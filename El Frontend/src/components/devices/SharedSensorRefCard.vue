@@ -8,7 +8,7 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Share2, ArrowRight } from 'lucide-vue-next'
-import { getSensorLabel, getSensorUnit } from '@/utils/sensorDefaults'
+import { getSensorLabel, getSensorUnit, getSensorConfig } from '@/utils/sensorDefaults'
 
 interface SharedSensor {
   sensor_type: string
@@ -42,7 +42,11 @@ const resolvedUnit = computed(() => {
 
 function formatValue(value: number | null | undefined): string {
   if (value === null || value === undefined) return '--'
-  return Number.isInteger(value) ? value.toString() : Number(value).toFixed(1)
+  const dec = getSensorConfig(props.sensor.sensor_type)?.decimals ?? 2
+  return new Intl.NumberFormat('de-DE', {
+    minimumFractionDigits: dec,
+    maximumFractionDigits: dec,
+  }).format(Number(value))
 }
 
 function goToHomeZone(): void {

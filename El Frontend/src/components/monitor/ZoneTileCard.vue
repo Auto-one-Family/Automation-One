@@ -60,7 +60,7 @@ function handleClick(): void {
 
 function formatKpiNumber(st: ZoneKPI['aggregation']['sensorTypes'][number]): string {
   if (st.count === 0) return '—'
-  return formatNumber(st.avg, 1, '—')
+  return formatNumber(st.avg, st.decimals, '—')
 }
 
 /** KPI-Zeile = Zonenmittel (Ø); Zoneinsight darunter = VPD + 24h-Spanne (kein zweites Klima-Tacho als Standard). */

@@ -6,10 +6,11 @@
  * Subscribes to WebSocket sensor_data events filtered by espId + gpio.
  */
 
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { websocketService, type WebSocketMessage } from '@/services/websocket'
 import { LiveLineChart, type ChartDataPoint } from '@/components/charts'
 import { tokens } from '@/utils/cssTokens'
+import { getSensorConfig } from '@/utils/sensorDefaults'
 
 interface Props {
   /** ESP device ID */
@@ -84,6 +85,16 @@ onUnmounted(() => {
   }
 })
 
+const decimals = computed(() => getSensorConfig(props.sensorType)?.decimals ?? 2)
+
+const formattedValue = computed(() => {
+  if (currentValue.value === null) return null
+  return new Intl.NumberFormat('de-DE', {
+    minimumFractionDigits: decimals.value,
+    maximumFractionDigits: decimals.value,
+  }).format(currentValue.value)
+})
+
 const QUALITY_COLORS: Record<string, string> = {
   excellent: 'var(--color-success)',
   good: 'var(--color-success)',
@@ -100,7 +111,7 @@ const QUALITY_COLORS: Record<string, string> = {
   <div class="live-preview" aria-live="polite" role="status">
     <div class="live-preview__value-row">
       <span class="live-preview__value" v-if="currentValue !== null">
-        {{ currentValue.toFixed(1) }}
+        {{ formattedValue }}
       </span>
       <span class="live-preview__value live-preview__value--empty" v-else>
         --

@@ -23,7 +23,7 @@ import {
 import ESPCardBase from '@/components/esp/ESPCardBase.vue'
 import { getESPStatus, getESPStatusDisplay, type ESPStatus } from '@/composables/useESPStatus'
 import { espHealthPresentation } from '@/domain/esp/espHealth'
-import { groupSensorsByBaseType, type RawSensor } from '@/utils/sensorDefaults'
+import { groupSensorsByBaseType, getSensorConfig, type RawSensor } from '@/utils/sensorDefaults'
 import { espStatusToLevel } from '@/utils/formatters'
 import StatusBadge from '@/components/base/StatusBadge.vue'
 import { getActuatorTypeInfo } from '@/utils/labels'
@@ -207,11 +207,16 @@ function qualityToValueColor(quality: 'normal' | 'warning' | 'stale' | 'unknown'
   return 'var(--color-text-primary)'
 }
 
-/** Format a sensor value with decimals from config */
-function formatValue(value: number | null, quality: 'normal' | 'warning' | 'stale' | 'unknown'): string {
+/** Format a sensor value with type-aware decimals and German locale */
+function formatValue(value: number | null, quality: 'normal' | 'warning' | 'stale' | 'unknown', sensorType: string): string {
   if (value === null || value === undefined) return '--'
-  if (quality === 'stale') return `${value}?`
-  return Number.isInteger(value) ? String(value) : value.toFixed(1)
+  const dec = getSensorConfig(sensorType)?.decimals ?? 2
+  const formatted = new Intl.NumberFormat('de-DE', {
+    minimumFractionDigits: dec,
+    maximumFractionDigits: dec,
+  }).format(value)
+  if (quality === 'stale') return `${formatted}?`
+  return formatted
 }
 
 const sensorDisplays = computed((): SensorDisplay[] => {
@@ -226,7 +231,7 @@ const sensorDisplays = computed((): SensorDisplay[] => {
       if (result.length >= MAX_VISIBLE_ROWS) break
       result.push({
         label: val.label,
-        value: formatValue(val.value, val.quality),
+        value: formatValue(val.value, val.quality, val.type),
         unit: val.unit,
         valueColor: qualityToValueColor(val.quality, isDeviceOnline.value),
         icon: resolveIcon(val.icon),

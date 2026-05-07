@@ -45,7 +45,7 @@ import { espHealthPresentation } from '@/domain/esp/espHealth'
 import { useToast } from '@/composables/useToast'
 import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
 import { formatUptimeShort, formatHeapSize } from '@/utils/formatters'
-import { getSensorLabel, getSensorUnit, getSensorDisplayName } from '@/utils/sensorDefaults'
+import { getSensorLabel, getSensorUnit, getSensorDisplayName, getSensorConfig } from '@/utils/sensorDefaults'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('ESPSettings')
@@ -238,7 +238,11 @@ function formatSensorValue(sensor: any): string {
   if (val === null || val === undefined) return '--'
   const num = Number(val)
   if (isNaN(num)) return String(val)
-  return num.toFixed(1)
+  const dec = getSensorConfig(sensor.sensor_type ?? sensor.type ?? '')?.decimals ?? 2
+  return new Intl.NumberFormat('de-DE', {
+    minimumFractionDigits: dec,
+    maximumFractionDigits: dec,
+  }).format(num)
 }
 
 /**

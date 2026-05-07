@@ -816,12 +816,29 @@ export function computeZoneVpdKpaFromKpiSensorTypes(
 }
 
 /**
+ * Case-insensitive lookup map built once from SENSOR_TYPE_CONFIG.
+ * Handles runtime sensor_type values like 'ph', 'ec', 'ds18b20'
+ * that don't match the mixed-case config keys 'pH', 'EC', 'DS18B20'.
+ */
+const _sensorConfigByLowerKey: Record<string, SensorTypeConfig> = Object.fromEntries(
+  Object.entries(SENSOR_TYPE_CONFIG).map(([k, v]) => [k.toLowerCase(), v]),
+)
+
+/**
+ * Retrieve sensor config with case-insensitive matching.
+ * Always prefer this over direct SENSOR_TYPE_CONFIG[sensorType] access.
+ */
+export function getSensorConfig(sensorType: string): SensorTypeConfig | null {
+  return SENSOR_TYPE_CONFIG[sensorType] ?? _sensorConfigByLowerKey[sensorType.toLowerCase()] ?? null
+}
+
+/**
  * Get the correct unit for a sensor type
  * @param sensorType - The sensor type key (e.g., 'pH', 'DS18B20')
  * @returns The unit string or 'raw' if unknown
  */
 export function getSensorUnit(sensorType: string): string {
-  return SENSOR_TYPE_CONFIG[sensorType]?.unit ?? 'raw'
+  return getSensorConfig(sensorType)?.unit ?? 'raw'
 }
 
 /**
@@ -833,14 +850,6 @@ export function getSensorDefault(sensorType: string): number {
   return SENSOR_TYPE_CONFIG[sensorType]?.defaultValue ?? 0
 }
 
-/**
- * Get the full configuration for a sensor type
- * @param sensorType - The sensor type key
- * @returns The full config or undefined if unknown
- */
-export function getSensorConfig(sensorType: string): SensorTypeConfig | undefined {
-  return SENSOR_TYPE_CONFIG[sensorType]
-}
 
 /**
  * Get human-readable label for a sensor type
@@ -1644,6 +1653,20 @@ const CATEGORY_UNITS: Record<AggCategory, string> = {
   other: '',
 }
 
+/** Decimal places per aggregation category — drives all numeric displays (KPIs, aggregations, subzone headers) */
+export const CATEGORY_DECIMALS: Record<AggCategory, number> = {
+  temperature: 1,
+  humidity: 1,
+  pressure: 1,
+  moisture: 0,
+  light: 0,
+  co2: 0,
+  ph: 2,
+  ec: 0,
+  flow: 2,
+  other: 1,
+}
+
 /**
  * Y-Achsen-Defaults für kompakte Gauges, wenn der Wert aus {@link aggregateZoneSensors}
  * (AggCategory) kommt — konsistent mit ZoneTileCard-KPI, nicht mit Einzelsensor-IDs.
@@ -1720,7 +1743,8 @@ export function formatSubzoneKpiLine(
   const parts: string[] = []
   for (const { category, avg } of ordered.slice(0, 3)) {
     const unit = CATEGORY_UNITS[category]
-    const num = Number.isInteger(avg) ? String(avg) : avg.toFixed(1)
+    const dec = CATEGORY_DECIMALS[category]
+    const num = new Intl.NumberFormat('de-DE', { minimumFractionDigits: dec, maximumFractionDigits: dec }).format(avg)
     parts.push(`${num}${unit}`)
   }
   return parts.join(' · ')
@@ -1738,6 +1762,7 @@ export interface ZoneAggregation {
     max: number
     count: number
     unit: string
+    decimals: number
   }[]
   /** Number of categories truncated (beyond the visible 3) */
   extraTypeCount: number
@@ -1803,6 +1828,7 @@ export function aggregateZoneSensors(devices: any[]): ZoneAggregation {
       max: Math.max(...values),
       count: values.length,
       unit: CATEGORY_UNITS[category],
+      decimals: CATEGORY_DECIMALS[category],
     })
   }
 
@@ -1827,13 +1853,16 @@ export function formatAggregatedValue(
 ): string {
   if (agg.count === 0) return ''
 
+  const dec = agg.decimals
+  const fmt = (v: number) => new Intl.NumberFormat('de-DE', { minimumFractionDigits: dec, maximumFractionDigits: dec }).format(v)
+
   if (agg.count === 1) {
-    return `${agg.min.toFixed(1)}\u2009${agg.unit}`
+    return `${fmt(agg.min)}\u2009${agg.unit}`
   }
 
   // Multiple values: show range
-  const minStr = agg.min.toFixed(1)
-  const maxStr = agg.max.toFixed(1)
+  const minStr = fmt(agg.min)
+  const maxStr = fmt(agg.max)
 
   if (minStr === maxStr) {
     // Same value across sensors — show count

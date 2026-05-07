@@ -37,7 +37,7 @@ import {
   getSensorUnit,
   getSensorDisplayName,
   getSensorAggCategory,
-  SENSOR_TYPE_CONFIG,
+  getSensorConfig,
   formatSubzoneKpiLine,
 } from '@/utils/sensorDefaults'
 import { getActuatorTypeInfo } from '@/utils/labels'
@@ -392,7 +392,7 @@ function toggleExpanded(sensorKey: string) {
 // =============================================================================
 
 function getDefaultThresholds(sensorType: string): ThresholdConfig | undefined {
-  const config = SENSOR_TYPE_CONFIG[sensorType]
+  const config = getSensorConfig(sensorType)
   if (config == null || config.min == null || config.max == null) return undefined
 
   const range = config.max - config.min
@@ -1018,7 +1018,7 @@ const detailLiveValue = computed(() => {
 /** SENSOR_TYPE_CONFIG for the detail sensor */
 const detailSensorTypeConfig = computed(() => {
   if (!selectedDetailSensor.value) return null
-  return SENSOR_TYPE_CONFIG[selectedDetailSensor.value.sensorType] ?? null
+  return getSensorConfig(selectedDetailSensor.value.sensorType)
 })
 
 /** Data-range-based Y-axis bounds for the L3 detail chart (AUT-29) */
@@ -1137,8 +1137,11 @@ async function fetchDetailStats() {
 /** Format a stat value with the detail sensor's unit and decimals */
 function formatStatValue(value: number | null): string {
   if (value == null) return '—'
-  const decimals = detailSensorTypeConfig.value?.decimals ?? 1
-  return value.toFixed(decimals).replace('.', ',')
+  const dec = detailSensorTypeConfig.value?.decimals ?? 2
+  return new Intl.NumberFormat('de-DE', {
+    minimumFractionDigits: dec,
+    maximumFractionDigits: dec,
+  }).format(value)
 }
 
 /** Find timestamp of min/max values from readings (client-side fallback) */

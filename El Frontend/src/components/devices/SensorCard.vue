@@ -12,7 +12,7 @@ import type { SensorWithContext } from '@/composables/useZoneGrouping'
 import type { TrendDirection } from '@/utils/trendUtils'
 import { qualityToStatus, sensorStatusToLevel, getDataFreshness, formatRelativeTime } from '@/utils/formatters'
 import StatusBadge from '@/components/base/StatusBadge.vue'
-import { getSensorLabel, getSensorUnit, getSensorDisplayName, SENSOR_TYPE_CONFIG, VIRTUAL_SENSOR_META } from '@/utils/sensorDefaults'
+import { getSensorLabel, getSensorUnit, getSensorDisplayName, getSensorConfig, VIRTUAL_SENSOR_META } from '@/utils/sensorDefaults'
 import { useDeviceContextStore } from '@/shared/stores/deviceContext.store'
 import { useZoneStore } from '@/shared/stores/zone.store'
 
@@ -82,13 +82,13 @@ const isEspOffline = computed(() =>
 // Sensor type icon — 3-tier fallback: exact match → base-type suffix → default
 const sensorIcon = computed(() => {
   const sType = props.sensor.sensor_type
-  // 1. Exact match
-  const exactIcon = SENSOR_TYPE_CONFIG[sType]?.icon
+  // 1. Exact match (case-insensitive via getSensorConfig)
+  const exactIcon = getSensorConfig(sType)?.icon
   if (exactIcon && ICON_MAP[exactIcon]) return ICON_MAP[exactIcon]
   // 2. Base-type suffix (e.g. "bme280_pressure" → "pressure")
   const suffix = sType.includes('_') ? sType.split('_').pop() : null
   if (suffix) {
-    const suffixIcon = SENSOR_TYPE_CONFIG[suffix]?.icon
+    const suffixIcon = getSensorConfig(suffix)?.icon
     if (suffixIcon && ICON_MAP[suffixIcon]) return ICON_MAP[suffixIcon]
   }
   // 3. Default fallback
@@ -226,7 +226,7 @@ async function handleZoneContextChange(event: Event): Promise<void> {
 
 function formatValue(value: number | null | undefined): string {
   if (value === null || value === undefined) return '--'
-  const dec = SENSOR_TYPE_CONFIG[props.sensor.sensor_type]?.decimals ?? 1
+  const dec = getSensorConfig(props.sensor.sensor_type)?.decimals ?? 2
   return new Intl.NumberFormat('de-DE', {
     minimumFractionDigits: dec,
     maximumFractionDigits: dec,
