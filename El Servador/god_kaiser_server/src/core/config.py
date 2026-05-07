@@ -247,6 +247,8 @@ class ExternalServicesSettings(BaseSettings):
     god_layer_url: str = Field(default="http://localhost:8001", alias="GOD_LAYER_URL")
     god_layer_enabled: bool = Field(default=False, alias="GOD_LAYER_ENABLED")
     god_layer_timeout: int = Field(default=10, alias="GOD_LAYER_TIMEOUT", ge=1)
+    loki_url: str = Field(default="http://loki:3100", alias="LOKI_URL")
+    prometheus_url: str = Field(default="http://prometheus:9090", alias="PROMETHEUS_URL")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

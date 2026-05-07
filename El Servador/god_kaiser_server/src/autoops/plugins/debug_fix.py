@@ -18,7 +18,6 @@ Issue Categories:
 
 import json
 import logging
-import re
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel
@@ -669,68 +668,21 @@ class DebugFixPlugin(AutoOpsPlugin):
         issues: list,  # list[DiagnosticIssue]
         client: "GodKaiserClient",
     ) -> Optional[DebugFinding]:
-        """Run an agentic LLM debug loop using Anthropic tool use."""
-        from anthropic import AsyncAnthropic
+        """Run an agentic LLM debug loop via ClaudeDebugAgent (AUT-270)."""
+        from ...services.claude_debug_agent import ClaudeDebugAgent
 
-        anthropic_client = AsyncAnthropic()
+        agent = ClaudeDebugAgent(client=client, db_session=None)
         issue_descriptions = [getattr(i, "description", str(i)) for i in issues]
-
-        messages: list[dict] = [
-            {
-                "role": "user",
-                "content": (
-                    f"Analysiere ESP {esp_id}.\n"
-                    f"Bekannte Probleme: {issue_descriptions}\n"
-                    "Nutze die verfuegbaren Tools um Evidenz zu sammeln, "
-                    "dann gib einen strukturierten Befund zurueck."
-                ),
-            }
-        ]
-
-        max_iterations = 5
-        for _ in range(max_iterations):
-            response = await anthropic_client.messages.create(
-                model="claude-opus-4-7",
-                max_tokens=4096,
-                tools=_DEBUG_TOOLS,
-                messages=messages,
+        message = f"Analysiere ESP {esp_id}. Bekannte Probleme: {issue_descriptions}"
+        text = await agent.run_batch(message, session_id=esp_id, esp_id=esp_id)
+        if text:
+            return DebugFinding(
+                root_cause=text[:500],
+                affected_components=[f"ESP {esp_id}"],
+                code_references=[],
+                recommended_actions=["Manuelle Analyse empfohlen"],
+                evidence=issue_descriptions,
             )
-
-            if response.stop_reason == "end_turn":
-                for block in reversed(response.content):
-                    if hasattr(block, "text") and block.text:
-                        try:
-                            json_match = re.search(r"\{.*\}", block.text, re.DOTALL)
-                            if json_match:
-                                return DebugFinding(**json.loads(json_match.group()))
-                        except Exception:
-                            pass
-                        return DebugFinding(
-                            root_cause=block.text[:500],
-                            affected_components=[f"ESP {esp_id}"],
-                            code_references=[],
-                            recommended_actions=["Manuelle Analyse empfohlen"],
-                            evidence=issue_descriptions,
-                        )
-                break
-
-            if response.stop_reason == "tool_use":
-                tool_results = []
-                for block in response.content:
-                    if hasattr(block, "type") and block.type == "tool_use":
-                        result = await self._execute_debug_tool(block.name, block.input, client)
-                        tool_results.append(
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": block.id,
-                                "content": result,
-                            }
-                        )
-                messages.append({"role": "assistant", "content": response.content})
-                messages.append({"role": "user", "content": tool_results})
-            else:
-                break
-
         return None
 
     # =========================================================================
