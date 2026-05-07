@@ -64,16 +64,29 @@ export function parseApiError(error: AxiosError): StructuredApiError {
     }
   }
 
-  // FastAPI HTTPException format: { detail: "..." }
+  // FastAPI HTTPException format: { detail: "..." } or { detail: { code, message, ... } }
   const detail = (response?.data as Record<string, unknown>)?.detail
   if (detail) {
-    return {
-      code: 'HTTP_ERROR',
-      numericCode: null,
-      message: typeof detail === 'string' ? detail : JSON.stringify(detail),
-      details: {},
-      requestId: response?.headers?.['x-request-id'] ?? null,
-      statusCode,
+    if (typeof detail === 'string') {
+      return {
+        code: 'HTTP_ERROR',
+        numericCode: null,
+        message: detail,
+        details: {},
+        requestId: typeof headerRequestId === 'string' ? headerRequestId : null,
+        statusCode,
+      }
+    }
+    if (typeof detail === 'object' && detail !== null) {
+      const detailObj = detail as Record<string, unknown>
+      return {
+        code: typeof detailObj.code === 'string' ? detailObj.code : 'HTTP_ERROR',
+        numericCode: null,
+        message: typeof detailObj.message === 'string' ? detailObj.message : JSON.stringify(detail),
+        details: {},
+        requestId: typeof headerRequestId === 'string' ? headerRequestId : null,
+        statusCode,
+      }
     }
   }
 
