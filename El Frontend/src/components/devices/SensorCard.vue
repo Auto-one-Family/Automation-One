@@ -70,6 +70,12 @@ const hasNoData = computed(() =>
 
 // Effective quality status: defense-in-depth via timestamp age check
 const effectiveQualityStatus = computed(() => {
+  // AUT-300: On-demand sensors in normal waiting state are not "offline" or "stale"
+  if (isOnDemand.value) {
+    if (hasNoData.value) return 'good'
+    if (props.sensor.is_stale === true) return 'warning'
+    return qualityToStatus(props.sensor.quality, { lastRead: props.sensor.last_read })
+  }
   if (hasNoData.value) return 'offline'
   if (isStale.value) return 'stale'
   return qualityToStatus(props.sensor.quality, { lastRead: props.sensor.last_read })
@@ -248,6 +254,8 @@ const atcFallbackWarning = computed<boolean>(() => {
 
 // On-demand measurement (AUT-298)
 const isOnDemand = computed(() => props.sensor.operating_mode === 'on_demand')
+// AUT-300: Stale-due uses server flag (measurement_freshness_hours threshold), not frontend 120s threshold
+const isOnDemandStaleDue = computed(() => isOnDemand.value && props.sensor.is_stale === true && !isEspOffline.value)
 const isMeasuring = ref(false)
 const measureState = ref<'idle' | 'success' | 'error'>('idle')
 const { success: toastSuccess, error: toastError } = useToast()
@@ -284,7 +292,8 @@ function handleClick() {
       'sensor-card',
       `sensor-card--${mode}`,
       mode === 'monitor' ? `sensor-card--${effectiveQualityStatus}` : '',
-      mode === 'monitor' && isStale ? 'sensor-card--stale' : '',
+      mode === 'monitor' && isStale && !isOnDemand ? 'sensor-card--stale' : '',
+      mode === 'monitor' && isOnDemandStaleDue ? 'sensor-card--on-demand-stale' : '',
       mode === 'monitor' && isEspOffline ? 'sensor-card--esp-offline' : '',
       mode === 'monitor' && isFromMockDevice ? 'sensor-card--mock' : '',
     ]"
@@ -345,6 +354,10 @@ function handleClick() {
           </span>
         </template>
       </div>
+      <!-- AUT-300: Always-visible timestamp below value — on_demand shows hours, live confirms freshness -->
+      <div v-if="sensor.last_read" class="sensor-card__last-seen">
+        {{ formatRelativeTime(sensor.last_read) }}
+      </div>
       <!-- Sparkline slot: parent can inject a mini chart -->
       <div v-if="$slots.sparkline" class="sensor-card__sparkline">
         <slot name="sparkline" />
@@ -364,6 +377,29 @@ function handleClick() {
           <span v-if="isEspOffline" class="sensor-card__badge sensor-card__badge--offline">
             <WifiOff class="w-3 h-3" /> ESP offline
           </span>
+          <!-- AUT-300: On-demand sensor states (only when ESP online) -->
+          <span
+            v-else-if="isOnDemandStaleDue"
+            class="sensor-card__badge sensor-card__badge--on-demand-stale"
+            title="Messung überfällig — Sensor wartet auf manuellen Abruf"
+          >
+            <AlertTriangle class="w-3 h-3" /> Messung veraltet
+          </span>
+          <span
+            v-else-if="isOnDemand && hasNoData"
+            class="sensor-card__badge sensor-card__badge--on-demand-waiting"
+            title="Noch keine Messung — Sensor wartet auf ersten Abruf"
+          >
+            <Clock class="w-3 h-3" /> Noch keine Messung
+          </span>
+          <span
+            v-else-if="isOnDemand"
+            class="sensor-card__badge sensor-card__badge--on-demand-waiting"
+            title="Wartet auf nächste Messung — on-demand-Sensor"
+          >
+            <Clock class="w-3 h-3" /> Wartet auf Messung
+          </span>
+          <!-- Non-on-demand fallback states -->
           <span v-else-if="hasNoData" class="sensor-card__badge sensor-card__badge--no-data">
             <Clock class="w-3 h-3" /> Keine Daten
           </span>
@@ -760,6 +796,33 @@ function handleClick() {
   color: var(--color-warning);
   background: rgba(251, 191, 36, 0.1);
   border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+/* AUT-300: On-demand sensor state badges */
+.sensor-card__badge--on-demand-waiting {
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
+}
+
+.sensor-card__badge--on-demand-stale {
+  color: var(--color-warning);
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+}
+
+/* AUT-300: On-demand stale card state (subtle, not full stale treatment) */
+.sensor-card--on-demand-stale {
+  border-color: rgba(251, 191, 36, 0.2);
+  border-left: 3px solid rgba(251, 191, 36, 0.5);
+}
+
+/* AUT-300: Always-visible timestamp below the sensor value */
+.sensor-card__last-seen {
+  font-size: var(--text-xxs);
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-1);
+  line-height: 1.3;
 }
 
 .sensor-card__number--no-data {

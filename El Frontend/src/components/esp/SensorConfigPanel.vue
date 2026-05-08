@@ -165,6 +165,20 @@ const isAtcCapable = computed(() => {
   return t === 'ph' || t === 'ec'
 })
 
+// AUT-300: Sensor types that require periodic calibration (matches server CALIBRATION_REQUIRED_SENSOR_TYPES)
+const CALIBRATION_REQUIRED_TYPES = new Set(['ph', 'ec', 'moisture', 'soil_moisture'])
+const isCalibrationRequired = computed(() =>
+  CALIBRATION_REQUIRED_TYPES.has(props.sensorType.toLowerCase())
+)
+
+// AUT-300: Sensor-type-specific calibration hint for the alert section
+const calibrationHelpText = computed((): string => {
+  const t = props.sensorType.toLowerCase()
+  if (t === 'ph') return 'pH-Elektroden degradieren durch Alterung und Verschmutzung. Monatliche Kalibrierung empfohlen (Standardintervall: 30 Tage).'
+  if (t === 'ec') return 'EC-Elektroden können durch Ablagerungen und Alterung driften. Monatliche Kalibrierung empfohlen (Standardintervall: 30 Tage).'
+  return 'Feuchtesensoren können nach einigen Monaten im Substrat driften. Regelmäßige Überprüfung empfohlen (Standardintervall: 90 Tage).'
+})
+
 /** AUT-299: All temperature sensors across all ESPs for ATC dropdown */
 const temperatureSensorOptions = computed<Array<{ value: string; label: string }>>(() => {
   const TEMP_TYPES = new Set(['temperature', 'ds18b20', 'sht31_temp', 'sht31', 'bme280_temp'])
@@ -1069,6 +1083,35 @@ async function handleSave() {
             </li>
           </ul>
         </div>
+
+        <!-- ─── Sub-Sektion 4: Kalibrierungs-Alerts (AUT-300) ──────────── -->
+        <div v-if="isCalibrationRequired" class="sensor-config__sub-section sensor-config__sub-section--calibration">
+          <div class="sensor-config__sub-header">
+            <h4 class="sensor-config__sub-title">Kalibrierungs-Alerts</h4>
+            <span class="sensor-config__source-tag">DB: sensor_config</span>
+          </div>
+          <p class="sensor-config__sub-hint">
+            <Info class="sensor-config__sub-hint-icon" aria-hidden="true" />
+            {{ calibrationHelpText }}
+          </p>
+
+          <div class="sensor-config__field">
+            <label class="sensor-config__label">Kalibrierungs-Erinnerung (Tage)</label>
+            <input
+              v-model.number="calibrationIntervalDays"
+              type="number"
+              min="1"
+              max="365"
+              step="1"
+              class="sensor-config__input"
+              placeholder="leer = deaktiviert"
+            />
+            <span class="sensor-config__helper">
+              Nach diesem Intervall erscheint eine Erinnerung im Benachrichtigungssystem.
+              Leer lassen = keine automatische Erinnerung.
+            </span>
+          </div>
+        </div>
       </AccordionSection>
 
       <!-- ═══ ZONE 3: EXPERT (Hardware + Preview) ═════════════════════════ -->
@@ -1741,6 +1784,12 @@ async function handleSave() {
 
 .sensor-config__sub-section + .sensor-config__sub-section {
   margin-top: var(--space-3);
+}
+
+/* AUT-300: Calibration alert sub-section — subtle left accent */
+.sensor-config__sub-section--calibration {
+  border-left: 3px solid rgba(251, 191, 36, 0.35);
+  padding-left: var(--space-3);
 }
 
 .sensor-config__sub-header {
