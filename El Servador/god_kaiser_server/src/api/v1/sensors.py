@@ -36,6 +36,7 @@ from ...core.exceptions import (
     ESPNotFoundError,
     GatewayTimeoutError,
     GpioConflictError,
+    MeasurementBusyError,
     SensorConfigInvalidUuidError,
     SensorNotFoundException,
     SensorProcessingException,
@@ -68,6 +69,7 @@ from ...schemas.alert_config import (
     SensorRuntimeViewResponse,
 )
 from ...schemas.common import PaginationMeta
+from ...schemas.sensor import _TEMPERATURE_SENSOR_TYPES
 from ...sensors.sensor_type_registry import (
     get_all_value_types_for_device,
     get_device_type_from_sensor_type,
@@ -929,6 +931,22 @@ async def create_or_update_sensor(
     if interface_type == "ONEWIRE" and validated_onewire_address:
         model_fields["onewire_address"] = validated_onewire_address
 
+    # =========================================================================
+    # AUT-299: Validate temp_sensor_config_id references a temperature sensor
+    # =========================================================================
+    if request.temp_sensor_config_id is not None:
+        temp_cfg = await sensor_repo.get_by_id(request.temp_sensor_config_id)
+        if temp_cfg is None:
+            raise ValidationException(
+                "temp_sensor_config_id",
+                "refers to a non-existent SensorConfig",
+            )
+        if temp_cfg.sensor_type not in _TEMPERATURE_SENSOR_TYPES:
+            raise ValidationException(
+                "temp_sensor_config_id",
+                f"must reference a temperature sensor (got '{temp_cfg.sensor_type}')",
+            )
+
     # Capture old values for H2 audit trail before modification
     old_scope = existing.device_scope if existing else None
     old_zones = list(existing.assigned_zones or []) if existing else None
@@ -1726,6 +1744,7 @@ async def get_sensor_stats(
     responses={
         200: {"description": "Measurement command sent successfully"},
         404: {"description": "ESP or sensor not found"},
+        429: {"description": "Measurement already in progress for this sensor"},
         503: {"description": "ESP offline or MQTT failure"},
     },
 )
@@ -1742,6 +1761,9 @@ async def trigger_measurement(
     Used primarily for sensors with operating_mode='on_demand'.
     Can also be used to force a measurement on any sensor.
 
+    Returns HTTP 429 if a measurement is already in progress for this
+    sensor (busy-guard against rapid-fire MQTT bursts, AUT-302).
+
     Requires Operator role or higher.
 
     Args:
@@ -1757,6 +1779,10 @@ async def trigger_measurement(
             gpio=gpio,
         )
         return TriggerMeasurementResponse(**result)
+
+    except MeasurementBusyError:
+        # Measurement already in progress — re-raise directly (handled by global handler)
+        raise
 
     except ValueError as e:
         # ESP or sensor not found, or sensor disabled

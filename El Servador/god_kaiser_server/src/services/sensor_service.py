@@ -23,6 +23,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from ..core.exceptions import MeasurementBusyError
 from ..core.logging_config import get_logger
 from .calibration_payloads import resolve_calibration_for_processor
 from ..db.models.sensor import SensorConfig, SensorData
@@ -32,6 +33,11 @@ from ..mqtt.publisher import Publisher
 from ..sensors.library_loader import LibraryLoader as SensorLibraryLoader
 
 logger = get_logger(__name__)
+
+# Cooldown window (seconds) for on-demand measurement busy-guard (AUT-302).
+# A second /measure call within this window for the same (esp_id, gpio) is
+# rejected with HTTP 429 to prevent MQTT burst → ESP publish-queue overflow.
+_MEASURE_COOLDOWN_SECONDS: float = 10.0
 
 
 class SensorService:
@@ -61,6 +67,8 @@ class SensorService:
         self.esp_repo = esp_repo
         self.publisher = publisher or Publisher()
         self.library_loader = library_loader or SensorLibraryLoader()
+        # Busy-guard: maps (esp_id, gpio) → timestamp of last trigger (AUT-302)
+        self._measure_cooldown: Dict[tuple[str, int], float] = {}
 
     # =========================================================================
     # Configuration Management
@@ -588,7 +596,22 @@ class SensorService:
         if not sensor.enabled:
             raise ValueError(f"Sensor is disabled: {esp_id}/GPIO {gpio}")
 
-        # 3. Publish MQTT command via Publisher
+        # 3. Busy-guard: reject rapid-fire duplicates within the cooldown window
+        cooldown_key = (esp_id, gpio)
+        now_ts = datetime.now(timezone.utc).timestamp()
+        last_triggered = self._measure_cooldown.get(cooldown_key)
+        if last_triggered is not None and (now_ts - last_triggered) < _MEASURE_COOLDOWN_SECONDS:
+            logger.warning(
+                "trigger_measurement rejected — measurement busy: esp=%s gpio=%s "
+                "(%.1fs since last trigger, cooldown=%.1fs)",
+                esp_id,
+                gpio,
+                now_ts - last_triggered,
+                _MEASURE_COOLDOWN_SECONDS,
+            )
+            raise MeasurementBusyError(esp_id=esp_id, gpio=gpio)
+
+        # 4. Publish MQTT command via Publisher
         success, request_id = self.publisher.publish_sensor_command(
             esp_id=esp_id,
             gpio=gpio,
@@ -598,6 +621,9 @@ class SensorService:
 
         if not success:
             raise RuntimeError(f"Failed to publish measurement command to {esp_id}/GPIO {gpio}")
+
+        # Record timestamp for busy-guard — only after successful publish
+        self._measure_cooldown[cooldown_key] = datetime.now(timezone.utc).timestamp()
 
         logger.info(
             f"Measurement triggered for {esp_id}/GPIO {gpio} "

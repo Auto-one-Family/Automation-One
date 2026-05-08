@@ -472,6 +472,25 @@ class AuthorizationError(GodKaiserException):
         )
 
 
+class MeasurementBusyError(GodKaiserException):
+    """Raised when a measurement is already in progress for a sensor.
+
+    HTTP 429 — prevents rapid-fire MQTT bursts that cause ESP-side
+    publish-queue overflow and circuit-breaker trips (AUT-302).
+    """
+
+    status_code = 429
+    error_code = "MEASUREMENT_BUSY"
+
+    def __init__(self, esp_id: str, gpio: int) -> None:
+        super().__init__(
+            message=f"Measurement already in progress for {esp_id}/GPIO {gpio}",
+            error_code="MEASUREMENT_BUSY",
+            details={"esp_id": esp_id, "gpio": gpio},
+            numeric_code=5404,  # ServiceErrorCode.RATE_LIMIT_EXCEEDED
+        )
+
+
 class ServiceUnavailableError(GodKaiserException):
     """Raised when a service is unavailable"""
 

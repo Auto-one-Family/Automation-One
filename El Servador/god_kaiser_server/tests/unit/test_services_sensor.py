@@ -11,7 +11,8 @@ Tests the SensorService business logic layer including:
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from src.services.sensor_service import SensorService
+from src.services.sensor_service import SensorService, _MEASURE_COOLDOWN_SECONDS
+from src.core.exceptions import MeasurementBusyError
 
 
 class TestSensorServiceConfigManagement:
@@ -673,3 +674,88 @@ class TestSensorServiceTriggerMeasurementContract:
 
         assert result["success"] is True
         assert result["request_id"] == "rid-2"
+
+
+class TestSensorServiceBusyGuard:
+    """Busy-guard tests for trigger_measurement (AUT-302)."""
+
+    def _make_service(self, request_id: str = "rid-busy") -> tuple:
+        """Return (service, mock_publisher) with a healthy ESP+sensor."""
+        mock_esp = MagicMock(id=1, status="online")
+        mock_esp_repo = MagicMock()
+        mock_esp_repo.get_by_device_id = AsyncMock(return_value=mock_esp)
+
+        mock_sensor = MagicMock(enabled=True, sensor_type="moisture")
+        mock_sensor_repo = MagicMock()
+        mock_sensor_repo.get_all_by_esp_and_gpio = AsyncMock(return_value=[mock_sensor])
+        mock_sensor_repo.session = MagicMock()
+
+        mock_publisher = MagicMock()
+        mock_publisher.publish_sensor_command = MagicMock(return_value=(True, request_id))
+
+        service = SensorService(
+            sensor_repo=mock_sensor_repo,
+            esp_repo=mock_esp_repo,
+            publisher=mock_publisher,
+        )
+        return service, mock_publisher
+
+    @pytest.mark.sensor
+    @pytest.mark.asyncio
+    async def test_second_trigger_within_cooldown_raises_429(self):
+        """Second trigger_measurement call within the cooldown window raises MeasurementBusyError."""
+        service, _ = self._make_service("rid-first")
+
+        with patch("src.services.sensor_service.CommandContractRepository") as repo_cls:
+            repo_cls.return_value.record_intent_publish_sent = AsyncMock()
+
+            # First call — must succeed
+            result = await service.trigger_measurement(esp_id="ESP_BUSY01", gpio=10)
+        assert result["success"] is True
+
+        # Second call immediately after — must raise MeasurementBusyError (HTTP 429)
+        with pytest.raises(MeasurementBusyError) as exc_info:
+            await service.trigger_measurement(esp_id="ESP_BUSY01", gpio=10)
+
+        assert exc_info.value.status_code == 429
+        assert exc_info.value.error_code == "MEASUREMENT_BUSY"
+        assert "ESP_BUSY01" in exc_info.value.message
+        assert exc_info.value.details["gpio"] == 10
+
+    @pytest.mark.sensor
+    @pytest.mark.asyncio
+    async def test_trigger_after_cooldown_expiry_succeeds(self):
+        """trigger_measurement succeeds again after the cooldown window has elapsed."""
+        import time
+
+        service, _ = self._make_service("rid-expired")
+
+        # Inject an expired cooldown entry directly
+        expired_ts = time.time() - _MEASURE_COOLDOWN_SECONDS - 1.0
+        service._measure_cooldown[("ESP_BUSY02", 11)] = expired_ts
+
+        with patch("src.services.sensor_service.CommandContractRepository") as repo_cls:
+            repo_cls.return_value.record_intent_publish_sent = AsyncMock()
+
+            result = await service.trigger_measurement(esp_id="ESP_BUSY02", gpio=11)
+
+        assert result["success"] is True
+        assert result["request_id"] == "rid-expired"
+
+    @pytest.mark.sensor
+    @pytest.mark.asyncio
+    async def test_different_gpio_not_blocked_by_cooldown(self):
+        """Busy-guard for (esp_id, gpio_A) does not block a trigger on (esp_id, gpio_B)."""
+        service, _ = self._make_service("rid-other-gpio")
+
+        # Pre-fill cooldown for gpio=20
+        import time
+        service._measure_cooldown[("ESP_BUSY03", 20)] = time.time()
+
+        # gpio=21 on the same ESP must not be blocked
+        with patch("src.services.sensor_service.CommandContractRepository") as repo_cls:
+            repo_cls.return_value.record_intent_publish_sent = AsyncMock()
+
+            result = await service.trigger_measurement(esp_id="ESP_BUSY03", gpio=21)
+
+        assert result["success"] is True
