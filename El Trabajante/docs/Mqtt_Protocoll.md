@@ -310,7 +310,7 @@ Zusätzlich optional: `intent_id`, `correlation_id`, `ttl_ms`. `reason_code` z. 
 
 **QoS:** 0 **Retain:** false
 
-**Aktivierung:** Compile-Flag `ENABLE_METRICS_SPLIT` (z. B. in `esp32_dev`). Ohne Flag bleiben die Zähler/Queue-Stats im Core-`system/heartbeat`-JSON (siehe `#ifndef ENABLE_METRICS_SPLIT` in `publishHeartbeat()`).
+**Aktivierung:** Compile-Flag `ENABLE_METRICS_SPLIT` (kanonisch in `src/config/feature_flags.h` definiert; seit AUT-285 in `esp32_dev` nicht mehr gesetzt — standardmäßig inaktiv). Ohne Flag bleiben die Zähler/Queue-Stats im Core-`system/heartbeat`-JSON (siehe `#ifndef ENABLE_METRICS_SPLIT` in `publishHeartbeat()`).
 
 **Modul:** `services/communication/mqtt_client.cpp` → `publishHeartbeatMetrics()` (wird am Ende von `publishHeartbeat()` aufgerufen). **TopicBuilder:** `TopicBuilder::buildSystemHeartbeatMetricsTopic()`.
 
@@ -2101,7 +2101,7 @@ mosquitto_pub -h localhost \
 **Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/zone/assign`
 
 **QoS:** 1 (at least once)
-**Handler:** `src/main.cpp:1243-1399` (Zone Assignment Handler mit WP1 Zone-Removal + WP5 Validation)
+**Handler:** `src/main.cpp:handleZoneAssignOnCore1()` (AUT-285 M3: via `g_config_update_queue` auf Core-1 dispatcht; WP1 Zone-Removal + WP5 Validation)
 **TopicBuilder:** `topic_builder.cpp:buildZoneAssignTopic()` und `buildZoneAckTopic()` (Zeile 229, 237)
 
 **Kaiser-ID Bedeutung:**

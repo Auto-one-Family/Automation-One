@@ -757,7 +757,7 @@ ACK-Pfad verzögern. Serverseitig werden akzeptierte Metrics in den
 nächsten Core-Heartbeat gemerged (`heartbeat_handler`) und gehen
 mit `esp_health` an das Frontend.
 
-**Payload (Ist, `ENABLE_METRICS_SPLIT` — ESP-IDF-Pfad, nicht `MQTT_USE_PUBSUBCLIENT`):**
+**Payload (Ist, `ENABLE_METRICS_SPLIT` aktiv — ESP-IDF-Pfad, nicht `MQTT_USE_PUBSUBCLIENT`; seit AUT-285 in `esp32_dev` nicht mehr standardmäßig gesetzt):**
 ```json
 {
   "esp_id": "ESP_12AB34CD",
@@ -1478,7 +1478,7 @@ Event-Werte: `"ENTER"` (Backpressure aktiv), `"RECOVERED"` (Backpressure aufgeho
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildZoneAssignTopic()` (Zeile 229) + `main.cpp` Subscription
+- **ESP32:** `topic_builder.cpp:buildZoneAssignTopic()` (Zeile 229) + `main.cpp` Subscription → AUT-285 M3: `handleZoneAssignOnCore1()` via `g_config_update_queue` auf Core-1 dispatcht
 - **Server:** `topics.py:build_zone_assign_topic()` (Zeile 142)
 
 ---
@@ -1531,7 +1531,7 @@ Event-Werte: `"ENTER"` (Backpressure aktiv), `"RECOVERED"` (Backpressure aufgeho
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `main.cpp` Zeile 734 (Subscription)
+- **ESP32:** `main.cpp` Subscription → AUT-285 M3: `handleSubzoneAssignOnCore1()` / `handleSubzoneRemoveOnCore1()` via `g_config_update_queue` auf Core-1 dispatcht
 - **Server:** `topics.py:build_subzone_assign_topic()` (Zeile 178)
 
 ---
@@ -1630,7 +1630,7 @@ Event-Werte: `"ENTER"` (Backpressure aktiv), `"RECOVERED"` (Backpressure aufgeho
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildSubzoneSafeTopic()`, `main.cpp` subscribt und verarbeitet (Handler: action enable/disable, gpioManager.enableSafeModeForSubzone/disableSafeModeForSubzone)
+- **ESP32:** `topic_builder.cpp:buildSubzoneSafeTopic()`, `main.cpp` subscribt → AUT-285 M3: `handleSubzoneSafeOnCore1()` via `g_config_update_queue` auf Core-1 dispatcht (action enable/disable, gpioManager.enableSafeModeForSubzone/disableSafeModeForSubzone)
 - **Server:** `topics.py:build_subzone_safe_topic()` (Zeile 192)
 
 ---
