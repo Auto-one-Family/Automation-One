@@ -1385,6 +1385,8 @@ void MQTTClient::publishHeartbeat(bool force) {
     payload += "\"wifi_rssi\":" + String(WiFi.RSSI()) + ",";
     payload += "\"sensor_count\":" + String(sensorManager.getActiveSensorCount()) + ",";
     payload += "\"actuator_count\":" + String(actuatorManager.getActiveActuatorCount()) + ",";
+    payload += "\"zone_name\":\"" + g_kaiser.zone_name + "\",";
+    payload += "\"subzone_count\":" + String(configManager.getSubzoneCount()) + ",";
     payload += "\"wifi_ip\":\"" + WiFi.localIP().toString() + "\",";
 
     // PKG-17: gpio_status removed from heartbeat (redundant with REST

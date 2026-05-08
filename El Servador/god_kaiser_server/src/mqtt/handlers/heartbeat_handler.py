@@ -721,6 +721,7 @@ class HeartbeatHandler:
                 esp_actuator_count = payload.get(
                     "actuator_count", payload.get("active_actuators", 0)
                 )
+                esp_subzone_count = payload.get("subzone_count", -1)
                 config_push_triggered = await self._has_pending_config(
                     esp_device,
                     session,
@@ -729,6 +730,7 @@ class HeartbeatHandler:
                     is_reconnect=is_reconnect,
                     offline_seconds=offline_seconds,
                     reconnect_epoch=payload.get("handover_epoch"),
+                    esp_subzone_count=esp_subzone_count,
                 )
                 # BUG-2 Fix: _has_pending_config sets config_push_sent_at on
                 # esp_device.device_metadata but the session.commit() at line 288
@@ -1265,6 +1267,109 @@ class HeartbeatHandler:
                         f"ZONE_MISMATCH [{esp_device.device_id}]: "
                         f"ESP reports zone_id='{heartbeat_zone_id}' but DB has zone_id='{db_zone_id}'. "
                         f"Zone assignment may be inconsistent."
+                    )
+
+            # AUT-283: Subzone Drift Detection & Auto-Reassignment
+            # Analog to Zone Mismatch Detection (WP7) above.
+            # Only fires on non-reconnect heartbeats; reconnects are handled by Full-State-Push.
+            esp_subzone_count = payload.get("subzone_count", -1)
+            if esp_subzone_count >= 0 and not is_reconnect:
+                try:
+                    from ...db.repositories.subzone_repo import SubzoneRepository as _SubzoneRepo
+                    _subzone_repo = _SubzoneRepo(session)
+                    db_subzone_count_meta = await _subzone_repo.count_by_esp(esp_device.device_id)
+
+                    if esp_subzone_count == 0 and db_subzone_count_meta > 0:
+                        subzone_resync_cooldown_seconds = 120
+                        last_sz_resync = current_metadata.get("subzone_resync_sent_at")
+                        now_ts_sz = int(time_module.time())
+                        should_sz_resync = True
+
+                        if last_sz_resync:
+                            elapsed_sz = now_ts_sz - last_sz_resync
+                            if elapsed_sz < subzone_resync_cooldown_seconds:
+                                should_sz_resync = False
+                                logger.debug(
+                                    "SUBZONE_DRIFT [%s]: subzones lost but cooldown active (%ds remaining)",
+                                    esp_device.device_id,
+                                    subzone_resync_cooldown_seconds - elapsed_sz,
+                                )
+
+                        if should_sz_resync and esp_device.status == "offline":
+                            should_sz_resync = False
+                            logger.debug(
+                                "Skipping subzone resync for offline ESP %s",
+                                esp_device.device_id,
+                            )
+
+                        if (
+                            should_sz_resync
+                            and _command_bridge
+                            and _command_bridge.has_pending(esp_device.device_id, "subzone")
+                        ):
+                            should_sz_resync = False
+                            logger.debug(
+                                "Skipping subzone resync for %s: pending subzone command exists",
+                                esp_device.device_id,
+                            )
+
+                        if should_sz_resync and esp_device.device_id in self._config_push_pending_esps:
+                            should_sz_resync = False
+                            logger.debug(
+                                "Skipping subzone resync for %s: config push pending",
+                                esp_device.device_id,
+                            )
+
+                        if should_sz_resync:
+                            logger.warning(
+                                "SUBZONE_DRIFT [%s]: ESP reports subzone_count=0 but DB has %d subzones. "
+                                "Auto-resending subzone assignments.",
+                                esp_device.device_id,
+                                db_subzone_count_meta,
+                            )
+                            try:
+                                from ..client import MQTTClient
+
+                                active_subzones = await _subzone_repo.get_by_esp(esp_device.device_id)
+                                active_subzones = [sz for sz in active_subzones if sz.is_active][:8]
+                                mqtt_client_instance = MQTTClient.get_instance()
+                                resent = 0
+                                for sz in active_subzones:
+                                    sz_topic = TopicBuilder.build_subzone_assign_topic(esp_device.device_id)
+                                    sz_payload_data = {
+                                        "subzone_id": sz.subzone_id,
+                                        "subzone_name": sz.subzone_name or "",
+                                        "parent_zone_id": "",
+                                        "assigned_gpios": [g for g in (sz.assigned_gpios or []) if g != 0],
+                                        "safe_mode_active": False,
+                                        "timestamp": now_ts_sz,
+                                    }
+                                    mqtt_client_instance.publish(
+                                        sz_topic,
+                                        json.dumps(sz_payload_data),
+                                        qos=1,
+                                    )
+                                    resent += 1
+                                current_metadata["subzone_resync_sent_at"] = now_ts_sz
+                                current_metadata["subzone_resync_count"] = db_subzone_count_meta
+                                logger.info(
+                                    "SUBZONE_DRIFT [%s]: Resent %d/%d subzone assignments.",
+                                    esp_device.device_id,
+                                    resent,
+                                    len(active_subzones),
+                                )
+                            except Exception as sz_resync_err:
+                                logger.error(
+                                    "Failed to resend subzone assignments to %s: %s",
+                                    esp_device.device_id,
+                                    sz_resync_err,
+                                    exc_info=True,
+                                )
+                except Exception as sz_drift_err:
+                    logger.warning(
+                        "Subzone drift check failed for %s: %s",
+                        esp_device.device_id,
+                        sz_drift_err,
                     )
 
             # Update health metrics
@@ -1911,6 +2016,7 @@ class HeartbeatHandler:
         session,
         esp_sensor_count: int = 0,
         esp_actuator_count: int = 0,
+        esp_subzone_count: int = -1,
         is_reconnect: bool = False,
         offline_seconds: float = 0.0,
         reconnect_epoch: int | None = None,
@@ -1927,6 +2033,7 @@ class HeartbeatHandler:
             session: Active DB session
             esp_sensor_count: sensor_count from heartbeat payload
             esp_actuator_count: actuator_count from heartbeat payload
+            esp_subzone_count: subzone_count from heartbeat payload (-1 = old firmware, skip check)
             is_reconnect: True when this heartbeat is from reconnect (>60s offline)
             offline_seconds: Observed offline duration for reconnect telemetry
 
@@ -1957,7 +2064,17 @@ class HeartbeatHandler:
             needs_sensor_push = db_sensor_count > 0 and esp_sensor_count != db_sensor_count
             needs_actuator_push = db_actuator_count > 0 and esp_actuator_count != db_actuator_count
 
-            if needs_sensor_push or needs_actuator_push:
+            # AUT-283: subzone count drift detection (esp_subzone_count=-1 means old firmware → skip)
+            from ...db.repositories.subzone_repo import SubzoneRepository
+            subzone_repo = SubzoneRepository(session)
+            db_subzone_count = await subzone_repo.count_by_esp(esp_device.device_id)
+            needs_subzone_push = (
+                esp_subzone_count >= 0
+                and db_subzone_count > 0
+                and esp_subzone_count != db_subzone_count
+            )
+
+            if needs_sensor_push or needs_actuator_push or needs_subzone_push:
                 if esp_device.device_id in self._config_push_pending_esps:
                     logger.debug(
                         "Config push for %s skipped (already pending). ESP sensors=%d/actuators=%d, "
