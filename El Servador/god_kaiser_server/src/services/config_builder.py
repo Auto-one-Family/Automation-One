@@ -575,11 +575,34 @@ class ConfigPayloadBuilder:
             )
 
         offline_rules: List[Dict[str, Any]] = []
+        pre_filtered_cross_esp = 0  # Rules silently skipped — no local actuator action
 
         if candidate_counter is not None:
             candidate_counter["total_candidate_rules"] = len(enabled_rules)
 
+        def _has_local_actuator_action(rule_actions: list) -> bool:
+            """Return True if at least one action targets this ESP."""
+            return any(
+                isinstance(a, dict)
+                and a.get("type") in ("actuator_command", "actuator")
+                and a.get("esp_id") == esp_id
+                for a in rule_actions
+            )
+
         for rule in enabled_rules:
+            # Pre-filter: pure cross-ESP rules have no local actuator action.
+            # They are silently skipped — no WARNING, no skip_collector entry.
+            # (Rules with mixed local+cross-ESP actions still pass through.)
+            actions = rule.actions if isinstance(rule.actions, list) else []
+            if not _has_local_actuator_action(actions):
+                pre_filtered_cross_esp += 1
+                logger.debug(
+                    "[CONFIG] Rule '%s' for ESP %s — no local actuator action, skip (cross-ESP only)",
+                    getattr(rule, "rule_name", "<unknown>"),
+                    esp_id,
+                )
+                continue
+
             try:
                 rule_entry = self._extract_offline_rule(
                     rule,
@@ -639,20 +662,23 @@ class ConfigPayloadBuilder:
             for r in offline_rules
             if self._is_time_window_only_sensor_type(str(r.get("sensor_value_type", "")))
         )
-        skipped_count = len(enabled_rules) - rules_before_cap
+        # skipped_count excludes pre_filtered_cross_esp (those never entered _extract_offline_rule)
+        skipped_count = len(enabled_rules) - pre_filtered_cross_esp - rules_before_cap
         capped_count = rules_before_cap - len(offline_rules)
 
         logger.info(
             "[CONFIG] offline_rules audit ESP %s: "
-            "enabled_rules_checked=%d | included=%d (sensor_hysteresis=%d, time_window_only=%d) | "
+            "enabled_rules_checked=%d | pre_filtered_cross_esp=%d | "
+            "included=%d (sensor_hysteresis=%d, time_window_only=%d) | "
             "skipped=%d | capped=%d. "
             "Skip reasons per rule logged above as [CONFIG] Rule/Offline-rule skip. "
-            "Typical causes: cross_esp_actuator, calibration_required (ph/ec/moisture), "
+            "Typical causes: calibration_required (ph/ec/moisture), "
             "or_compound, no_convertible_condition, invalid_gpio. "
             "time_window_only rules use sensor_gpio=255 and sensor_value_type=__twindow_on/off — "
             "these count in offline_rules but are not listed as sensor-based logic rules in the UI.",
             esp_id,
             len(enabled_rules),
+            pre_filtered_cross_esp,
             len(offline_rules),
             len(offline_rules) - twindow_count,
             twindow_count,

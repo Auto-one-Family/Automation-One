@@ -756,9 +756,7 @@ bool ActuatorManager::handleActuatorCommand(const String& topic, const String& p
   // BUG-008 Fix: Check if actuator exists before processing command
   RegisteredActuator* actuator = findActuator(gpio);
   if (!actuator || !actuator->driver) {
-    LOG_E(TAG, "╔════════════════════════════════════════╗");
-    LOG_E(TAG, "║  ACTUATOR COMMAND FAILED               ║");
-    LOG_E(TAG, "╚════════════════════════════════════════╝");
+    LOG_E(TAG, "=== ACTUATOR COMMAND FAILED ===");
     LOG_E(TAG, "No actuator configured on GPIO " + String(gpio));
     LOG_E(TAG, "Hint: Send config first via kaiser/{id}/esp/{esp_id}/config");
 

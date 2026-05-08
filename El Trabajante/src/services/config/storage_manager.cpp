@@ -320,16 +320,12 @@ bool StorageManager::checkNVSQuota(const char* key) {
 
   size_t free_entries = preferences_.freeEntries();
   if (free_entries == 0) {
-    LOG_E(TAG, "╔════════════════════════════════════════╗");
-    LOG_E(TAG, "║  NVS FULL - CANNOT SAVE DATA!         ║");
-    LOG_E(TAG, "╚════════════════════════════════════════╝");
+    LOG_E(TAG, "=== NVS FULL - CANNOT SAVE DATA! ===");
     LOG_E(TAG, "NVS namespace '" + String(current_namespace_) + "' has 0 free entries");
     LOG_E(TAG, "Cannot write key: " + String(key));
     return false;
   } else if (free_entries < 10) {
-    LOG_W(TAG, "╔════════════════════════════════════════╗");
-    LOG_W(TAG, "║  NVS NEARLY FULL - " + String(free_entries) + " entries left        ║");
-    LOG_W(TAG, "╚════════════════════════════════════════╝");
+    LOG_W(TAG, "=== NVS NEARLY FULL - " + String(free_entries) + " entries left ===");
     LOG_W(TAG, "NVS namespace '" + String(current_namespace_) + "' low on space");
   }
   return true;

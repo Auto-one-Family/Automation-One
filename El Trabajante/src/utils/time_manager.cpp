@@ -81,9 +81,7 @@ bool TimeManager::begin() {
         return synchronized_;
     }
 
-    LOG_I(TAG, "╔════════════════════════════════════════╗");
-    LOG_I(TAG, "║  TimeManager: NTP Initialization       ║");
-    LOG_I(TAG, "╚════════════════════════════════════════╝");
+    LOG_I(TAG, "=== TimeManager: NTP Initialization ===");
 
     // Check WiFi connection
     if (WiFi.status() != WL_CONNECTED) {
@@ -133,17 +131,13 @@ bool TimeManager::begin() {
     last_resync_check_ = millis();
 
     if (sync_completed_) {
-        LOG_I(TAG, "╔════════════════════════════════════════╗");
-        LOG_I(TAG, "║  NTP Sync Successful                   ║");
-        LOG_I(TAG, "╚════════════════════════════════════════╝");
+        LOG_I(TAG, "=== NTP Sync Successful ===");
         LOG_I(TAG, "  Unix Timestamp: " + String((unsigned long)last_sync_time_));
         LOG_I(TAG, "  Formatted:      " + getFormattedTime());
         return true;
     } else {
         // Do NOT stop the daemon — it continues probing in background.
-        LOG_W(TAG, "╔════════════════════════════════════════╗");
-        LOG_W(TAG, "║  NTP Boot Wait elapsed                 ║");
-        LOG_W(TAG, "╚════════════════════════════════════════╝");
+        LOG_W(TAG, "=== NTP Boot Wait elapsed ===");
         LOG_W(TAG, "  Continuing boot without blocking MQTT");
         LOG_W(TAG, "  SNTP daemon active — sync completes asynchronously");
         return false;

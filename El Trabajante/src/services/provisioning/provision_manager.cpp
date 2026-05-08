@@ -1,5 +1,10 @@
 #include "provision_manager.h"
 #include "../../config/firmware_version.h"
+#ifdef XIAO_ESP32C3
+    #include "../../config/hardware/xiao_esp32c3.h"
+#else
+    #include "../../config/hardware/esp32_dev.h"
+#endif
 #include "../../services/config/config_manager.h"
 #include "../../services/config/storage_manager.h"
 #include "../../models/error_codes.h"
@@ -318,9 +323,7 @@ bool ProvisionManager::begin() {
     return true;
   }
 
-  LOG_I(TAG, "╔════════════════════════════════════════╗");
-  LOG_I(TAG, "║  PROVISION MANAGER INITIALIZATION     ║");
-  LOG_I(TAG, "╚════════════════════════════════════════╝");
+  LOG_I(TAG, "=== PROVISION MANAGER INITIALIZATION ===");
 
   // Get ESP ID from global system config
   esp_id_ = configManager.getESPId();
@@ -382,9 +385,7 @@ bool ProvisionManager::startAPMode() {
     return false;
   }
 
-  LOG_I(TAG, "╔════════════════════════════════════════╗");
-  LOG_I(TAG, "║  STARTING ACCESS POINT MODE           ║");
-  LOG_I(TAG, "╚════════════════════════════════════════╝");
+  LOG_I(TAG, "=== STARTING ACCESS POINT MODE ===");
 
   ap_start_time_ = millis();
   retry_count_ = 0;
@@ -413,9 +414,7 @@ bool ProvisionManager::startAPMode() {
   // Transition to AP_MODE state
   transitionTo(PROVISION_AP_MODE);
 
-  LOG_I(TAG, "╔════════════════════════════════════════╗");
-  LOG_I(TAG, "║  ACCESS POINT MODE ACTIVE             ║");
-  LOG_I(TAG, "╚════════════════════════════════════════╝");
+  LOG_I(TAG, "=== ACCESS POINT MODE ACTIVE ===");
   LOG_I(TAG, "Please connect to this ESP and configure:");
   LOG_I(TAG, "  1. Connect to WiFi SSID: AutoOne-" + esp_id_);
   LOG_I(TAG, "  2. Password: provision");
@@ -432,9 +431,7 @@ bool ProvisionManager::startAPModeForReconfig() {
     return false;
   }
 
-  LOG_I(TAG, "╔════════════════════════════════════════╗");
-  LOG_I(TAG, "║  AP+STA MODE (Reconfig, Reconnect)     ║");
-  LOG_I(TAG, "╚════════════════════════════════════════╝");
+  LOG_I(TAG, "=== AP+STA MODE (Reconfig, Reconnect) ===");
 
   ap_start_time_ = millis();
   retry_count_ = 0;
@@ -653,10 +650,7 @@ bool ProvisionManager::checkTimeouts() {
 }
 
 void ProvisionManager::enterSafeMode() {
-  LOG_C(TAG, "╔════════════════════════════════════════╗");
-  LOG_C(TAG, "║  ENTERING SAFE-MODE (PROVISIONING)    ║");
-  LOG_C(TAG, "║  AP-Mode remains active indefinitely  ║");
-  LOG_C(TAG, "╚════════════════════════════════════════╝");
+  LOG_C(TAG, "=== ENTERING SAFE-MODE (PROVISIONING) | AP-Mode remains active indefinitely ===");
 
   // Update system state
   SystemConfig sys_config = configManager.getSystemConfig();
@@ -671,30 +665,26 @@ void ProvisionManager::enterSafeMode() {
 
   // User-Instructions (ERWEITERT)
   LOG_I(TAG, "");
-  LOG_I(TAG, "╔═══════════════════════════════════════════════════════════╗");
-  LOG_I(TAG, "║  MANUAL PROVISIONING REQUIRED                             ║");
-  LOG_I(TAG, "╠═══════════════════════════════════════════════════════════╣");
+  LOG_I(TAG, "=== MANUAL PROVISIONING REQUIRED ===");
 
   // ESP-ID-abhängige SSID-Anzeige
   String ssid_lower = esp_id_;
   ssid_lower.toLowerCase();
 
-  LOG_I(TAG, "║  1. Connect to WiFi: AutoOne-" + esp_id_ + "                  ");
-  LOG_I(TAG, "║  2. Password: provision                                   ║");
-  LOG_I(TAG, "║  3. Open: http://192.168.4.1                              ║");
-  LOG_I(TAG, "║     OR:   http://" + ssid_lower + ".local                    ");
-  LOG_I(TAG, "║  4. Use POST /provision endpoint                          ║");
-  LOG_I(TAG, "║                                                           ║");
-  LOG_I(TAG, "║  Alternative: Factory-Reset (Boot-Button 10s)             ║");
-  LOG_I(TAG, "╚═══════════════════════════════════════════════════════════╝");
+  LOG_I(TAG, "1. Connect to WiFi: AutoOne-" + esp_id_);
+  LOG_I(TAG, "2. Password: provision");
+  LOG_I(TAG, "3. Open: http://192.168.4.1");
+  LOG_I(TAG, "   OR:   http://" + ssid_lower + ".local");
+  LOG_I(TAG, "4. Use POST /provision endpoint");
+  LOG_I(TAG, "Alternative: Factory-Reset (Boot-Button 10s)");
   LOG_I(TAG, "");
 
   // Visual feedback (LED-Blink-Pattern)
-  const uint8_t LED_PIN = 2;  // ESP32 onboard LED
+  const uint8_t LED_PIN = HardwareConfig::LED_PIN;
   pinMode(LED_PIN, OUTPUT);
 
   // Pattern: 10× kurzes Blinken (200ms on/off)
-  LOG_I(TAG, "LED Pattern: 10× blink (GPIO 2)");
+  LOG_I(TAG, "LED Pattern: 10x blink");
   for (int i = 0; i < 10; i++) {
     digitalWrite(LED_PIN, HIGH);
     delay(200);
@@ -903,9 +893,7 @@ void ProvisionManager::handleRoot() {
 }
 
 void ProvisionManager::handleProvision() {
-  LOG_I(TAG, "╔════════════════════════════════════════╗");
-  LOG_I(TAG, "║  HTTP POST /provision                 ║");
-  LOG_I(TAG, "╚════════════════════════════════════════╝");
+  LOG_I(TAG, "=== HTTP POST /provision ===");
 
   // Check state
   if (state_ != PROVISION_AP_MODE && state_ != PROVISION_WAITING_CONFIG) {
@@ -1041,9 +1029,7 @@ void ProvisionManager::handleProvision() {
   config_received_ = true;
   transitionTo(PROVISION_CONFIG_RECEIVED);
 
-  LOG_I(TAG, "╔════════════════════════════════════════╗");
-  LOG_I(TAG, "║  ✅ PROVISIONING SUCCESSFUL           ║");
-  LOG_I(TAG, "╚════════════════════════════════════════╝");
+  LOG_I(TAG, "=== [OK] PROVISIONING SUCCESSFUL ===");
   LOG_I(TAG, "Rebooting in " + String(REBOOT_DELAY_MS / 1000) + " seconds...");
 
   // Delay before reboot (allow HTTP response to be sent)
@@ -1078,10 +1064,7 @@ void ProvisionManager::handleStatus() {
 }
 
 void ProvisionManager::handleReset() {
-  LOG_W(TAG, "╔════════════════════════════════════════╗");
-  LOG_W(TAG, "║  HTTP POST /reset                     ║");
-  LOG_W(TAG, "║  FACTORY RESET REQUESTED              ║");
-  LOG_W(TAG, "╚════════════════════════════════════════╝");
+  LOG_W(TAG, "=== HTTP POST /reset | FACTORY RESET REQUESTED ===");
 
   // Parse request
   String body = server_->arg("plain");
@@ -1117,9 +1100,7 @@ void ProvisionManager::handleReset() {
 
   server_->send(200, "application/json", response_str);
 
-  LOG_I(TAG, "╔════════════════════════════════════════╗");
-  LOG_I(TAG, "║  ✅ FACTORY RESET COMPLETE            ║");
-  LOG_I(TAG, "╚════════════════════════════════════════╝");
+  LOG_I(TAG, "=== [OK] FACTORY RESET COMPLETE ===");
   LOG_I(TAG, "Rebooting in 3 seconds...");
 
   // Delay before reboot

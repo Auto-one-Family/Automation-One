@@ -83,9 +83,7 @@ static void handleProvisioningState() {
 
     // Config received via HTTP → reload + reboot
     if (provisionManager.isConfigReceived()) {
-        LOG_I(COMM_TAG, "╔════════════════════════════════════════╗");
-        LOG_I(COMM_TAG, "║  ✅ KONFIGURATION EMPFANGEN!          ║");
-        LOG_I(COMM_TAG, "╚════════════════════════════════════════╝");
+        LOG_I(COMM_TAG, "=== [OK] KONFIGURATION EMPFANGEN! ===");
         configManager.loadWiFiConfig(g_wifi_config);
         LOG_I(COMM_TAG, "WiFi SSID: " + g_wifi_config.ssid);
         LOG_I(COMM_TAG, "Rebooting to apply configuration...");
@@ -159,10 +157,7 @@ static void handleMqttPersistentFailure() {
                     mqtt_failure_start = 0;
                     return;
                 }
-                LOG_C(COMM_TAG, "╔════════════════════════════════════════╗");
-                LOG_C(COMM_TAG, "║  MQTT PERSISTENT FAILURE (5 min)       ║");
-                LOG_C(COMM_TAG, "║  Config-Portal oeffnen...              ║");
-                LOG_C(COMM_TAG, "╚════════════════════════════════════════╝");
+                LOG_C(COMM_TAG, "=== MQTT PERSISTENT FAILURE (5 min) | Config-Portal oeffnen... ===");
                 g_system_config.current_state = STATE_SAFE_MODE_PROVISIONING;
                 g_system_config.safe_mode_reason =
                     "MQTT persistent failure (5 min Circuit Breaker OPEN)";

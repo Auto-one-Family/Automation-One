@@ -1609,9 +1609,7 @@ void MQTTClient::confirmRegistration() {
     if (!registration_confirmed_) {
         registration_confirmed_ = true;
         registration_timeout_logged_ = false;
-        LOG_I(TAG, "╔════════════════════════════════════════╗");
-        LOG_I(TAG, "║  REGISTRATION CONFIRMED BY SERVER     ║");
-        LOG_I(TAG, "╚════════════════════════════════════════╝");
+        LOG_I(TAG, "=== REGISTRATION CONFIRMED BY SERVER ===");
         LOG_I(TAG, "Gate opened - publishes now allowed");
     }
 }
@@ -1654,9 +1652,7 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
     switch (event_id) {
 
         case MQTT_EVENT_CONNECTED: {
-            LOG_I(TAG, "╔════════════════════════════════════════╗");
-            LOG_I(TAG, "║  MQTT_EVENT_CONNECTED                 ║");
-            LOG_I(TAG, "╚════════════════════════════════════════╝");
+            LOG_I(TAG, "=== MQTT_EVENT_CONNECTED ===");
 
             // Update shared connection state (atomic — read by Safety-Task Core 1)
             g_mqtt_connected.store(true);
@@ -1736,9 +1732,7 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
         }
 
         case MQTT_EVENT_DISCONNECTED:
-            LOG_W(TAG, "╔════════════════════════════════════════╗");
-            LOG_W(TAG, "║  MQTT_EVENT_DISCONNECTED              ║");
-            LOG_W(TAG, "╚════════════════════════════════════════╝");
+            LOG_W(TAG, "=== MQTT_EVENT_DISCONNECTED ===");
 
             // INC-2026-04-11-ea5484-mqtt-transport-keepalive (PKG-01):
             // Telemetrie-Marker mit uptime + free heap + WiFi-RSSI, damit Disconnect-
