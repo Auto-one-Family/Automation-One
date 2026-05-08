@@ -153,6 +153,14 @@ class CalibrationSession(Base, TimestampMixin):
         doc="Username of operator who started the session",
     )
 
+    # ── Session Metadata (AUT-299) ─────────────────────────────────────────
+    session_metadata: Mapped[Optional[dict]] = mapped_column(
+        JSONBCompat,
+        nullable=True,
+        default=None,
+        doc="Session-level metadata: calibration_temperature (°C for EC ATC), etc.",
+    )
+
     # ── Terminal Metadata ──────────────────────────────────────────────────
     completed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),

@@ -267,6 +267,12 @@ class SensorConfigCreate(SensorConfigBase):
         description="List of subzone_ids for static multi-zone assignment",
     )
 
+    # AUT-299: Optional linked temperature sensor for ATC
+    temp_sensor_config_id: Optional[uuid.UUID] = Field(
+        None,
+        description="UUID of a temperature SensorConfig to use for ATC. NULL = auto-discover same-ESP temperature sensor.",
+    )
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -361,6 +367,11 @@ class SensorConfigUpdate(BaseModel):
     # NOTE (AUT-227): assigned_subzones removed from SensorConfigUpdate (read-only).
     # The DB column is DEPRECATED and is not consumed by any business-logic layer.
     # Reads are still served via SensorConfigResponse for backwards compatibility.
+    # AUT-299: Optional linked temperature sensor for ATC
+    temp_sensor_config_id: Optional[uuid.UUID] = Field(
+        None,
+        description="UUID of a temperature SensorConfig to use for ATC. NULL = auto-discover same-ESP temperature sensor.",
+    )
 
 
 class SensorConfigResponse(SensorConfigBase, TimestampMixin):
@@ -423,6 +434,11 @@ class SensorConfigResponse(SensorConfigBase, TimestampMixin):
     warning_min: Optional[float] = Field(None)
     warning_max: Optional[float] = Field(None)
     metadata: Optional[Dict[str, Any]] = Field(None)
+    # AUT-299: Linked temperature sensor config UUID for ATC
+    temp_sensor_config_id: Optional[uuid.UUID] = Field(
+        None,
+        description="Linked temperature sensor config UUID for ATC",
+    )
     description: Optional[str] = Field(
         None,
         description="Human-readable sensor description (from sensor_metadata)",

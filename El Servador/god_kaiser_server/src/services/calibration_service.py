@@ -183,6 +183,7 @@ class CalibrationService:
         expected_points: int = 2,
         initiated_by: Optional[str] = None,
         correlation_id: Optional[str] = None,
+        session_metadata: Optional[dict] = None,
     ) -> CalibrationSession:
         """
         Start a new calibration session.
@@ -234,6 +235,7 @@ class CalibrationService:
                 expected_points=expected_points,
                 initiated_by=initiated_by,
                 correlation_id=correlation_id,
+                session_metadata=session_metadata or {},
             )
 
         logger.info(
@@ -620,12 +622,18 @@ class CalibrationService:
                     "INSUFFICIENT_POINTS",
                 )
 
+        # AUT-299: Read calibration_temperature from session_metadata (default 25.0°C NIST).
+        cal_temp = float(
+            (cal_session.session_metadata or {}).get("calibration_temperature", 25.0)
+        )
+
         # Compute calibration based on method
         try:
             result = self._compute_calibration(
                 cal_session.method,
                 cal_session.sensor_type,
                 points,
+                temperature=cal_temp,
             )
         except Exception as e:
             await self.repo.update_status(
@@ -838,9 +846,19 @@ class CalibrationService:
     # ── Private computation methods ────────────────────────────────────────
 
     @staticmethod
-    def _compute_calibration(method: str, sensor_type: str, points: list[dict]) -> dict:
+    def _compute_calibration(
+        method: str, sensor_type: str, points: list[dict], temperature: float = 25.0
+    ) -> dict:
         """
         Compute calibration parameters from measurement points.
+
+        Args:
+            method: Calibration method string.
+            sensor_type: Normalized sensor type.
+            points: List of calibration point dicts.
+            temperature: Solution temperature at calibration time (°C).
+                AUT-299: Used for EC temperature-compensated coefficient calculation.
+                Default 25.0°C = NIST reference (no compensation applied).
 
         Returns a dict ready to be stored as calibration_data.
         """
@@ -856,9 +874,9 @@ class CalibrationService:
         elif method == "ph_2point":
             return CalibrationService._compute_ph_2point(points)
         elif method == "ec_1point":
-            return CalibrationService._compute_ec_1point(points)
+            return CalibrationService._compute_ec_1point(points, temperature=temperature)
         elif method == "ec_2point":
-            return CalibrationService._compute_ec_2point(points)
+            return CalibrationService._compute_ec_2point(points, temperature=temperature)
         else:
             raise ValueError(f"Unknown calibration method: {method}")
 
@@ -1046,7 +1064,7 @@ class CalibrationService:
         }
 
     @staticmethod
-    def _compute_ec_1point(points: list[dict]) -> dict:
+    def _compute_ec_1point(points: list[dict], temperature: float = 25.0) -> dict:
         """
         EC 1-point calibration.
 
@@ -1056,11 +1074,20 @@ class CalibrationService:
         Derives voltage-based slope/offset: EC = slope * voltage + offset (offset = 0)
         and also stores cell_factor for backward-compatibility inspection.
 
+        AUT-299: If calibrated at a temperature other than 25°C the reference EC value is
+        normalized to 25°C using the DFR0300 temperature coefficient (2%/°C) before
+        computing slope. This ensures the stored calibration is temperature-independent
+        and ATC in ECSensorProcessor applies uniformly.
+
         cell_factor = reference_EC / raw_ADC_count.
         Typical DFR0300: raw ~625 at 1413 µS/cm → cell_factor ≈ 2.26.
         Valid range: [0.01, 100.0] — hard stop only for physically impossible values
         (sensor reads <1% of expected ADC at reference EC).
         Values outside [0.5, 10.0] generate a warning but do not block calibration.
+
+        Args:
+            points: List of calibration point dicts (requires one with point_role="reference").
+            temperature: Solution temperature at calibration time in °C (default 25.0).
 
         Raises:
             ValueError: If raw is zero, cell_factor is non-positive, or exceeds hard limit
@@ -1088,9 +1115,14 @@ class CalibrationService:
         if reference <= 0:
             raise ValueError("Reference EC value must be positive")
 
-        # cell_factor = reference_EC / raw_ADC — only used for validation and backward compat.
+        # AUT-299: Normalize reference EC to 25°C when calibrated at a different temperature.
+        # Matches ECSensorProcessor.TEMP_COEFFICIENT = 0.02 (2%/°C).
+        _TEMP_COEFFICIENT = 0.02
+        reference_at_25 = reference / (1.0 + _TEMP_COEFFICIENT * (temperature - 25.0))
+
+        # cell_factor = reference_EC@25 / raw_ADC — only used for validation and backward compat.
         # Hard limit: cell_factor > 100 means ADC < 1% of expected response → sensor issue.
-        cell_factor = reference / raw
+        cell_factor = reference_at_25 / raw
         _HARD_LIMIT = 100.0
         if cell_factor <= 0:
             raise ValueError(
@@ -1122,7 +1154,7 @@ class CalibrationService:
         #   EC = slope * voltage + offset
         # 1-point: passes through origin (offset = 0).
         voltage = (raw / _ADC_MAX) * _ADC_VOLTAGE
-        slope = reference / voltage  # EC (µS/cm) per volt
+        slope = reference_at_25 / voltage  # EC@25°C (µS/cm) per volt
         offset = 0.0
 
         return {
@@ -1132,18 +1164,28 @@ class CalibrationService:
             "cell_factor": round(cell_factor, 6),
             "point_raw": raw,
             "point_reference": reference,
+            "calibration_temperature": round(temperature, 1),
+            "reference_at_25": round(reference_at_25, 2),
             "validation_warnings": validation_warnings,
             "calibrated_at": datetime.now(timezone.utc).isoformat(),
         }
 
     @staticmethod
-    def _compute_ec_2point(points: list[dict]) -> dict:
+    def _compute_ec_2point(points: list[dict], temperature: float = 25.0) -> dict:
         """
         EC 2-point calibration (air + reference).
 
         Converts raw ADC to voltage first, then computes:
         EC = slope * voltage + offset
         Air point (0 µS/cm reference) pins the offset; reference solution pins the slope.
+
+        AUT-299: The reference-solution EC value is normalized to 25°C before computing
+        slope so that the stored calibration is temperature-independent and ECSensorProcessor
+        ATC applies uniformly regardless of calibration temperature.
+
+        Args:
+            points: List of calibration point dicts (requires "air" and "reference" roles).
+            temperature: Solution temperature at calibration time in °C (default 25.0).
 
         Raises:
             ValueError: If points are invalid or voltages too close
@@ -1170,6 +1212,11 @@ class CalibrationService:
         raw_ref = float(ref_point["raw"])
         ref_ref = float(ref_point["reference"])
 
+        # AUT-299: Normalize reference EC to 25°C.  Air point is 0 µS/cm regardless of
+        # temperature — no normalization needed for that point.
+        _TEMP_COEFFICIENT = 0.02
+        ref_ref_at_25 = ref_ref / (1.0 + _TEMP_COEFFICIENT * (temperature - 25.0))
+
         # Convert raw ADC to voltage before computing slope.
         # ECSensorProcessor.process() applies voltage-based formula: EC = slope * voltage + offset
         # Using raw ADC values would produce slope in EC/ADC-count (~1241x wrong).
@@ -1179,7 +1226,7 @@ class CalibrationService:
         if abs(voltage_ref - voltage_air) < 1e-6:
             raise ValueError("Voltage values too close — cannot compute slope")
 
-        slope = (ref_ref - ref_air) / (voltage_ref - voltage_air)
+        slope = (ref_ref_at_25 - ref_air) / (voltage_ref - voltage_air)
         offset = ref_air - slope * voltage_air
 
         return {
@@ -1190,5 +1237,7 @@ class CalibrationService:
             "point_air_ref": ref_air,
             "point_reference_raw": raw_ref,
             "point_reference_ref": ref_ref,
+            "calibration_temperature": round(temperature, 1),
+            "reference_at_25": round(ref_ref_at_25, 2),
             "calibrated_at": datetime.now(timezone.utc).isoformat(),
         }

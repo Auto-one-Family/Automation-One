@@ -300,6 +300,9 @@ class SensorDataHandler:
                     # Step 8: Determine processing mode
                     processing_mode = "raw"
                     processed_value = None
+                    # AUT-299: initialised before pi_enhanced block so metadata build (step 8d)
+                    # can read ATC provenance regardless of processing path.
+                    ec_extra_params: dict = {}
 
                     if sensor_config and sensor_config.pi_enhanced and raw_mode:
                         # Pi-Enhanced processing needed
@@ -307,24 +310,32 @@ class SensorDataHandler:
 
                         # ATC pre-lookup: for EC sensors, fetch latest temperature from
                         # this ESP before calling the processor (session available here).
-                        ec_extra_params: dict = {}
                         if sensor_type == "ec":
-                            atc_temp = await self._try_get_ec_temperature(esp_device, session)
+                            atc_temp, atc_source = await self._try_get_ec_temperature(
+                                esp_device, session, sensor_config=sensor_config
+                            )
                             if atc_temp is not None:
                                 ec_extra_params["temperature_compensation"] = atc_temp
                                 logger.debug(
-                                    "[EC-ATC] Using temperature %.2f°C for ATC on %s GPIO %s",
+                                    "[EC-ATC] Using temperature %.2f°C for ATC on %s GPIO %s (source=%s)",
                                     atc_temp,
                                     esp_id_str,
                                     gpio,
+                                    atc_source,
                                 )
                             else:
-                                ec_extra_params["temperature_compensation"] = 25.0  # ECSensorProcessor.REFERENCE_TEMP fallback
+                                atc_temp = 25.0  # ECSensorProcessor.REFERENCE_TEMP fallback
+                                atc_source = "default_25"
+                                ec_extra_params["temperature_compensation"] = atc_temp
                                 logger.debug(
                                     "[EC-ATC] No temperature sensor available — using reference temp 25.0°C for ATC on %s GPIO %s",
                                     esp_id_str,
                                     gpio,
                                 )
+                            # Transport the ATC source into extra_params for metadata enrichment.
+                            # Filtered out before passing to processor (processor ignores unknown keys
+                            # but we strip it explicitly below to keep the interface clean).
+                            ec_extra_params["_atc_source"] = atc_source
 
                         # Trigger Pi-Enhanced processing (pass raw_mode!)
                         pi_result = await self._trigger_pi_enhanced_processing(
@@ -488,6 +499,13 @@ class SensorDataHandler:
                         sensor_metadata["i2c_address"] = i2c_address
                     if onewire_address:
                         sensor_metadata["onewire_address"] = onewire_address
+                    # AUT-299: Enrich metadata for EC sensors with ATC provenance
+                    if sensor_type == "ec" and ec_extra_params:
+                        atc_source_meta = ec_extra_params.get("_atc_source", "default_25")
+                        sensor_metadata["temp_compensation_value"] = ec_extra_params.get(
+                            "temperature_compensation", 25.0
+                        )
+                        sensor_metadata["temp_source"] = atc_source_meta
 
                     sensor_data = await sensor_repo.save_data(
                         esp_id=esp_device.id,
@@ -912,23 +930,62 @@ class SensorDataHandler:
         self,
         esp_device,
         session,
-    ) -> Optional[float]:
+        sensor_config=None,
+    ) -> tuple[Optional[float], str]:
         """Look up the latest temperature reading for EC automatic temperature compensation.
 
-        Searches for the most recent temperature reading (sensor_type "temperature" or
-        "sht31_temp") on the same ESP device regardless of GPIO pin. Returns the
-        processed_value if the reading is within _ATC_MAX_AGE, otherwise None.
+        Priority 1 (AUT-299): If sensor_config.temp_sensor_config_id is set, fetch the
+        reading from the explicitly linked temperature sensor (cross-ESP capable).
+
+        Priority 2 (existing behavior): Same-ESP auto-discovery — searches for the most
+        recent temperature reading (sensor_type "temperature" or "sht31_temp") on the
+        same ESP device regardless of GPIO pin.
+
+        Returns None as float component when no fresh reading is available — callers
+        should fall back to 25.0°C (NIST reference).
 
         Args:
             esp_device: ESPDevice ORM instance (provides device UUID)
             session: Active async database session
+            sensor_config: Optional SensorConfig ORM instance for AUT-299 explicit link
 
         Returns:
-            Temperature in °C as float, or None if unavailable or stale
+            Tuple of (temperature_celsius_or_None, source_label) where source_label is
+            one of "config:<uuid>", "same_esp", or "default_25".
         """
         sensor_repo = SensorRepository(session)
         now_utc = datetime.now(timezone.utc)
 
+        # Priority 1 (AUT-299): Explicitly configured temp sensor (cross-ESP capable)
+        if sensor_config is not None and sensor_config.temp_sensor_config_id is not None:
+            linked_config = await sensor_repo.get_by_id(sensor_config.temp_sensor_config_id)
+            if linked_config is not None:
+                reading = await sensor_repo.get_latest_reading(
+                    esp_id=linked_config.esp_id,
+                    gpio=linked_config.gpio,
+                    sensor_type=linked_config.sensor_type,
+                )
+                if reading is not None and reading.processed_value is not None:
+                    ts = reading.timestamp
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    age = now_utc - ts
+                    if age <= self._ATC_MAX_AGE:
+                        source_label = f"config:{sensor_config.temp_sensor_config_id}"
+                        logger.debug(
+                            "[EC-ATC] Using linked temp sensor %s (%.2f°C, age=%.0fs) for ATC",
+                            sensor_config.temp_sensor_config_id,
+                            float(reading.processed_value),
+                            age.total_seconds(),
+                        )
+                        return (float(reading.processed_value), source_label)
+                    logger.debug(
+                        "[EC-ATC] Linked temp sensor reading too stale (age=%.0fs > %.0fs), falling back to same-ESP",
+                        age.total_seconds(),
+                        self._ATC_MAX_AGE.total_seconds(),
+                    )
+
+        # Priority 2: Same-ESP auto-discovery (existing behavior)
         for temp_type in ("temperature", "sht31_temp"):
             reading = await sensor_repo.get_latest_reading_for_esp(
                 esp_id=esp_device.id,
@@ -949,9 +1006,9 @@ class SensorDataHandler:
                     self._ATC_MAX_AGE.total_seconds(),
                 )
                 continue
-            return float(reading.processed_value)
+            return (float(reading.processed_value), "same_esp")
 
-        return None
+        return (None, "default_25")
 
     # ─── Threshold Evaluation ─────────────────────────────────────
 
@@ -1475,9 +1532,11 @@ class SensorDataHandler:
             # For DS18B20: raw_mode=True means ESP sent 12-bit integer (400 = 25°C)
             processing_params["raw_mode"] = raw_mode
 
-            # Merge caller-supplied extra params (e.g. ATC temperature_compensation for EC)
+            # Merge caller-supplied extra params (e.g. ATC temperature_compensation for EC).
+            # Strip internal transport keys (prefixed with "_") before passing to processor.
             if extra_params:
-                processing_params.update(extra_params)
+                processor_params = {k: v for k, v in extra_params.items() if not k.startswith("_")}
+                processing_params.update(processor_params)
 
             proc_calibration = None
             if sensor_config and sensor_config.calibration_data:

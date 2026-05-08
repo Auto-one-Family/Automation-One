@@ -40,6 +40,14 @@ class StartSessionRequest(BaseModel):
     method: str = Field(default="linear_2point", max_length=30)
     expected_points: int = Field(default=2, ge=1, le=10)
     correlation_id: Optional[str] = Field(default=None, max_length=64)
+    # AUT-299: Solution temperature at calibration time for temperature-compensated
+    # coefficient calculation.  Default 25.0°C = NIST reference temperature.
+    calibration_temperature: Optional[float] = Field(
+        25.0,
+        ge=-10.0,
+        le=50.0,
+        description="Solution temperature at calibration time (°C). Used for temperature-compensated coefficient calculation. Default: 25.0 (NIST reference).",
+    )
 
 
 class AddPointRequest(BaseModel):
@@ -171,6 +179,9 @@ async def start_session(
     """
     service = CalibrationService(db)
     try:
+        # AUT-299: persist calibration_temperature in session_metadata so finalize()
+        # can apply temperature-compensated EC coefficient calculation.
+        cal_temperature = request.calibration_temperature if request.calibration_temperature is not None else 25.0
         session = await service.start_session(
             esp_id=request.esp_id,
             gpio=request.gpio,
@@ -179,6 +190,7 @@ async def start_session(
             expected_points=request.expected_points,
             initiated_by=current_user.username if current_user else None,
             correlation_id=request.correlation_id,
+            session_metadata={"calibration_temperature": cal_temperature},
         )
         await db.commit()
         return _session_to_response(session)

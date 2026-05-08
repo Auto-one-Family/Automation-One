@@ -186,6 +186,8 @@ def _model_to_response(
         # Primary subzone assignment is via subzone_configs.assigned_gpios. Candidate for
         # future DB cleanup.
         assigned_subzones=sensor.assigned_subzones,
+        # AUT-299: Linked temperature sensor config UUID for ATC
+        temp_sensor_config_id=sensor.temp_sensor_config_id,
         latest_value=None,  # Will be set by caller if available
         latest_quality=None,
         latest_timestamp=None,
@@ -265,6 +267,8 @@ def _schema_to_model_fields(request: SensorConfigCreate) -> dict:
         # Writes from clients are ignored; column persists as empty list for new rows.
         # Reads continue via the response schema for backwards compatibility.
         "assigned_subzones": [],
+        # AUT-299: Optional linked temperature sensor for ATC
+        "temp_sensor_config_id": request.temp_sensor_config_id,
     }
 
 
@@ -969,6 +973,9 @@ async def create_or_update_sensor(
         if request.assigned_zones is not None:
             existing.assigned_zones = model_fields["assigned_zones"]
         # AUT-227: assigned_subzones is read-only — writes from clients are ignored.
+        # AUT-299: temp_sensor_config_id — explicit NULL clears the link (intentional write)
+        if "temp_sensor_config_id" in model_fields:
+            existing.temp_sensor_config_id = model_fields["temp_sensor_config_id"]
         # =========================================================================
         # ADDRESS FIELDS (R20-P1): Update if provided so re-addressing works
         # =========================================================================

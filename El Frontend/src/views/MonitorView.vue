@@ -419,7 +419,7 @@ function getSensorTrend(espId: string, gpio: number, sensorType?: string): Trend
 
 function getDisplaySparkline(sensor: { esp_id: string; gpio: number; sensor_type?: string; operating_mode?: string | null }) {
   const key = getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type)
-  return getSparklineForDisplay(key, (sensor as any).operating_mode)
+  return getSparklineForDisplay(key, sensor.operating_mode)
 }
 
 // =============================================================================

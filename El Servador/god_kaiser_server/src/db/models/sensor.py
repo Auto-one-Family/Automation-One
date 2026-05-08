@@ -283,6 +283,15 @@ class SensorConfig(Base, TimestampMixin):
         doc="Sensor kind: continuous (MQTT stream) or snapshot (manual, e.g. MultispeQ)",
     )
 
+    # AUT-299: Optional linked temperature sensor for ATC
+    temp_sensor_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sensor_configs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        doc="Optional FK to a temperature SensorConfig for automatic temperature compensation (ATC). NULL = use same-ESP auto-discovery.",
+    )
+
     # Relationships
     esp: Mapped["ESPDevice"] = relationship(
         "ESPDevice",
