@@ -93,7 +93,7 @@ void safetyTaskFunction(void* param) {
                     LOG_W(SAFETY_TAG, "[SAFETY-M2] MQTT_DISCONNECTED — no offline rules, setting actuators to safe state immediately");
                 }
             }
-            // NOTIFY_SUBZONE_SAFE: M3 — full GPIO routing via Core 1 queue (not yet implemented)
+            // NOTIFY_SUBZONE_SAFE: M3 resolved (AUT-285) — Zone/Subzone now routed via g_config_update_queue → Core 1
         }
 
         #ifndef WOKWI_SIMULATION
