@@ -640,3 +640,45 @@ def test_compute_calibration_linear_ec_stays_linear():
     result = CalibrationService._compute_calibration("linear_2point", "ec", points)
     assert result["type"] == "linear_2point"
     assert "slope" in result
+
+
+def test_ec_1point_calibration_temperature_normalization():
+    """Regression: slope at T<25°C must be lower than at T=25°C for same raw/reference.
+
+    Physics: actual EC of a 1413 µS/cm standard at 20°C is ~1271.7 µS/cm.
+    slope × voltage = EC@T_cal; ATC then divides by (1+0.02*(T-25)) to yield EC@25°C.
+    Wrong formula (division): slope@20 > slope@25 → double-compensation error.
+    Correct formula (multiplication): slope@20 < slope@25 → ATC cancels exactly.
+    """
+    points_ref = [{"raw": 625.0, "reference": 1413.0, "point_role": "reference"}]
+
+    result_25 = CalibrationService._compute_ec_1point(points_ref, temperature=25.0)
+    result_20 = CalibrationService._compute_ec_1point(points_ref, temperature=20.0)
+    result_30 = CalibrationService._compute_ec_1point(points_ref, temperature=30.0)
+
+    # At lower T: actual EC is lower → slope must be lower
+    assert result_20["slope"] < result_25["slope"]
+    # At higher T: actual EC is higher → slope must be higher
+    assert result_30["slope"] > result_25["slope"]
+
+    # actual_at_cal_temp for T=20: 1413 * (1 + 0.02 * (20-25)) = 1413 * 0.9 = 1271.7
+    assert result_20["actual_at_cal_temp"] == pytest.approx(1271.7, rel=1e-4)
+    # actual_at_cal_temp for T=25: no change
+    assert result_25["actual_at_cal_temp"] == pytest.approx(1413.0, rel=1e-4)
+    # actual_at_cal_temp for T=30: 1413 * 1.1 = 1554.3
+    assert result_30["actual_at_cal_temp"] == pytest.approx(1554.3, rel=1e-4)
+
+
+def test_ec_2point_calibration_temperature_normalization():
+    """Regression: 2-point slope at T<25°C must be lower than at T=25°C for same inputs."""
+    points = [
+        {"raw": 10.0, "reference": 0.0, "point_role": "air"},
+        {"raw": 625.0, "reference": 1413.0, "point_role": "reference"},
+    ]
+
+    result_25 = CalibrationService._compute_ec_2point(points, temperature=25.0)
+    result_20 = CalibrationService._compute_ec_2point(points, temperature=20.0)
+
+    assert result_20["slope"] < result_25["slope"]
+    assert result_20["actual_at_cal_temp"] == pytest.approx(1271.7, rel=1e-4)
+    assert result_25["actual_at_cal_temp"] == pytest.approx(1413.0, rel=1e-4)

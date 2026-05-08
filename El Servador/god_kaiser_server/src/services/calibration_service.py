@@ -1115,14 +1115,15 @@ class CalibrationService:
         if reference <= 0:
             raise ValueError("Reference EC value must be positive")
 
-        # AUT-299: Normalize reference EC to 25°C when calibrated at a different temperature.
+        # AUT-299: Compute actual EC of the solution at calibration temperature.
+        # slope × voltage must yield EC@T_cal so that ATC (÷ (1+coeff*(T-25))) gives EC@25°C.
         # Matches ECSensorProcessor.TEMP_COEFFICIENT = 0.02 (2%/°C).
         _TEMP_COEFFICIENT = 0.02
-        reference_at_25 = reference / (1.0 + _TEMP_COEFFICIENT * (temperature - 25.0))
+        actual_at_cal_temp = reference * (1.0 + _TEMP_COEFFICIENT * (temperature - 25.0))
 
-        # cell_factor = reference_EC@25 / raw_ADC — only used for validation and backward compat.
+        # cell_factor = actual_EC@T_cal / raw_ADC — only used for validation and backward compat.
         # Hard limit: cell_factor > 100 means ADC < 1% of expected response → sensor issue.
-        cell_factor = reference_at_25 / raw
+        cell_factor = actual_at_cal_temp / raw
         _HARD_LIMIT = 100.0
         if cell_factor <= 0:
             raise ValueError(
@@ -1154,7 +1155,7 @@ class CalibrationService:
         #   EC = slope * voltage + offset
         # 1-point: passes through origin (offset = 0).
         voltage = (raw / _ADC_MAX) * _ADC_VOLTAGE
-        slope = reference_at_25 / voltage  # EC@25°C (µS/cm) per volt
+        slope = actual_at_cal_temp / voltage  # EC@T_cal (µS/cm) per volt; ATC normalizes to EC@25°C
         offset = 0.0
 
         return {
@@ -1165,7 +1166,7 @@ class CalibrationService:
             "point_raw": raw,
             "point_reference": reference,
             "calibration_temperature": round(temperature, 1),
-            "reference_at_25": round(reference_at_25, 2),
+            "actual_at_cal_temp": round(actual_at_cal_temp, 2),
             "validation_warnings": validation_warnings,
             "calibrated_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -1212,10 +1213,10 @@ class CalibrationService:
         raw_ref = float(ref_point["raw"])
         ref_ref = float(ref_point["reference"])
 
-        # AUT-299: Normalize reference EC to 25°C.  Air point is 0 µS/cm regardless of
-        # temperature — no normalization needed for that point.
+        # AUT-299: Compute actual EC of reference solution at calibration temperature.
+        # Air point is 0 µS/cm regardless of temperature — no normalization needed for that point.
         _TEMP_COEFFICIENT = 0.02
-        ref_ref_at_25 = ref_ref / (1.0 + _TEMP_COEFFICIENT * (temperature - 25.0))
+        ref_ref_actual_at_T = ref_ref * (1.0 + _TEMP_COEFFICIENT * (temperature - 25.0))
 
         # Convert raw ADC to voltage before computing slope.
         # ECSensorProcessor.process() applies voltage-based formula: EC = slope * voltage + offset
@@ -1226,7 +1227,7 @@ class CalibrationService:
         if abs(voltage_ref - voltage_air) < 1e-6:
             raise ValueError("Voltage values too close — cannot compute slope")
 
-        slope = (ref_ref_at_25 - ref_air) / (voltage_ref - voltage_air)
+        slope = (ref_ref_actual_at_T - ref_air) / (voltage_ref - voltage_air)
         offset = ref_air - slope * voltage_air
 
         return {
@@ -1238,6 +1239,6 @@ class CalibrationService:
             "point_reference_raw": raw_ref,
             "point_reference_ref": ref_ref,
             "calibration_temperature": round(temperature, 1),
-            "reference_at_25": round(ref_ref_at_25, 2),
+            "actual_at_cal_temp": round(ref_ref_actual_at_T, 2),
             "calibrated_at": datetime.now(timezone.utc).isoformat(),
         }
