@@ -755,12 +755,12 @@ if (state_ == PROVISION_TIMEOUT) {
 void ProvisionManager::enterSafeMode() {
   LOG_CRITICAL("Entering Safe-Mode due to provisioning failure");
   
-  // Blink LED (GPIO 2)
-  pinMode(2, OUTPUT);
+  // Blink LED (HardwareConfig::LED_PIN = GPIO 5)
+  pinMode(HardwareConfig::LED_PIN, OUTPUT);
   for (int i = 0; i < 10; i++) {
-    digitalWrite(2, HIGH);
+    digitalWrite(HardwareConfig::LED_PIN, HIGH);
     delay(200);
-    digitalWrite(2, LOW);
+    digitalWrite(HardwareConfig::LED_PIN, LOW);
     delay(200);
   }
   

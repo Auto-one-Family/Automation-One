@@ -14,7 +14,7 @@ Dynamic sensor configuration via MQTT allows God-Kaiser to add, modify, or remov
 - `src/services/config/storage_manager.cpp/.h` - NVS operations abstraction
 - `src/services/config/config_response.cpp` (lines 1-72) - Response publishing
 - `src/services/config/config_response.h` (lines 1-31) - Response builder interface
-- `src/utils/json_helpers.h` (lines 9-82) - JSON field extraction helpers
+- `src/utils/json_helpers.h` - JSON field extraction helpers
 - `src/utils/topic_builder.cpp` (lines 124-138) - Topic generation
 - `src/models/sensor_types.h` (lines 1-46) - SensorConfig and SensorReading structures
 - `src/models/config_types.h` (lines 1-74) - ConfigResponsePayload, ConfigType, ConfigStatus
@@ -283,7 +283,7 @@ bool parseAndConfigureSensor(const JsonObjectConst& sensor_obj) {
 
 ### JSON Field Parsing
 
-**File:** `src/utils/json_helpers.h` (lines 9-82)
+**File:** `src/utils/json_helpers.h`
 
 The parsing uses helper functions from `JsonHelpers` namespace:
 
@@ -302,6 +302,15 @@ bool extractString(const JsonObjectConst& obj, const char* key, String& out, con
 ```
 - Checks if key exists
 - Validates type (const char*, String)
+- Returns false if key missing or wrong type
+- Sets `out` to default if extraction fails
+
+**extractFloat():**
+```cpp
+bool extractFloat(const JsonObjectConst& obj, const char* key, float& out, float default_val = 0.0f)
+```
+- Checks if key exists
+- Validates type (float, double, int, long)
 - Returns false if key missing or wrong type
 - Sets `out` to default if extraction fails
 

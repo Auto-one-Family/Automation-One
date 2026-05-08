@@ -7,11 +7,7 @@ allowed-tools: Read
 
 # REST API Referenz
 
-<<<<<<< Updated upstream
-> **Version:** 4.3 | **Aktualisiert:** 2026-05-01
-=======
-> **Version:** 4.3 | **Aktualisiert:** 2026-04-10
->>>>>>> Stashed changes
+> **Version:** 4.4 | **Aktualisiert:** 2026-05-08
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
@@ -21,7 +17,7 @@ allowed-tools: Read
 
 ## 0. Quick-Lookup (Alle Endpoints)
 
-### Authentication (`/auth`) - 10 Endpoints
+### Authentication (`/auth`) - 11 Endpoints
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
@@ -33,8 +29,9 @@ allowed-tools: Read
 | `/auth/logout` | POST | JWT | Logout |
 | `/auth/me` | GET | JWT | Aktuelle User-Info |
 | `/auth/mqtt-credentials` | POST | Admin | MQTT-Credentials konfigurieren |
-| `/auth/api-keys` | GET | JWT | API-Keys auflisten |
-| `/auth/api-keys` | POST | JWT | API-Key erstellen |
+| `/auth/api-keys` | GET | Admin | API-Keys auflisten (inkl. widerrufene) |
+| `/auth/api-keys` | POST | Admin | API-Key erstellen (SHA256-Hash gespeichert, Raw-Key einmalig) |
+| `/auth/api-keys/{key_id}/revoke` | POST | Admin | API-Key widerrufen (setzt revoked_at) |
 
 ### ESP Devices (`/esp`) - 17 Endpoints
 
@@ -81,7 +78,7 @@ allowed-tools: Read
 | `/sensors/{sensor_id}/runtime` | GET | JWT | Runtime-Stats + Wartungsstatus (Phase 4A.8) |
 | `/sensors/{sensor_id}/runtime` | PATCH | Operator | Runtime-Stats aktualisieren (Wartungslog) |
 
-> **Calibration Sessions:** Mehrpunkt-Kalibrierung unter **`/api/v1/calibration/sessions`** (Router `calibration_sessions.py`). Request-Feld `method` z. B. **`moisture_2point`** (Bodenfeuchte: `derived` mit `dry_value`/`wet_value`) oder **`linear_2point`** (u. a. andere Sensortypen). **`point_role` Server-Kontrakt: `dry|wet|buffer_high|buffer_low|reference|air`** (Validator in `AddPointRequest`/`UpdatePointRequest`). `calibrationApi.addPoint()` leitet via `toServerPointRole()` alle validen Rollen unverändert durch (Fallback: `dry`). Abgleich Feuchte-Wizard/Server: `docs/analysen/FIX-kalibrierungsflow-bodenfeuchte-2026-04-09.md`. **El Frontend:** Ohne `VITE_CALIBRATION_API_KEY` mappt `calibrationApi.calibrate()` auf den JWT-Session-Pfad und startet Feuchte (`moisture` / Alias `soil_moisture`) mit **`method: moisture_2point`** — konsistent zu `useCalibrationWizard` (`El Frontend/src/api/calibration.ts`). Altbestände / Operator-SQL: `docs/analysen/FIX-kalibrierungsflow-bodenfeuchte-operator-hinweis-2026-04-10.md`.
+> **Calibration Sessions:** Mehrpunkt-Kalibrierung unter **`/api/v1/calibration/sessions`** (Router `calibration_sessions.py`). Request-Feld `method` z. B. **`moisture_2point`** (Bodenfeuchte: `derived` mit `dry_value`/`wet_value`), **`ec_2point`** (EC: Spannungs-basiert, Slope/Offset im Volt-Raum, ATC-Lookup — AUT-290 2026-05-08), **`ph_2point`** (pH: Nernst-Slope-Validierung ±15 %) oder **`linear_2point`** (andere Sensortypen). **`point_role` Server-Kontrakt: `dry|wet|buffer_high|buffer_low|reference|air`** (Validator in `AddPointRequest`/`UpdatePointRequest`). `calibrationApi.addPoint()` leitet via `toServerPointRole()` alle validen Rollen unverändert durch (Fallback: `dry`). Abgleich Feuchte-Wizard/Server: `docs/analysen/FIX-kalibrierungsflow-bodenfeuchte-2026-04-09.md`. **El Frontend:** Ohne `VITE_CALIBRATION_API_KEY` mappt `calibrationApi.calibrate()` auf den JWT-Session-Pfad und startet Feuchte (`moisture` / Alias `soil_moisture`) mit **`method: moisture_2point`** — konsistent zu `useCalibrationWizard` (`El Frontend/src/api/calibration.ts`). Altbestände / Operator-SQL: `docs/analysen/FIX-kalibrierungsflow-bodenfeuchte-operator-hinweis-2026-04-10.md`.
 
 ### Actuators (`/actuators`) - 13 Endpoints
 
@@ -632,6 +629,54 @@ Logout (optional alle Sessions).
   "logout_all": false
 }
 ```
+
+---
+
+### 1.7 GET /auth/api-keys
+
+Alle API-Keys auflisten (aktive + widerrufene, für Audit). Admin only.
+
+**Auth:** JWT (Admin)
+
+**Response 200:** `list[ApiKeyResponse]` — enthält id, key_prefix, owner_type, owner_id, scopes, last_used_at, revoked_at, created_at. **Kein Raw-Key** (nur beim Create zurückgegeben).
+
+---
+
+### 1.8 POST /auth/api-keys
+
+Neuen API-Key erstellen. Admin only. SHA256-Hash wird persistiert, Raw-Key wird **einmalig** zurückgegeben.
+
+**Auth:** JWT (Admin)
+
+**Request Body:**
+```json
+{
+  "owner_type": "esp",
+  "owner_id": "ESP_698EB4",
+  "scopes": ["sensor:write", "actuator:read"]
+}
+```
+
+| `owner_type` | Präfix | Verwendung |
+|-------------|--------|------------|
+| `esp` | `esp_` | ESP32-Devices |
+| `god_layer` | `god_` | God-Kaiser-Service |
+| `service` | `svc_` | Externe Services |
+
+**Response 201:** `ApiKeyCreateResponse` mit `raw_key` (einmalig), `id`, `key_prefix`, `owner_type`, `created_at`.
+
+---
+
+### 1.9 POST /auth/api-keys/{key_id}/revoke
+
+API-Key widerrufen (setzt `revoked_at`). Validierungsanfragen mit diesem Key schlagen danach mit 401 fehl.
+
+**Auth:** JWT (Admin)
+
+**Path:** `key_id` (UUID)
+
+**Response 200:** `{"status": "revoked", "id": "<uuid>"}`
+**404:** Key nicht gefunden. **409:** Key bereits widerrufen.
 
 ---
 

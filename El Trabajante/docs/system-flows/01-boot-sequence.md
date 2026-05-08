@@ -521,7 +521,7 @@ LOG_INFO("Configuration found - starting normal flow");
 **State Machine:**
 - Provisioning Timeout → `STATE_SAFE_MODE_PROVISIONING` (State 20, dokumentiert in `src/models/system_types.h`)
 - AP bleibt aktiv für manuelles Provisioning (unbegrenzt)
-- LED blinkt Fehler-Pattern (10× blink auf GPIO 2)
+- LED blinkt Fehler-Pattern (10× blink auf GPIO 5, via `HardwareConfig::LED_PIN`)
 - System State wird in NVS gespeichert mit `safe_mode_reason`
 
 **Provision Manager internals (`provision_manager.cpp`):**
@@ -531,7 +531,7 @@ LOG_INFO("Configuration found - starting normal flow");
   - `GET /status` exposes live telemetry (ESP ID, MAC, uptime, heap stats, current provisioning state)
   - `POST /reset` performs a factory reset when `{"confirm":true}` is supplied
 - mDNS advertises the host as `<esp-id-lowercase>.local` with `_http._tcp` and `_autoone._tcp` records so the AP can be discovered without typing the IP.
-- `waitForConfig()` enforces `AP_MODE_TIMEOUT_MS = 600000` (10 min). Each timeout increments `retry_count` and restarts AP mode up to `MAX_RETRY_COUNT = 3`. After the third timeout `enterSafeMode()` persists `STATE_SAFE_MODE` + `safe_mode_reason` to `system_config`, flashes GPIO2 ten times, and leaves the AP running for manual intervention.
+- `waitForConfig()` enforces `AP_MODE_TIMEOUT_MS = 600000` (10 min). Each timeout increments `retry_count` and restarts AP mode up to `MAX_RETRY_COUNT = 3`. After the third timeout `enterSafeMode()` persists `STATE_SAFE_MODE` + `safe_mode_reason` to `system_config`, flashes GPIO 5 (`HardwareConfig::LED_PIN`) ten times, and leaves the AP running for manual intervention.
 - Successful provisioning writes WiFi + optional zone data via `configManager.save*`, replies with JSON, delays `REBOOT_DELAY_MS = 2000`, then calls `ESP.restart()`.
 
 **Important:** If provisioning is needed, setup() STOPS here. Normal flow only continues if already provisioned.

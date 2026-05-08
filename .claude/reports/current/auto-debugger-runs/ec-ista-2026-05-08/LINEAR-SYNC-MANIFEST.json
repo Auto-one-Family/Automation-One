@@ -1,0 +1,108 @@
+{
+  "run_id": "ec-ista-2026-05-08",
+  "created_at": "2026-05-08",
+  "linear_project": {
+    "id": "2a333415-1223-4807-af85-bff5216c1f77",
+    "name": "Firmware Cleaning & Fixes",
+    "url": "https://linear.app/autoone/project/firmware-cleaning-and-fixes-deb017ce4369",
+    "team": "AutoOne"
+  },
+  "issues": [
+    {
+      "finding_id": "F1",
+      "linear_id": "AUT-276",
+      "title": "Firmware: require_actuator=true blockiert sensor-only Geräte dauerhaft in CONFIG_PENDING_AFTER_RESET",
+      "priority": "urgent",
+      "severity": "CRITICAL",
+      "category": "error",
+      "layer": "El Trabajante",
+      "url": "https://linear.app/autoone/issue/AUT-276/firmware-require-actuatortrue-blockiert-sensor-only-gerate-dauerhaft",
+      "code_ref": "El Trabajante/src/services/config/runtime_readiness_policy.cpp",
+      "log_ts": "20362ms"
+    },
+    {
+      "finding_id": "F2",
+      "linear_id": "AUT-277",
+      "title": "Firmware: Doppelter NVS-Write pro Sensor bei Config-Push (main.cpp + sensor_manager.cpp)",
+      "priority": "high",
+      "severity": "HIGH",
+      "category": "duplicate",
+      "layer": "El Trabajante",
+      "url": "https://linear.app/autoone/issue/AUT-277/firmware-doppelter-nvs-write-pro-sensor-bei-config-push-maincpp-sensor",
+      "code_ref": "El Trabajante/src/main.cpp:4327 + El Trabajante/src/services/sensor/sensor_manager.cpp:441",
+      "log_ts": "20040ms + 20082ms"
+    },
+    {
+      "finding_id": "F3",
+      "linear_id": "AUT-278",
+      "title": "Firmware: Doppelter NVS-Read ns=system_config bei heartbeat_ack Handler",
+      "priority": "medium",
+      "severity": "HIGH",
+      "category": "duplicate",
+      "layer": "El Trabajante",
+      "url": "https://linear.app/autoone/issue/AUT-278/firmware-doppelter-nvs-read-nssystem-config-bei-heartbeat-ack-handler",
+      "code_ref": "El Trabajante/src/main.cpp:2480-2481 + El Trabajante/src/services/config/config_manager.cpp:1279-1348",
+      "log_ts": "4205ms + 4217ms"
+    },
+    {
+      "finding_id": "F4",
+      "linear_id": "AUT-279",
+      "title": "Firmware: SafetyTask als NVS-Owner während Sensor-Config-Processing — Task-Kontext-Mismatch",
+      "priority": "medium",
+      "severity": "MEDIUM",
+      "category": "tracing-gap",
+      "layer": "El Trabajante",
+      "url": "https://linear.app/autoone/issue/AUT-279/firmware-safetytask-als-nvs-owner-wahrend-sensor-config-processing",
+      "code_ref": "El Trabajante/src/services/config/storage_manager.cpp:114",
+      "log_ts": "20040ms"
+    },
+    {
+      "finding_id": "F5",
+      "linear_id": "AUT-280",
+      "title": "Firmware: Doppelter Log 'Handling actuator configuration from MQTT' bei Config-Push",
+      "priority": "medium",
+      "severity": "MEDIUM",
+      "category": "duplicate",
+      "layer": "El Trabajante",
+      "url": "https://linear.app/autoone/issue/AUT-280/firmware-doppelter-log-handling-actuator-configuration-from-mqtt-bei",
+      "code_ref": "El Trabajante/src/main.cpp:4356 + El Trabajante/src/services/actuator/actuator_manager.cpp:955",
+      "log_ts": "20229ms + 20239ms"
+    },
+    {
+      "finding_id": "F6",
+      "linear_id": "AUT-281",
+      "title": "Cross-Layer: Server sendet measure-Commands bevor ESP CONFIG_PENDING verlassen hat",
+      "priority": "high",
+      "severity": "HIGH",
+      "category": "error",
+      "layer": "El Servador + El Trabajante",
+      "url": "https://linear.app/autoone/issue/AUT-281/cross-layer-server-sendet-measure-commands-bevor-esp-config-pending",
+      "code_ref": "El Servador/god_kaiser_server/src/services/sensor_scheduler_service.py:364-406",
+      "log_ts": "29008ms + 40470ms"
+    },
+    {
+      "finding_id": "F7",
+      "linear_id": "AUT-282",
+      "title": "Firmware: main.cpp Monolith — handleSensorConfig/handleActuatorConfig als lose Funktionen",
+      "priority": "low",
+      "severity": "LOW",
+      "category": "overcomplexity",
+      "layer": "El Trabajante",
+      "url": "https://linear.app/autoone/issue/AUT-282/firmware-maincpp-monolith",
+      "code_ref": "El Trabajante/src/main.cpp:4043-4353",
+      "log_ts": "N/A (structural)"
+    }
+  ],
+  "dedup_checked": [
+    {
+      "existing_issue": "AUT-59",
+      "status": "Done",
+      "relation": "AUT-59 löste offline_rules-only Blockade. F1 (AUT-276) ist der verbleibende sensor-only Fall ohne offline_rules — nicht abgedeckt."
+    },
+    {
+      "existing_issue": "AUT-61",
+      "status": "Done",
+      "relation": "AUT-61 deduplizierte Approval NVS Writes. F3 (AUT-278) ist ein anderer Pfad: doppelter NVS-Read beim heartbeat_ack, nicht Write."
+    }
+  ]
+}

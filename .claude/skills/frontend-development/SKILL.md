@@ -202,7 +202,6 @@ El Frontend/src/
 │   ├── useZoneDragDrop.ts
 │   ├── useSwipeNavigation.ts
 │   ├── useConfigResponse.ts
-│   ├── useCalibration.ts
 │   ├── useCalibrationWizard.ts   # Session-Flow; Bodenfeuchte: `moisture_2point`; Live-Messung: WS `calibration_measurement_*` nur bei Match `request_id`↔`intent_id`/`correlation_id`/`request_id`/Message-`correlation_id` (POST `/measure`)
 │   ├── useCommandPalette.ts
 │   ├── useContextMenu.ts

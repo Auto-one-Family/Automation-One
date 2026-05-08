@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # MQTT Topic Referenz
 
-> **Version:** 2.25 | **Aktualisiert:** 2026-05-06
+> **Version:** 2.26 | **Aktualisiert:** 2026-05-08
 > **Quellen:** `El Trabajante/docs/Mqtt_Protocoll.md`, `CLAUDE_SERVER.md` Section 4
 > **Verifiziert gegen:** `topic_builder.cpp`, `main.py`, `constants.py`
 > **Änderungen:** **AUT-117 (2026-05-06):** Topic `actuator/{gpio}/latched_offline` (ESP→Server, QoS 0) meldet Aktor-Latch-Zustand bei Disconnect (reason: `offline_rule_hold`/`safety_forced_off`/`manual_override`). Server: `ActuatorLatchedOfflineHandler` (Log + WS-Broadcast). Firmware: `publishLatchedOffline()` in `actuator_manager.cpp`. Zuvor: **AUT-118 (2026-04-28):** Bidirektionaler ACK-Flow für Emergency-Stop/Recovery: Topics `actuator/emergency/ack` (Section 2.6) und `actuator/recovery_confirm` (Section 2.7). Zuvor: **AUT-121 (2026-04-24):** Topic `system/heartbeat_metrics` (ESP→Server, QoS 0) koppelt Laufzeit-Counter vom Core-Heartbeat ab. Server: `HeartbeatMetricsHandler`; Firmware: `ENABLE_METRICS_SPLIT` → `publishHeartbeatMetrics()`. Zuvor: **PKG-01 (2026-04-20):** Neuer Topic `system/queue_pressure` (ESP→Server, QoS 1). Zuvor: **AUT-69 (2026-04-20):** `session/announce` Contract. Zuvor: **AUT-54 (2026-04-17):** Heartbeat Bootstrap-Fix. Zuvor: **PKG-05 (2026-04-14):** Heartbeat/ack Reject-Diagnose. Zuvor: **Epic1-05:** Intent-Orchestration-State `sent`; **MQTTCommandBridge** `resolve_ack`; Heartbeat-Felder; Intent-Outcome-Codes (2026-04-05). Früher: Contract-Härtung, Canonical-First Ingest (2026-04-04).

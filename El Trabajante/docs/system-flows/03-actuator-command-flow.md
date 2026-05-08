@@ -156,34 +156,34 @@ uint8_t ActuatorManager::extractGPIOFromTopic(const String& topic) const {
 
 ### STEP 3: Parse Command Payload
 
-**File:** `src/services/actuator/actuator_manager.cpp` (lines 492-497)
+**File:** `src/services/actuator/actuator_manager.cpp`
 
 **Code:**
 
 ```cpp
+StaticJsonDocument<256> doc;
+if (deserializeJson(doc, payload) != DeserializationError::Ok) {
+  LOG_E(TAG, "Failed to parse actuator command payload");
+  xSemaphoreGive(g_actuator_mutex);
+  return false;
+}
+JsonObjectConst obj = doc.as<JsonObjectConst>();
+
 ActuatorCommand command;
 command.gpio = gpio;
-command.command = extractJSONString(payload, "command");
-command.value = extractJSONFloat(payload, "value", 0.0f);
-command.duration_s = extractJSONUInt32(payload, "duration", 0);
+JsonHelpers::extractString(obj, "command", command.command);
+JsonHelpers::extractFloat(obj, "value", command.value, 0.0f);
+int duration_tmp = 0;
+JsonHelpers::extractInt(obj, "duration", duration_tmp, 0);
+command.duration_s = static_cast<uint32_t>(duration_tmp);
 command.timestamp = millis();
+JsonHelpers::extractString(obj, "correlation_id", command.correlation_id);
+JsonHelpers::extractString(obj, "issued_by", command.issued_by);
 ```
 
 **JSON Parsing:**
 
-Uses lightweight string parsing (not ArduinoJson) for performance:
-
-```cpp
-String extractJSONString(const String& json, const String& key) {
-  String pattern = "\"" + key + "\":";
-  int key_pos = json.indexOf(pattern);
-  if (key_pos == -1) {
-    return "";
-  }
-  // ... extract value between quotes or until comma/}
-  return value;
-}
-```
+Uses `ArduinoJson` (`StaticJsonDocument<256>`) with `JsonHelpers::extract*` from `src/utils/json_helpers.h` — same pattern as sensor/actuator config parsing. Malformed payloads are rejected early (`deserializeJson` failure → `return false`).
 
 **Parsed Command Structure:**
 
