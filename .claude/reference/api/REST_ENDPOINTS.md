@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # REST API Referenz
 
-> **Version:** 4.4 | **Aktualisiert:** 2026-05-08
+> **Version:** 4.5 | **Aktualisiert:** 2026-05-08
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
@@ -71,6 +71,7 @@ allowed-tools: Read
 | `/sensors/calibrate` | POST | JWT/API-Key | Sensor kalibrieren (body: esp_id, gpio, sensor_type, calibration_points) |
 | `/sensors/{sensor_id}/process` | POST | JWT | Sensor-Wert verarbeiten |
 | `/sensors/onewire/scan` | POST | JWT | OneWire-Bus scannen |
+| `/sensors/{esp_id}/{gpio}/measure` | POST | Operator | On-Demand-Messung auslösen (MQTT-Command an ESP; Ergebnis via WS sensor_data; AUT-298 Monitor-Mess-Button) |
 | `/sensors/{sensor_id}/trigger` | POST | JWT | Messung triggern |
 | `/sensors/by-esp/{esp_id}` | GET | JWT | Sensoren nach ESP |
 | `/sensors/{sensor_id}/alert-config` | PATCH | Operator | Per-Sensor Alert-Config setzen (Phase 4A.7) |
@@ -78,7 +79,7 @@ allowed-tools: Read
 | `/sensors/{sensor_id}/runtime` | GET | JWT | Runtime-Stats + Wartungsstatus (Phase 4A.8) |
 | `/sensors/{sensor_id}/runtime` | PATCH | Operator | Runtime-Stats aktualisieren (Wartungslog) |
 
-> **Calibration Sessions:** Mehrpunkt-Kalibrierung unter **`/api/v1/calibration/sessions`** (Router `calibration_sessions.py`). Request-Feld `method` z. B. **`moisture_2point`** (Bodenfeuchte: `derived` mit `dry_value`/`wet_value`), **`ec_2point`** (EC: Spannungs-basiert, Slope/Offset im Volt-Raum, ATC-Lookup — AUT-290 2026-05-08), **`ph_2point`** (pH: Nernst-Slope-Validierung ±15 %) oder **`linear_2point`** (andere Sensortypen). **`point_role` Server-Kontrakt: `dry|wet|buffer_high|buffer_low|reference|air`** (Validator in `AddPointRequest`/`UpdatePointRequest`). `calibrationApi.addPoint()` leitet via `toServerPointRole()` alle validen Rollen unverändert durch (Fallback: `dry`). Abgleich Feuchte-Wizard/Server: `docs/analysen/FIX-kalibrierungsflow-bodenfeuchte-2026-04-09.md`. **El Frontend:** Ohne `VITE_CALIBRATION_API_KEY` mappt `calibrationApi.calibrate()` auf den JWT-Session-Pfad und startet Feuchte (`moisture` / Alias `soil_moisture`) mit **`method: moisture_2point`** — konsistent zu `useCalibrationWizard` (`El Frontend/src/api/calibration.ts`). Altbestände / Operator-SQL: `docs/analysen/FIX-kalibrierungsflow-bodenfeuchte-operator-hinweis-2026-04-10.md`.
+> **Calibration Sessions:** Mehrpunkt-Kalibrierung unter **`/api/v1/calibration/sessions`** (Router `calibration_sessions.py`). Request-Feld `method` z. B. **`moisture_2point`** (Bodenfeuchte: `derived` mit `dry_value`/`wet_value`), **`ec_2point`** (EC: Spannungs-basiert, Slope/Offset im Volt-Raum, ATC-Lookup — AUT-290 2026-05-08), **`ph_2point`** (pH: Nernst-Slope-Validierung ±15 %) oder **`linear_2point`** (andere Sensortypen). **`point_role` Server-Kontrakt: `dry|wet|buffer_high|buffer_low|reference|air`** (Validator in `AddPointRequest`/`UpdatePointRequest`). `calibrationApi.addPoint()` leitet via `toServerPointRole()` alle validen Rollen unverändert durch (Fallback: `dry`). Abgleich Feuchte-Wizard/Server: `docs/analysen/FIX-kalibrierungsflow-bodenfeuchte-2026-04-09.md`. **El Frontend:** Ohne `VITE_CALIBRATION_API_KEY` mappt `calibrationApi.calibrate()` auf den JWT-Session-Pfad und startet Feuchte (`moisture` / Alias `soil_moisture`) mit **`method: moisture_2point`** — konsistent zu `useCalibrationWizard` (`El Frontend/src/api/calibration.ts`). Altbestände / Operator-SQL: `docs/analysen/FIX-kalibrierungsflow-bodenfeuchte-operator-hinweis-2026-04-10.md`. **AUT-299 (2026-05-08):** `StartSessionRequest` hat neu `calibration_temperature: float = 25.0` (°C, -10..50) — normalisiert EC/pH-Referenzwerte auf 25°C; `_compute_ec_1point`/`_compute_ec_2point` verwenden diesen Wert. **SensorConfig** hat neu optionales Feld `temp_sensor_config_id: UUID | null` — verknüpft einen Temperatursensor (auch cross-ESP) für automatische Temperaturkompensation (ATC) bei EC/pH-Messungen; `SensorConfigUpdate` + `SensorConfigResponse` exponieren dieses Feld.
 
 ### Actuators (`/actuators`) - 13 Endpoints
 

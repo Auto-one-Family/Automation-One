@@ -500,7 +500,11 @@ Neuer Sensor-Wert empfangen.
     "subzone_id": "zone_a",
     "config_id": "550e8400-e29b-41d4-a716-446655440000",
     "i2c_address": 68,
-    "onewire_address": "28FF123456780000"
+    "onewire_address": "28FF123456780000",
+    "metadata": {
+      "temp_compensation_value": 22.3,
+      "temp_source": "config:a1b2c3d4-e5f6-..."
+    }
   }
 }
 ```
@@ -512,6 +516,8 @@ Neuer Sensor-Wert empfangen.
 | `config_id` | string? | Sensor-Config UUID für address-based GPIO-Matching (R20-P3) |
 | `i2c_address` | number? | I2C-Adresse als Dezimalzahl (nur I2C-Sensoren: SHT31, BME280) |
 | `onewire_address` | string? | OneWire-ROM-Adresse als Hex-String (nur DS18B20) |
+| `metadata.temp_compensation_value` | number? | Temperaturwert (°C) der für ATC verwendet wurde (nur EC-Sensoren, AUT-299) |
+| `metadata.temp_source` | string? | ATC-Quelle: `"config:<uuid>"` (explizit verknüpft), `"same_esp"` (auto-discovery), `"default_25"` (Fallback — Sensor konfiguriert aber kein frischer Wert)
 
 ---
 
