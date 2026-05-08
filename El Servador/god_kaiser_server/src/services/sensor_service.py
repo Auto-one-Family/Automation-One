@@ -38,6 +38,8 @@ logger = get_logger(__name__)
 # A second /measure call within this window for the same (esp_id, gpio) is
 # rejected with HTTP 429 to prevent MQTT burst → ESP publish-queue overflow.
 _MEASURE_COOLDOWN_SECONDS: float = 10.0
+# Module-level dict so the cooldown survives across FastAPI request-scoped SensorService instances.
+_measure_cooldown: Dict[tuple[str, int], float] = {}
 
 
 class SensorService:
@@ -67,8 +69,6 @@ class SensorService:
         self.esp_repo = esp_repo
         self.publisher = publisher or Publisher()
         self.library_loader = library_loader or SensorLibraryLoader()
-        # Busy-guard: maps (esp_id, gpio) → timestamp of last trigger (AUT-302)
-        self._measure_cooldown: Dict[tuple[str, int], float] = {}
 
     # =========================================================================
     # Configuration Management
@@ -599,7 +599,7 @@ class SensorService:
         # 3. Busy-guard: reject rapid-fire duplicates within the cooldown window
         cooldown_key = (esp_id, gpio)
         now_ts = datetime.now(timezone.utc).timestamp()
-        last_triggered = self._measure_cooldown.get(cooldown_key)
+        last_triggered = _measure_cooldown.get(cooldown_key)
         if last_triggered is not None and (now_ts - last_triggered) < _MEASURE_COOLDOWN_SECONDS:
             logger.warning(
                 "trigger_measurement rejected — measurement busy: esp=%s gpio=%s "
@@ -623,7 +623,7 @@ class SensorService:
             raise RuntimeError(f"Failed to publish measurement command to {esp_id}/GPIO {gpio}")
 
         # Record timestamp for busy-guard — only after successful publish
-        self._measure_cooldown[cooldown_key] = datetime.now(timezone.utc).timestamp()
+        _measure_cooldown[cooldown_key] = datetime.now(timezone.utc).timestamp()
 
         logger.info(
             f"Measurement triggered for {esp_id}/GPIO {gpio} "
