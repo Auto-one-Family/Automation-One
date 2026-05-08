@@ -483,8 +483,12 @@ async def test_ec_1point_calibration_happy_path(db_session):
 
     derived = result["derived"]
     assert "cell_factor" in derived
-    # cell_factor = 1.413 / 1.5 = 0.942
-    assert 0.5 < derived["cell_factor"] < 2.0
+    # cell_factor = 1.413 / 1.5 = 0.942 — now validated against [0.1, 5.0]
+    assert 0.1 < derived["cell_factor"] < 5.0
+    # slope and offset are now included for ECSensorProcessor compatibility
+    assert "slope" in derived
+    assert "offset" in derived
+    assert derived["offset"] == 0.0
     assert "point_raw" in derived
     assert "point_reference" in derived
 
@@ -604,9 +608,12 @@ async def test_canonical_structure_ec_1point(db_session):
     assert isinstance(result["derived"], dict)
     assert "metadata" in result
 
-    # Check derived has cell_factor
+    # Check derived has cell_factor and voltage-based slope/offset
     assert "cell_factor" in result["derived"]
-    assert 0.5 <= result["derived"]["cell_factor"] <= 2.0
+    assert 0.1 <= result["derived"]["cell_factor"] <= 5.0
+    assert "slope" in result["derived"]
+    assert "offset" in result["derived"]
+    assert result["derived"]["offset"] == 0.0
 
 
 def test_compute_calibration_linear_moisture_maps_to_moisture_2point_derived():

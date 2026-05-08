@@ -469,6 +469,34 @@ class SensorRepository(BaseRepository[SensorConfig]):
         data = await self.get_latest_data(esp_id, gpio, sensor_type=sensor_type, limit=1)
         return data[0] if data else None
 
+    async def get_latest_reading_for_esp(
+        self,
+        esp_id: uuid.UUID,
+        sensor_type: str,
+    ) -> Optional[SensorData]:
+        """
+        Get latest sensor reading for an ESP device regardless of GPIO pin.
+
+        Used for cross-sensor lookups where the GPIO of the partner sensor is
+        unknown (e.g. ATC: find the latest temperature reading for an EC sensor's
+        ESP without knowing which GPIO the temperature sensor is on).
+
+        Args:
+            esp_id: ESP device UUID
+            sensor_type: Sensor type to search for (e.g. "temperature", "sht31_temp")
+
+        Returns:
+            Latest SensorData instance or None
+        """
+        stmt = (
+            select(SensorData)
+            .where(SensorData.esp_id == esp_id, SensorData.sensor_type == sensor_type)
+            .order_by(SensorData.timestamp.desc())
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_latest_readings_batch(
         self,
         sensor_keys: list[tuple[uuid.UUID, int]],

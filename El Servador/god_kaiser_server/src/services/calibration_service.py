@@ -1077,16 +1077,29 @@ class CalibrationService:
 
         cell_factor = reference / raw
 
-        # Validation: cell_factor should be reasonable (0.5 to 2.0)
-        if not (0.5 <= cell_factor <= 2.0):
+        # Validation: cell_factor range [0.1, 5.0] for DFR0300
+        # Typical DFR0300 ADC reading ~625 at 1413 µS/cm → cell_factor ≈ 2.26
+        # Old range [0.5, 2.0] was too narrow and caused false rejections.
+        if not (0.1 <= cell_factor <= 5.0):
             raise ValueError(
-                f"EC cell_factor {cell_factor:.3f} out of range [0.5, 2.0]. "
+                f"EC cell_factor {cell_factor:.3f} out of range [0.1, 5.0]. "
                 f"Check reference solution or probe."
             )
 
+        # Derive voltage-based slope/offset for ECSensorProcessor compatibility.
+        # ECSensorProcessor.process() checks for "slope" and "offset" keys.
+        # 1-point calibration: EC = slope * voltage + 0 (offset = 0, passes through origin)
+        ADC_MAX_12BIT = 4095.0
+        ADC_VOLTAGE_3V3 = 3.3
+        voltage = (raw / ADC_MAX_12BIT) * ADC_VOLTAGE_3V3
+        slope = reference / voltage  # EC (µS/cm) per volt
+        offset = 0.0
+
         return {
             "type": "ec_1point",
-            "cell_factor": round(cell_factor, 6),
+            "slope": round(slope, 4),
+            "offset": offset,
+            "cell_factor": round(cell_factor, 6),  # preserved for backward-compat reference
             "point_raw": raw,
             "point_reference": reference,
             "calibrated_at": datetime.now(timezone.utc).isoformat(),
@@ -1125,15 +1138,23 @@ class CalibrationService:
         raw_ref = float(ref_point["raw"])
         ref_ref = float(ref_point["reference"])
 
-        if abs(raw_ref - raw_air) < 1e-6:
-            raise ValueError("Raw values too close — cannot compute slope")
+        # Convert raw ADC to voltage before computing slope.
+        # ECSensorProcessor.process() applies voltage-based formula: EC = slope * voltage + offset
+        # Using raw ADC values would produce slope in EC/ADC-count (~1241x wrong).
+        ADC_MAX_12BIT = 4095.0
+        ADC_VOLTAGE_3V3 = 3.3
+        voltage_air = (raw_air / ADC_MAX_12BIT) * ADC_VOLTAGE_3V3
+        voltage_ref = (raw_ref / ADC_MAX_12BIT) * ADC_VOLTAGE_3V3
 
-        slope = (ref_ref - ref_air) / (raw_ref - raw_air)
-        offset = ref_air - slope * raw_air
+        if abs(voltage_ref - voltage_air) < 1e-6:
+            raise ValueError("Voltage values too close — cannot compute slope")
+
+        slope = (ref_ref - ref_air) / (voltage_ref - voltage_air)
+        offset = ref_air - slope * voltage_air
 
         return {
             "type": "ec_2point",
-            "slope": round(slope, 6),
+            "slope": round(slope, 4),
             "offset": round(offset, 4),
             "point_air_raw": raw_air,
             "point_air_ref": ref_air,

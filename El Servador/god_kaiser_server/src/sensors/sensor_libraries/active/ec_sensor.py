@@ -164,9 +164,16 @@ class ECSensorProcessor(BaseSensorProcessor):
 
         # Step 3: Apply calibration if available
         if calibration and "slope" in calibration and "offset" in calibration:
+            # Primary path: voltage-based calibration (ec_1point / ec_2point new format)
             slope = calibration["slope"]
             offset = calibration["offset"]
             ec_value = self._voltage_to_ec_calibrated(voltage, slope, offset)
+            calibrated = True
+        elif calibration and "cell_factor" in calibration:
+            # Backward-compat path: old ec_1point sessions that stored only cell_factor.
+            # cell_factor = reference_EC / raw_ADC → EC = cell_factor * raw_adc
+            cell_factor = calibration["cell_factor"]
+            ec_value = max(self.EC_MIN, min(self.EC_MAX, cell_factor * raw_value))
             calibrated = True
         else:
             # No calibration - use default conversion

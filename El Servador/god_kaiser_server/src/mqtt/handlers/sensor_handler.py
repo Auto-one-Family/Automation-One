@@ -305,6 +305,20 @@ class SensorDataHandler:
                         # Pi-Enhanced processing needed
                         processing_mode = "pi_enhanced"
 
+                        # ATC pre-lookup: for EC sensors, fetch latest temperature from
+                        # this ESP before calling the processor (session available here).
+                        ec_extra_params: dict = {}
+                        if sensor_type == "ec":
+                            atc_temp = await self._try_get_ec_temperature(esp_device, session)
+                            if atc_temp is not None:
+                                ec_extra_params["temperature_compensation"] = atc_temp
+                                logger.debug(
+                                    "[EC-ATC] Using temperature %.2f°C for ATC on %s GPIO %s",
+                                    atc_temp,
+                                    esp_id_str,
+                                    gpio,
+                                )
+
                         # Trigger Pi-Enhanced processing (pass raw_mode!)
                         pi_result = await self._trigger_pi_enhanced_processing(
                             esp_id_str,
@@ -313,6 +327,7 @@ class SensorDataHandler:
                             raw_value,
                             sensor_config,
                             raw_mode=raw_mode,  # Pass raw_mode to processor
+                            extra_params=ec_extra_params,
                         )
 
                         if pi_result:
@@ -879,6 +894,58 @@ class SensorDataHandler:
         except Exception as e:
             logger.warning(f"Failed to broadcast VPD data via WebSocket: {e}")
 
+    # ─── EC Temperature Compensation (ATC) ───────────────────────
+
+    # Max age for temperature reading used in EC automatic temperature compensation.
+    # EC is an on-demand sensor; allow a wider window than VPD since temperature
+    # rarely changes rapidly in a greenhouse environment.
+    _ATC_MAX_AGE = timedelta(minutes=5)
+
+    async def _try_get_ec_temperature(
+        self,
+        esp_device,
+        session,
+    ) -> Optional[float]:
+        """Look up the latest temperature reading for EC automatic temperature compensation.
+
+        Searches for the most recent temperature reading (sensor_type "temperature" or
+        "sht31_temp") on the same ESP device regardless of GPIO pin. Returns the
+        processed_value if the reading is within _ATC_MAX_AGE, otherwise None.
+
+        Args:
+            esp_device: ESPDevice ORM instance (provides device UUID)
+            session: Active async database session
+
+        Returns:
+            Temperature in °C as float, or None if unavailable or stale
+        """
+        sensor_repo = SensorRepository(session)
+        now_utc = datetime.now(timezone.utc)
+
+        for temp_type in ("temperature", "sht31_temp"):
+            reading = await sensor_repo.get_latest_reading_for_esp(
+                esp_id=esp_device.id,
+                sensor_type=temp_type,
+            )
+            if reading is None:
+                continue
+            if reading.processed_value is None:
+                continue
+            ts = reading.timestamp
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            age = now_utc - ts
+            if age > self._ATC_MAX_AGE:
+                logger.debug(
+                    "[EC-ATC] Temperature reading too stale (age=%.0fs > %.0fs), skipping ATC",
+                    age.total_seconds(),
+                    self._ATC_MAX_AGE.total_seconds(),
+                )
+                continue
+            return float(reading.processed_value)
+
+        return None
+
     # ─── Threshold Evaluation ─────────────────────────────────────
 
     async def _evaluate_thresholds_and_notify(
@@ -1333,6 +1400,7 @@ class SensorDataHandler:
         raw_value: float,
         sensor_config,
         raw_mode: bool = True,
+        extra_params: Optional[dict] = None,
     ) -> Optional[dict]:
         """
         Trigger Pi-Enhanced sensor processing.
@@ -1399,6 +1467,10 @@ class SensorDataHandler:
             # Always pass raw_mode to processor (Pi-Enhanced mode indicator)
             # For DS18B20: raw_mode=True means ESP sent 12-bit integer (400 = 25°C)
             processing_params["raw_mode"] = raw_mode
+
+            # Merge caller-supplied extra params (e.g. ATC temperature_compensation for EC)
+            if extra_params:
+                processing_params.update(extra_params)
 
             proc_calibration = None
             if sensor_config and sensor_config.calibration_data:
