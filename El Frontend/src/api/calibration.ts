@@ -4,7 +4,7 @@ import api from './index'
 export interface CalibrationPoint {
   raw: number
   reference: number
-  point_role?: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference'
+  point_role?: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference' | 'air'
   point_id?: string
 }
 
@@ -38,7 +38,7 @@ export interface CalibrationSessionResponse {
   expected_points: number
   points_collected?: number
   calibration_points: {
-    points: Array<CalibrationPoint & { id?: string; point_role?: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference' }>
+    points: Array<CalibrationPoint & { id?: string; point_role?: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference' | 'air' }>
     history?: Array<Record<string, unknown>>
   } | null
   calibration_result: Record<string, unknown> | null
@@ -55,6 +55,9 @@ export type CalibrationSessionMethod =
   | 'linear_2point'
   | 'moisture_2point'
   | 'offset'
+  | 'ph_2point'
+  | 'ec_1point'
+  | 'ec_2point'
   | string
 
 export interface StartSessionRequest {
@@ -68,7 +71,7 @@ export interface StartSessionRequest {
 export interface AddPointRequest {
   raw_value: number
   reference_value: number
-  point_role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference'
+  point_role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference' | 'air'
   overwrite?: boolean
   quality?: string
   intent_id?: string
@@ -79,7 +82,7 @@ export interface AddPointRequest {
 export interface UpdatePointRequest {
   raw_value: number
   reference_value: number
-  point_role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference'
+  point_role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference' | 'air'
   quality?: string
   intent_id?: string
   measured_at?: string
@@ -104,8 +107,7 @@ function normalizeCalibrationPoints(points: CalibrationPoint[]): CalibrationPoin
   )
 }
 
-/** Wie useCalibrationWizard: Alias fuer Server-Typ `moisture`. */
-function normalizeCalibrationSensorType(sensorType: string): string {
+export function normalizeCalibrationSensorType(sensorType: string): string {
   const normalized = sensorType.trim().toLowerCase()
   return normalized === 'soil_moisture' ? 'moisture' : normalized
 }

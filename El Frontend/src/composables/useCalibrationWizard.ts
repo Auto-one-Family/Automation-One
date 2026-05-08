@@ -14,7 +14,7 @@
  */
 
 import { ref, computed, onUnmounted, getCurrentInstance, watch, type Ref, type ComputedRef } from 'vue'
-import { calibrationApi } from '@/api/calibration'
+import { calibrationApi, normalizeCalibrationSensorType } from '@/api/calibration'
 import type { CalibrationPoint, CalibrateResponse } from '@/api/calibration'
 import { sensorsApi } from '@/api/sensors'
 import { formatUiApiError, toUiApiError } from '@/api/uiApiError'
@@ -37,7 +37,7 @@ export interface SensorTypePreset {
   point2Label?: string
   point2Ref?: number
   expectedPoints: 1 | 2
-  calibrationMethod: 'moisture_2point' | 'ph_2point' | 'ec_1point'
+  calibrationMethod: 'moisture_2point' | 'ph_2point' | 'ec_1point' | 'linear_2point'
   /** Number of ADC samples to average for one calibration point. Default: 1 (no averaging). EC sensors use 3. */
   sampleCount?: number
 }
@@ -162,7 +162,7 @@ export const SENSOR_TYPE_PRESETS: Record<string, SensorTypePreset> = {
     point2Label: 'Kochendes Wasser (100°C)',
     point2Ref: 100,
     expectedPoints: 2,
-    calibrationMethod: 'moisture_2point',
+    calibrationMethod: 'linear_2point',
   },
 }
 
@@ -190,12 +190,6 @@ const TERMINAL_SESSION_STATUSES = new Set(['applied', 'rejected', 'failed', 'exp
 
 /** Mindestabstand nach Mess-HTTP wie SensorValueCard (ESP + MQTT). */
 const MEASUREMENT_TRIGGER_COOLDOWN_MS = 2000
-
-function normalizeCalibrationSensorType(sensorType: string): string {
-  const normalized = sensorType.trim().toLowerCase()
-  return normalized === 'soil_moisture' ? 'moisture' : normalized
-}
-
 
 // ─── Composable ───────────────────────────────────────────────────────────────
 
@@ -658,14 +652,14 @@ export function useCalibrationWizard(
   }
 
   async function waitForTerminalSession(sessionId: string): Promise<Awaited<ReturnType<typeof calibrationApi.getSession>>> {
-    const maxAttempts = 10
+    const maxAttempts = 15
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       const session = await calibrationApi.getSession(sessionId)
       const normalizedStatus = String(session.status || '').toLowerCase()
       if (TERMINAL_SESSION_STATUSES.has(normalizedStatus)) {
         return session
       }
-      await new Promise((resolve) => setTimeout(resolve, 400))
+      await new Promise((resolve) => setTimeout(resolve, 500))
     }
     return calibrationApi.getSession(sessionId)
   }
@@ -735,15 +729,17 @@ export function useCalibrationWizard(
           lifecycleState.value = 'pending'
           lifecycleMessage.value = `Messung ${sampleIndex + 1}/${targetSampleCount} laeuft...`
 
-          const prevRaw = lastRawValue.value
+          const prevMeasurementAt = lastMeasurementAt.value
           const triggerResult = await sensorsApi.triggerMeasurement(selectedEspId.value, selectedGpio.value)
           measurementRequestId.value = triggerResult.request_id
 
-          // Wait for the WS handler (calibration_measurement_received) to update lastRawValue
+          // Wait for the WS handler (calibration_measurement_received) to signal a new measurement.
+          // Use lastMeasurementAt timestamp instead of raw value so that consecutive identical
+          // ADC readings (stable EC solution) are not mistaken for "no new measurement".
           const sampleReceived = await new Promise<number | null>((resolve) => {
             const start = Date.now()
             const poll = setInterval(() => {
-              if (lastRawValue.value !== prevRaw && lastRawValue.value !== null) {
+              if (lastMeasurementAt.value !== prevMeasurementAt && lastMeasurementAt.value !== null) {
                 clearInterval(poll)
                 resolve(lastRawValue.value)
               } else if (Date.now() - start > SAMPLE_TIMEOUT_MS) {
@@ -841,10 +837,13 @@ export function useCalibrationWizard(
   function goBack() {
     if (isSubmitting.value) return
 
+    const confirmTarget: WizardPhase =
+      (currentPreset.value?.expectedPoints ?? 2) === 1 ? 'point1' : 'point2'
+
     const backMap: Partial<Record<WizardPhase, WizardPhase>> = {
       point1: 'select',
       point2: 'point1',
-      confirm: 'point2',
+      confirm: confirmTarget,
       finalizing: 'confirm',
       error: 'confirm',
     }

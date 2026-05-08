@@ -80,6 +80,16 @@ const availableDevices = computed(() =>
 )
 
 const normalizedSelectedType = computed(() => String(selectedSensorType.value || '').toLowerCase())
+const ecDerived = computed(() => {
+  const cal = calibrationResult.value?.calibration as Record<string, unknown> | undefined
+  const derived = cal?.derived
+  return (derived && typeof derived === 'object') ? (derived as Record<string, unknown>) : null
+})
+const phDerived = computed(() => {
+  const cal = calibrationResult.value?.calibration as Record<string, unknown> | undefined
+  const derived = cal?.derived
+  return (derived && typeof derived === 'object') ? (derived as Record<string, unknown>) : null
+})
 const selectedDevice = computed(() =>
   availableDevices.value.find((device) => espStore.getDeviceId(device) === selectedEspId.value),
 )
@@ -577,33 +587,33 @@ defineExpose({
       </p>
 
       <!-- pH-specific results -->
-      <template v-if="selectedSensorType === 'ph' && calibrationResult?.calibration">
-            <div class="calibration-wizard__result-grid grid-auto-sm">
-          <div v-if="calibrationResult.calibration.slope !== undefined" class="calibration-wizard__result-item">
+      <template v-if="selectedSensorType === 'ph' && phDerived">
+        <div class="calibration-wizard__result-grid grid-auto-sm">
+          <div v-if="phDerived.slope !== undefined" class="calibration-wizard__result-item">
             <div class="calibration-wizard__result-label">Slope (mV/pH)</div>
-            <div class="calibration-wizard__result-value">{{ Number(calibrationResult.calibration.slope).toFixed(2) }}</div>
+            <div class="calibration-wizard__result-value">{{ Number(phDerived.slope).toFixed(2) }}</div>
             <div class="calibration-wizard__result-hint">Idealwert: -59,16 mV/pH</div>
           </div>
-          <div v-if="calibrationResult.calibration.offset !== undefined" class="calibration-wizard__result-item">
+          <div v-if="phDerived.offset !== undefined" class="calibration-wizard__result-item">
             <div class="calibration-wizard__result-label">Offset (mV)</div>
-            <div class="calibration-wizard__result-value">{{ Number(calibrationResult.calibration.offset).toFixed(2) }}</div>
+            <div class="calibration-wizard__result-value">{{ Number(phDerived.offset).toFixed(2) }}</div>
             <div class="calibration-wizard__result-hint">Kalibrier-Referenz</div>
           </div>
-          <div v-if="calibrationResult.calibration.slope_deviation_pct !== undefined" class="calibration-wizard__result-item">
+          <div v-if="phDerived.slope_deviation_pct !== undefined" class="calibration-wizard__result-item">
             <div class="calibration-wizard__result-label">Abweichung</div>
-            <div class="calibration-wizard__result-value">{{ Number(calibrationResult.calibration.slope_deviation_pct).toFixed(2) }}%</div>
+            <div class="calibration-wizard__result-value">{{ Number(phDerived.slope_deviation_pct).toFixed(2) }}%</div>
             <div class="calibration-wizard__result-hint">
-              {{ Number(calibrationResult.calibration.slope_deviation_pct) < 5 ? 'Ausgezeichnet' : Number(calibrationResult.calibration.slope_deviation_pct) < 15 ? 'Gut' : 'Abweichend (Signalaufbereitung)' }}
+              {{ Number(phDerived.slope_deviation_pct) < 5 ? 'Ausgezeichnet' : Number(phDerived.slope_deviation_pct) < 15 ? 'Gut' : 'Abweichend (Signalaufbereitung)' }}
             </div>
           </div>
         </div>
 
         <!-- Validation warnings from signal conditioning / non-Nernst sensors -->
         <div
-          v-if="Array.isArray(calibrationResult.calibration.validation_warnings) && (calibrationResult.calibration.validation_warnings as string[]).length > 0"
+          v-if="Array.isArray(phDerived.validation_warnings) && (phDerived.validation_warnings as string[]).length > 0"
           class="calibration-wizard__validation-warnings"
         >
-          <div v-for="(warning, i) in (calibrationResult.calibration.validation_warnings as string[])" :key="i" class="calibration-wizard__validation-warning">
+          <div v-for="(warning, i) in (phDerived.validation_warnings as string[])" :key="i" class="calibration-wizard__validation-warning">
             <AlertCircle :size="13" class="calibration-wizard__warning-icon" />
             <span>{{ warning }}</span>
           </div>
@@ -611,13 +621,19 @@ defineExpose({
       </template>
 
       <!-- EC-specific results -->
-      <template v-if="selectedSensorType === 'ec' && calibrationResult?.calibration">
+      <template v-if="selectedSensorType === 'ec' && ecDerived">
         <div class="calibration-wizard__result-grid">
-          <div v-if="calibrationResult.calibration.cell_factor !== undefined" class="calibration-wizard__result-item">
+          <div v-if="ecDerived.cell_factor !== undefined" class="calibration-wizard__result-item">
             <div class="calibration-wizard__result-label">Zellfaktor</div>
-            <div class="calibration-wizard__result-value">{{ Number(calibrationResult.calibration.cell_factor).toFixed(3) }}</div>
+            <div class="calibration-wizard__result-value">{{ Number(ecDerived.cell_factor).toFixed(3) }}</div>
             <div class="calibration-wizard__result-hint">
-              {{ Number(calibrationResult.calibration.cell_factor) >= 0.9 && Number(calibrationResult.calibration.cell_factor) <= 1.1 ? 'Gut' : Number(calibrationResult.calibration.cell_factor) >= 0.7 && Number(calibrationResult.calibration.cell_factor) <= 1.3 ? 'Reinigen empfohlen' : 'Sonde ersetzen' }}
+              {{
+                Number(ecDerived.cell_factor) >= 1.0 && Number(ecDerived.cell_factor) <= 4.0
+                  ? 'Gut'
+                  : Number(ecDerived.cell_factor) >= 0.5 && Number(ecDerived.cell_factor) <= 5.0
+                  ? 'Reinigen empfohlen'
+                  : 'Sonde ersetzen'
+              }}
             </div>
           </div>
         </div>
