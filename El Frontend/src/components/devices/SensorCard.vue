@@ -5,7 +5,7 @@
  * Config mode: Name, type, ESP-ID, GPIO, settings hint
  * Monitor mode: Name, live value, quality dot, sparkline, ESP-ID
  */
-import { computed, ref, type Component } from 'vue'
+import { computed, ref, watch, onUnmounted, type Component } from 'vue'
 import { Settings, ChevronRight, WifiOff, Clock, BellOff, Thermometer, Droplets, Wind, Sun, Gauge, Leaf, Activity, CircleDot, TrendingUp, TrendingDown, Minus, Info, Loader2, Scan, Check, X, AlertTriangle } from 'lucide-vue-next'
 import { isMockEspId } from '@/composables/useZoneGrouping'
 import type { SensorWithContext } from '@/composables/useZoneGrouping'
@@ -258,21 +258,54 @@ const isOnDemand = computed(() => props.sensor.operating_mode === 'on_demand')
 const isOnDemandStaleDue = computed(() => isOnDemand.value && props.sensor.is_stale === true && !isEspOffline.value)
 const isMeasuring = ref(false)
 const measureState = ref<'idle' | 'success' | 'error'>('idle')
+let measureTriggerTime = 0
+let measureTimeoutId: ReturnType<typeof setTimeout> | null = null
 const { success: toastSuccess, error: toastError } = useToast()
+
+function clearMeasureTimeout(): void {
+  if (measureTimeoutId !== null) {
+    clearTimeout(measureTimeoutId)
+    measureTimeoutId = null
+  }
+}
+
+// AUT-298 Finalitätsmodell: wait for WS sensor_data to arrive after trigger
+// Detected via reactive prop — store updates last_read when sensor_data event arrives
+watch(() => props.sensor.last_read, (newVal) => {
+  if (!isMeasuring.value || !newVal || !measureTriggerTime) return
+  const dataTs = new Date(newVal).getTime()
+  if (dataTs > measureTriggerTime) {
+    clearMeasureTimeout()
+    isMeasuring.value = false
+    measureState.value = 'success'
+    toastSuccess('Messwert empfangen')
+    setTimeout(() => { measureState.value = 'idle' }, 2000)
+  }
+})
+
+onUnmounted(clearMeasureTimeout)
 
 async function triggerMeasure(): Promise<void> {
   if (isMeasuring.value || isEspOffline.value) return
   isMeasuring.value = true
   measureState.value = 'idle'
+  measureTriggerTime = Date.now()
   try {
     await sensorsApi.triggerMeasurement(props.sensor.esp_id, props.sensor.gpio)
-    measureState.value = 'success'
-    toastSuccess('Messung ausgelöst')
+    // Command published to ESP — wait for WS sensor_data (finality via watch above)
+    measureTimeoutId = setTimeout(() => {
+      isMeasuring.value = false
+      measureState.value = 'error'
+      measureTriggerTime = 0
+      toastError('Kein Messwert erhalten (Timeout)')
+      setTimeout(() => { measureState.value = 'idle' }, 2000)
+    }, 10_000)
   } catch {
-    measureState.value = 'error'
-    toastError('Messung fehlgeschlagen')
-  } finally {
+    clearMeasureTimeout()
     isMeasuring.value = false
+    measureState.value = 'error'
+    measureTriggerTime = 0
+    toastError('Messung fehlgeschlagen')
     setTimeout(() => { measureState.value = 'idle' }, 2000)
   }
 }
