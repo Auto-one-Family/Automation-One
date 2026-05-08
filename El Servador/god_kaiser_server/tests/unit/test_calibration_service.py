@@ -339,12 +339,15 @@ async def test_ph_2point_calibration_happy_path(db_session):
         initiated_by="tester",
     )
 
-    # Realistic Nernst response (glass electrode):
-    # Higher pH → lower raw mV (negative slope per Nernst equation)
-    # pH 7.00 buffer (reference) at ~0 mV, pH 4.01 at ~178 mV (59.16 mV/pH * 3 units ≈ 177)
+    # DFR0300 pH sensor: higher pH → lower voltage (Nernst), raw = ADC counts (12-bit).
+    # pH 7.00 at ~2.5V → ADC 3103; pH 4.01 at ~2.68V → ADC 3325.
+    # Firmware sends raw ADC counts (0-4095), NOT millivolts.
+    # PHSensorProcessor converts: voltage = (raw/4095)*3.3, then pH = slope*V + offset.
+    # slope ≈ (7.00-4.01) / ((3103-3325)/4095*3.3) ≈ -16.7 pH/V
+    # measured_response = 1000/16.7 ≈ 59.8 mV/pH → deviation ≈ 1.1% from Nernst ✓
     session = await service.add_point(
         session_id=session.id,
-        raw=0.0,
+        raw=3103.0,  # pH 7.00 buffer at ~2.5 V → ADC 3103
         reference=7.00,
         point_role="buffer_high",
     )
@@ -352,7 +355,7 @@ async def test_ph_2point_calibration_happy_path(db_session):
 
     session = await service.add_point(
         session_id=session.id,
-        raw=178.0,
+        raw=3325.0,  # pH 4.01 buffer at ~2.68 V → ADC 3325
         reference=4.01,
         point_role="buffer_low",
     )
@@ -367,9 +370,6 @@ async def test_ph_2point_calibration_happy_path(db_session):
     assert result["method"] == "ph_2point"
 
     derived = result["derived"]
-    # slope = (7.00 - 4.01) / (0.0 - 178.0) = 2.99 / (-178.0) ≈ -0.01679 pH/mV
-    # This is close to Nernst ideal of 1/(-59.16) ≈ -0.01689 pH/mV
-    # Deviation: |(−0.01679 − (−0.01689))| / 0.01689 * 100 ≈ 0.6% ✓ within 15%
     assert derived["slope"] < 0  # Must be negative per Nernst
     assert "slope_deviation_pct" in derived
     assert derived["slope_deviation_pct"] <= 15.0
@@ -464,12 +464,13 @@ async def test_ec_1point_calibration_happy_path(db_session):
         initiated_by="tester",
     )
 
-    # Standard 1.413 mS/cm reference — raw must be in conductance units (mS/cm)
-    # so cell_factor = reference / raw falls in [0.5, 2.0]. raw=1.5 → cell_factor≈0.942.
+    # Standard 1413 µS/cm reference solution; raw=625 ADC counts (typical DFR0300 at 1413 µS/cm).
+    # cell_factor = 1413 / 625 = 2.2608 — within typical range [0.5, 10.0].
+    # Firmware sends raw ADC counts (12-bit, 0-4095), NOT processed EC values.
     session = await service.add_point(
         session_id=session.id,
-        raw=1.5,  # conductance in mS/cm
-        reference=1.413,  # mS/cm
+        raw=625.0,  # raw ADC count (12-bit ESP32, 0-4095)
+        reference=1413.0,  # µS/cm
         point_role="reference",
     )
     assert session.points_collected == 1
@@ -483,8 +484,8 @@ async def test_ec_1point_calibration_happy_path(db_session):
 
     derived = result["derived"]
     assert "cell_factor" in derived
-    # cell_factor = 1.413 / 1.5 = 0.942 — now validated against [0.1, 5.0]
-    assert 0.1 < derived["cell_factor"] < 5.0
+    # cell_factor = 1413 / 625 = 2.2608 — within typical range [0.5, 10.0]
+    assert 0.5 < derived["cell_factor"] < 10.0
     # slope and offset are now included for ECSensorProcessor compatibility
     assert "slope" in derived
     assert "offset" in derived
@@ -505,11 +506,11 @@ async def test_ec_1point_validation_cell_factor_range(db_session):
         expected_points=1,
     )
 
-    # Unrealistic: raw=1 with reference=100 → cell_factor = 100 (way too high)
+    # raw=1 ADC count with reference=200 µS/cm → cell_factor = 200 > hard limit 100 → COMPUTE_FAILED
     session = await service.add_point(
         session_id=session.id,
         raw=1.0,
-        reference=100.0,
+        reference=200.0,
         point_role="reference",
     )
 
@@ -587,11 +588,12 @@ async def test_canonical_structure_ec_1point(db_session):
         initiated_by="tester",
     )
 
-    # raw in conductance units (mS/cm); cell_factor = 1.413/1.5 ≈ 0.942 — in [0.5, 2.0]
+    # raw=625 ADC counts (12-bit ESP32); reference=1413 µS/cm → cell_factor ≈ 2.26
+    # Firmware sends raw ADC counts, NOT processed EC values.
     session = await service.add_point(
         session_id=session.id,
-        raw=1.5,
-        reference=1.413,
+        raw=625.0,
+        reference=1413.0,
         point_role="reference",
     )
 
@@ -610,7 +612,7 @@ async def test_canonical_structure_ec_1point(db_session):
 
     # Check derived has cell_factor and voltage-based slope/offset
     assert "cell_factor" in result["derived"]
-    assert 0.1 <= result["derived"]["cell_factor"] <= 5.0
+    assert 0.5 <= result["derived"]["cell_factor"] <= 10.0
     assert "slope" in result["derived"]
     assert "offset" in result["derived"]
     assert result["derived"]["offset"] == 0.0

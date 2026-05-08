@@ -24,13 +24,11 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, select, update
-
 from ...core.logging_config import get_logger
 from ...db.models.audit_log import AuditSeverity, AuditSourceType
-from ...db.models.esp import ESPDevice
 from ...db.models.sensor import SensorData
 from ...db.repositories.audit_log_repo import AuditLogRepository
+from ...db.repositories.multispeq_repo import MultispeQRepository
 from ...db.repositories.plant_repo import PlantRepository
 from ...schemas.common import DataResponse
 from ...services.multispeq_ingest_service import (
@@ -380,9 +378,10 @@ async def assign_plant_to_snapshot(
     db: DBSession,
     current_user: OperatorUser,
 ) -> DataResponse[dict]:
+    multispeq_repo = MultispeQRepository(db)
+
     # 1. Verify the snapshot row exists.
-    stmt = select(SensorData).where(SensorData.id == snapshot_id)
-    snapshot = (await db.execute(stmt)).scalar_one_or_none()
+    snapshot = await multispeq_repo.get_snapshot_by_id(snapshot_id)
     if snapshot is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -401,10 +400,9 @@ async def assign_plant_to_snapshot(
     previous_plant_id = snapshot.plant_id
 
     # 3. Apply the update.
-    await db.execute(
-        update(SensorData)
-        .where(SensorData.id == snapshot_id)
-        .values(plant_id=body.plant_id)
+    await multispeq_repo.assign_plant(
+        snapshot_id=snapshot_id,
+        plant_id=body.plant_id,
     )
     await db.commit()
 
@@ -465,9 +463,8 @@ async def get_multispeq_aggregates(
         "30d", description="Window: 7d | 30d | 90d | season"
     ),
 ) -> DataResponse[list[dict]]:
-    # 1. Validate group_by → resolve to actual column.
-    group_column = _AGGREGATE_GROUP_FIELDS.get(group_by)
-    if group_column is None:
+    # 1. Validate group_by early (mirrors the repo-side ValueError for fast 422).
+    if group_by not in _AGGREGATE_GROUP_FIELDS:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
@@ -479,59 +476,19 @@ async def get_multispeq_aggregates(
     # 2. Resolve date window.
     cutoff = _resolve_date_cutoff(date_range)
 
-    # 3. Build aggregate query — PostgreSQL percentile_cont WITHIN GROUP.
-    median_expr = func.percentile_cont(0.5).within_group(
-        SensorData.processed_value.asc()
-    )
-    q1_expr = func.percentile_cont(0.25).within_group(
-        SensorData.processed_value.asc()
-    )
-    q3_expr = func.percentile_cont(0.75).within_group(
-        SensorData.processed_value.asc()
-    )
-
-    stmt = (
-        select(
-            group_column.label("group_label"),
-            func.min(SensorData.processed_value).label("min"),
-            q1_expr.label("q1"),
-            median_expr.label("median"),
-            q3_expr.label("q3"),
-            func.max(SensorData.processed_value).label("max"),
-            func.count().label("n"),
+    # 3. Delegate to repository — raises ValueError for unknown group_by.
+    multispeq_repo = MultispeQRepository(db)
+    try:
+        data = await multispeq_repo.get_aggregates(
+            sensor_type=sensor_type,
+            cutoff=cutoff,
+            group_by=group_by,
         )
-        .join(ESPDevice, ESPDevice.id == SensorData.esp_id)
-        .where(
-            and_(
-                SensorData.sensor_type == sensor_type,
-                SensorData.timestamp >= cutoff,
-                SensorData.processed_value.is_not(None),
-                ESPDevice.status == _VIRTUAL_ESP_STATUS,
-            )
-        )
-        .group_by(group_column)
-        .order_by(group_column)
-    )
-
-    rows = (await db.execute(stmt)).all()
-
-    data: list[dict[str, Any]] = []
-    for row in rows:
-        label = row.group_label
-        # UUIDs (plant_id) and ints become strings for stable JSON output.
-        if label is not None and not isinstance(label, str):
-            label = str(label)
-        data.append(
-            {
-                "group_label": label,
-                "min": float(row.min) if row.min is not None else None,
-                "q1": float(row.q1) if row.q1 is not None else None,
-                "median": float(row.median) if row.median is not None else None,
-                "q3": float(row.q3) if row.q3 is not None else None,
-                "max": float(row.max) if row.max is not None else None,
-                "n": int(row.n),
-            }
-        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
 
     logger.info(
         "MultispeQ aggregates: sensor_type=%s group_by=%s range=%s -> %d groups",
@@ -571,28 +528,14 @@ async def get_multispeq_correlation(
     # gracefully tolerate heterogeneous metadata payloads (PhotosynQ exports
     # vary widely between protocols). For Stufe-1 dashboards the dataset size
     # is bounded by the date window and the virtual-ESP filter.
-    stmt = (
-        select(
-            SensorData.processed_value,
-            SensorData.sensor_metadata,
-            SensorData.plant_id,
-        )
-        .join(ESPDevice, ESPDevice.id == SensorData.esp_id)
-        .where(
-            and_(
-                SensorData.sensor_type == x_type,
-                SensorData.timestamp >= cutoff,
-                SensorData.processed_value.is_not(None),
-                ESPDevice.status == _VIRTUAL_ESP_STATUS,
-            )
-        )
-        .order_by(SensorData.timestamp.asc())
+    multispeq_repo = MultispeQRepository(db)
+    raw_rows = await multispeq_repo.get_correlation_data(
+        x_type=x_type,
+        cutoff=cutoff,
     )
 
-    rows = (await db.execute(stmt)).all()
-
     data: list[dict[str, Any]] = []
-    for processed_value, sensor_metadata, plant_id in rows:
+    for processed_value, sensor_metadata, plant_id in raw_rows:
         if not isinstance(sensor_metadata, dict):
             continue
         y_raw = sensor_metadata.get(y_metadata_key)

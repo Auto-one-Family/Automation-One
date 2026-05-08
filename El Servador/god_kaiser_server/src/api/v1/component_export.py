@@ -19,7 +19,6 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import select
 
 from ..deps import ActiveUser, DBSession
 from ...core.logging_config import get_logger
@@ -31,6 +30,7 @@ from ...db.repositories import (
     ActuatorRepository,
     ESPRepository,
     SensorRepository,
+    ZoneContextRepository,
 )
 
 logger = get_logger(__name__)
@@ -483,9 +483,8 @@ async def export_zones(
             zone_map[zid]["online_count"] += 1
 
     # Load zone contexts
-    stmt = select(ZoneContext)
-    result = await db.execute(stmt)
-    all_contexts = result.scalars().all()
+    zone_ctx_repo = ZoneContextRepository(db)
+    all_contexts = await zone_ctx_repo.list_all()
     context_map = {ctx.zone_id: ctx for ctx in all_contexts}
 
     zones: list[dict[str, Any]] = []
@@ -532,6 +531,7 @@ async def export_zone_detail(
     esp_repo = ESPRepository(db)
     sensor_repo = SensorRepository(db)
     actuator_repo = ActuatorRepository(db)
+    zone_ctx_repo = ZoneContextRepository(db)
 
     # Get all devices in zone
     devices = await esp_repo.get_by_zone(zone_id)
@@ -542,9 +542,7 @@ async def export_zone_detail(
         )
 
     # Get zone context
-    stmt = select(ZoneContext).where(ZoneContext.zone_id == zone_id)
-    result = await db.execute(stmt)
-    zone_context = result.scalar_one_or_none()
+    zone_context = await zone_ctx_repo.get_by_zone_id(zone_id)
 
     # Build component list
     components: list[dict[str, Any]] = []
@@ -589,6 +587,9 @@ async def export_system_description(
     with all zones, devices, component counts, and operational status.
     """
     esp_repo = ESPRepository(db)
+    sensor_repo = SensorRepository(db)
+    actuator_repo = ActuatorRepository(db)
+    zone_ctx_repo = ZoneContextRepository(db)
 
     # Get all devices
     all_devices = await esp_repo.get_all()
@@ -609,19 +610,12 @@ async def export_system_description(
         else:
             offline_devices += 1
 
-        # Count sensors/actuators via relationships
-        stmt_s = select(SensorConfig).where(SensorConfig.esp_id == device.id)
-        result_s = await db.execute(stmt_s)
-        total_sensors += len(result_s.scalars().all())
-
-        stmt_a = select(ActuatorConfig).where(ActuatorConfig.esp_id == device.id)
-        result_a = await db.execute(stmt_a)
-        total_actuators += len(result_a.scalars().all())
+        # Count sensors/actuators via repository methods
+        total_sensors += len(await sensor_repo.get_by_esp(device.id))
+        total_actuators += len(await actuator_repo.get_by_esp(device.id))
 
     # Load zone contexts
-    stmt = select(ZoneContext)
-    result = await db.execute(stmt)
-    all_contexts = result.scalars().all()
+    all_contexts = await zone_ctx_repo.list_all()
 
     zones_with_context = len(all_contexts)
     active_growth_phases = set()

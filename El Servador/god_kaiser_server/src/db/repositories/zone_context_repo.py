@@ -34,6 +34,12 @@ class ZoneContextRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def list_all(self) -> List[ZoneContext]:
+        """Return all ZoneContext rows without pagination."""
+        stmt = select(ZoneContext).order_by(ZoneContext.zone_id)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_all(self, page: int = 1, page_size: int = 50) -> tuple[List[ZoneContext], int]:
         """Return paginated list and total count."""
         count_stmt = select(func.count()).select_from(ZoneContext)

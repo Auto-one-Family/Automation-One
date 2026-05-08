@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import and_, desc, func, select
+
 
 from ...core.logging_config import get_logger
 from ...db.models.audit_log import AuditEventType, AuditLog, AuditSeverity, AuditSourceType
@@ -318,21 +318,12 @@ async def list_audit_logs(
     if end_time:
         conditions.append(AuditLog.created_at <= end_time)
 
-    # Count total
-    count_stmt = select(func.count(AuditLog.id))
-    if conditions:
-        count_stmt = count_stmt.where(and_(*conditions))
-    count_result = await db.execute(count_stmt)
-    total = count_result.scalar_one()
-
-    # Get paginated data
-    offset = (page - 1) * page_size
-    data_stmt = select(AuditLog).order_by(desc(AuditLog.created_at)).offset(offset).limit(page_size)
-    if conditions:
-        data_stmt = data_stmt.where(and_(*conditions))
-
-    data_result = await db.execute(data_stmt)
-    logs = list(data_result.scalars().all())
+    audit_repo = AuditLogRepository(db)
+    logs, total = await audit_repo.get_paginated(
+        conditions=conditions,
+        page=page,
+        page_size=page_size,
+    )
 
     # Convert to response models
     response_data = [

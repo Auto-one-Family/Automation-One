@@ -38,6 +38,11 @@ _ROLE_PENDING_OVERWRITES: dict[tuple[uuid.UUID, str], int] = {}
 _ROLE_PENDING_GUARD = asyncio.Lock()
 _OVERWRITE_ARBITRATION_WINDOW_SECONDS = 0.100
 
+# ESP32 ADC constants — shared by all voltage-based calibration computations (pH, EC).
+# Must match ECSensorProcessor / PHSensorProcessor._adc_to_voltage() (12-bit path).
+_ADC_MAX = 4095.0
+_ADC_VOLTAGE = 3.3
+
 
 class CalibrationError(Exception):
     """Base exception for calibration service errors."""
@@ -982,11 +987,9 @@ class CalibrationService:
         if abs(raw_high - raw_low) < 1e-6:
             raise ValueError("Raw values too close — cannot compute slope")
 
-        # Convert raw ADC (0–4095) to voltage (V) — matches PHSensorProcessor._adc_to_voltage
-        _ADC_MAX = 4095.0
-        _VOLTAGE_RANGE = 3.3
-        voltage_high = (raw_high / _ADC_MAX) * _VOLTAGE_RANGE
-        voltage_low = (raw_low / _ADC_MAX) * _VOLTAGE_RANGE
+        # Convert raw ADC (0–4095) to voltage — matches PHSensorProcessor._adc_to_voltage
+        voltage_high = (raw_high / _ADC_MAX) * _ADC_VOLTAGE
+        voltage_low = (raw_low / _ADC_MAX) * _ADC_VOLTAGE
 
         # Linear regression in voltage space: pH = slope * voltage_V + offset
         slope = (ref_high - ref_low) / (voltage_high - voltage_low)
@@ -1045,15 +1048,22 @@ class CalibrationService:
     @staticmethod
     def _compute_ec_1point(points: list[dict]) -> dict:
         """
-        EC 1-point calibration using cell factor.
+        EC 1-point calibration.
 
-        Formula: EC = cell_factor * raw_value
-        cell_factor = reference_value / raw_value
+        raw is the raw ADC count (0–4095, 12-bit ESP32 ADC) — matching what the
+        firmware sends in the MQTT sensor response ("raw" field).
 
-        Validation: cell_factor must be between 0.5 and 2.0
+        Derives voltage-based slope/offset: EC = slope * voltage + offset (offset = 0)
+        and also stores cell_factor for backward-compatibility inspection.
+
+        cell_factor = reference_EC / raw_ADC_count.
+        Typical DFR0300: raw ~625 at 1413 µS/cm → cell_factor ≈ 2.26.
+        Valid range: [0.01, 100.0] — hard stop only for physically impossible values
+        (sensor reads <1% of expected ADC at reference EC).
+        Values outside [0.5, 10.0] generate a warning but do not block calibration.
 
         Raises:
-            ValueError: If cell_factor is out of acceptable range
+            ValueError: If raw is zero, cell_factor is non-positive, or exceeds hard limit
         """
         if len(points) < 1:
             raise ValueError("Need at least 1 point for EC 1-point calibration")
@@ -1073,25 +1083,45 @@ class CalibrationService:
         reference = float(ref_point["reference"])
 
         if abs(raw) < 1e-6:
-            raise ValueError("Raw value too close to zero — cannot compute cell factor")
+            raise ValueError("Raw ADC value too close to zero — sensor may be disconnected")
 
+        if reference <= 0:
+            raise ValueError("Reference EC value must be positive")
+
+        # cell_factor = reference_EC / raw_ADC — only used for validation and backward compat.
+        # Hard limit: cell_factor > 100 means ADC < 1% of expected response → sensor issue.
         cell_factor = reference / raw
-
-        # Validation: cell_factor range [0.1, 5.0] for DFR0300
-        # Typical DFR0300 ADC reading ~625 at 1413 µS/cm → cell_factor ≈ 2.26
-        # Old range [0.5, 2.0] was too narrow and caused false rejections.
-        if not (0.1 <= cell_factor <= 5.0):
+        _HARD_LIMIT = 100.0
+        if cell_factor <= 0:
             raise ValueError(
-                f"EC cell_factor {cell_factor:.3f} out of range [0.1, 5.0]. "
-                f"Check reference solution or probe."
+                f"EC cell_factor {cell_factor:.3f} is not positive. "
+                f"Ensure raw and reference values are not swapped."
+            )
+        if cell_factor > _HARD_LIMIT:
+            raise ValueError(
+                f"EC cell_factor {cell_factor:.3f} exceeds hard limit {_HARD_LIMIT:.0f}. "
+                f"Raw ADC {raw:.0f} is far too low for reference {reference:.1f} µS/cm. "
+                f"Check probe connection and ensure sensor is submerged in reference solution."
+            )
+
+        # Soft warning: outside typical DFR0300-class range [0.5, 10.0].
+        validation_warnings: list[str] = []
+        _TYPICAL_MIN = 0.5
+        _TYPICAL_MAX = 10.0
+        if not (_TYPICAL_MIN <= cell_factor <= _TYPICAL_MAX):
+            validation_warnings.append(
+                f"EC cell_factor {cell_factor:.3f} is outside typical range "
+                f"[{_TYPICAL_MIN}, {_TYPICAL_MAX}]. "
+                f"Typical DFR0300 reads ADC ~625 at 1413 µS/cm (cell_factor ≈ 2.26). "
+                f"Check probe connection and reference solution quality. "
+                f"Calibration accepted with reduced confidence."
             )
 
         # Derive voltage-based slope/offset for ECSensorProcessor compatibility.
-        # ECSensorProcessor.process() checks for "slope" and "offset" keys.
-        # 1-point calibration: EC = slope * voltage + 0 (offset = 0, passes through origin)
-        ADC_MAX_12BIT = 4095.0
-        ADC_VOLTAGE_3V3 = 3.3
-        voltage = (raw / ADC_MAX_12BIT) * ADC_VOLTAGE_3V3
+        # ECSensorProcessor.process() converts raw ADC → voltage, then applies:
+        #   EC = slope * voltage + offset
+        # 1-point: passes through origin (offset = 0).
+        voltage = (raw / _ADC_MAX) * _ADC_VOLTAGE
         slope = reference / voltage  # EC (µS/cm) per volt
         offset = 0.0
 
@@ -1099,9 +1129,10 @@ class CalibrationService:
             "type": "ec_1point",
             "slope": round(slope, 4),
             "offset": offset,
-            "cell_factor": round(cell_factor, 6),  # preserved for backward-compat reference
+            "cell_factor": round(cell_factor, 6),
             "point_raw": raw,
             "point_reference": reference,
+            "validation_warnings": validation_warnings,
             "calibrated_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -1110,11 +1141,12 @@ class CalibrationService:
         """
         EC 2-point calibration (air + reference).
 
-        Formula: EC = slope * raw + offset
-        Air point (0 mS/cm) provides offset; reference provides slope.
+        Converts raw ADC to voltage first, then computes:
+        EC = slope * voltage + offset
+        Air point (0 µS/cm reference) pins the offset; reference solution pins the slope.
 
         Raises:
-            ValueError: If points are invalid or too close
+            ValueError: If points are invalid or voltages too close
         """
         if len(points) < 2:
             raise ValueError("Need at least 2 points for EC 2-point calibration")
@@ -1141,10 +1173,8 @@ class CalibrationService:
         # Convert raw ADC to voltage before computing slope.
         # ECSensorProcessor.process() applies voltage-based formula: EC = slope * voltage + offset
         # Using raw ADC values would produce slope in EC/ADC-count (~1241x wrong).
-        ADC_MAX_12BIT = 4095.0
-        ADC_VOLTAGE_3V3 = 3.3
-        voltage_air = (raw_air / ADC_MAX_12BIT) * ADC_VOLTAGE_3V3
-        voltage_ref = (raw_ref / ADC_MAX_12BIT) * ADC_VOLTAGE_3V3
+        voltage_air = (raw_air / _ADC_MAX) * _ADC_VOLTAGE
+        voltage_ref = (raw_ref / _ADC_MAX) * _ADC_VOLTAGE
 
         if abs(voltage_ref - voltage_air) < 1e-6:
             raise ValueError("Voltage values too close — cannot compute slope")

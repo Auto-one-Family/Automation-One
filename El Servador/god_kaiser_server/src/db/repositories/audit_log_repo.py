@@ -535,6 +535,48 @@ class AuditLogRepository(BaseRepository[AuditLog]):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_paginated(
+        self,
+        conditions: list,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[AuditLog], int]:
+        """
+        Get paginated audit logs with optional filter conditions.
+
+        Executes a count query and a data query in one method, removing
+        the need for direct ``db.execute`` calls in API endpoints.
+
+        Args:
+            conditions: List of SQLAlchemy filter expressions (may be empty).
+            page: 1-based page number.
+            page_size: Number of items per page.
+
+        Returns:
+            Tuple of (list of AuditLog instances, total count).
+        """
+        # Count total matching rows.
+        count_stmt = select(func.count(AuditLog.id))
+        if conditions:
+            count_stmt = count_stmt.where(and_(*conditions))
+        count_result = await self.session.execute(count_stmt)
+        total = count_result.scalar_one()
+
+        # Fetch paginated rows ordered newest-first.
+        offset = (page - 1) * page_size
+        data_stmt = (
+            select(AuditLog)
+            .order_by(desc(AuditLog.created_at))
+            .offset(offset)
+            .limit(page_size)
+        )
+        if conditions:
+            data_stmt = data_stmt.where(and_(*conditions))
+        data_result = await self.session.execute(data_stmt)
+        logs = list(data_result.scalars().all())
+
+        return logs, total
+
     # =========================================================================
     # Statistics Methods
     # =========================================================================

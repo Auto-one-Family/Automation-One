@@ -318,6 +318,13 @@ class SensorDataHandler:
                                     esp_id_str,
                                     gpio,
                                 )
+                            else:
+                                ec_extra_params["temperature_compensation"] = 25.0  # ECSensorProcessor.REFERENCE_TEMP fallback
+                                logger.debug(
+                                    "[EC-ATC] No temperature sensor available — using reference temp 25.0°C for ATC on %s GPIO %s",
+                                    esp_id_str,
+                                    gpio,
+                                )
 
                         # Trigger Pi-Enhanced processing (pass raw_mode!)
                         pi_result = await self._trigger_pi_enhanced_processing(

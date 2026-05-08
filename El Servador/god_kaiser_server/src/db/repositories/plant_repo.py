@@ -10,10 +10,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.plant import Plant
+from ..models.sensor import SensorData
 from .base_repo import BaseRepository
 
 
@@ -133,6 +134,117 @@ class PlantRepository(BaseRepository[Plant]):
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def get_sensor_data_for_plant(
+        self,
+        plant_id: uuid.UUID,
+        cutoff: datetime,
+        limit: int,
+    ) -> list[SensorData]:
+        """
+        Get sensor_data rows for a plant within a time window.
+
+        Args:
+            plant_id: Plant UUID (matches ``sensor_data.plant_id``).
+            cutoff: Earliest timestamp to include (inclusive).
+            limit: Maximum number of rows to return (newest first).
+
+        Returns:
+            List of ``SensorData`` instances ordered by timestamp descending.
+        """
+        stmt = (
+            select(SensorData)
+            .where(
+                and_(
+                    SensorData.plant_id == plant_id,
+                    SensorData.timestamp >= cutoff,
+                )
+            )
+            .order_by(SensorData.timestamp.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_zone_phase_histogram(
+        self,
+        zone_id: str,
+    ) -> dict[str, int]:
+        """
+        Return a phase-count histogram for all active plants in a zone.
+
+        Plants are resolved via ``SubzoneConfig.parent_zone_id`` joined on
+        ``Plant.subzone_id``.  Only non-soft-deleted plants are counted.
+
+        Args:
+            zone_id: Zone identifier string.
+
+        Returns:
+            Dict mapping ``phase`` (str) to count (int).  Empty dict when
+            the zone has no active plants.
+        """
+        # Local import — SubzoneConfig is used only here and in the one
+        # other zone-plant method to avoid polluting the module-level imports.
+        from ..models.subzone import SubzoneConfig
+
+        stmt = (
+            select(Plant.phase, func.count(Plant.plant_id))
+            .join(SubzoneConfig, SubzoneConfig.id == Plant.subzone_id)
+            .where(
+                and_(
+                    SubzoneConfig.parent_zone_id == zone_id,
+                    Plant.deleted_at.is_(None),
+                )
+            )
+            .group_by(Plant.phase)
+        )
+        result = await self.session.execute(stmt)
+        return {phase: int(count) for phase, count in result.all()}
+
+    async def get_zone_avg_phi2(
+        self,
+        zone_id: str,
+        phi2_sensor_type: str,
+        cutoff: datetime,
+    ) -> Optional[float]:
+        """
+        Return the average ``processed_value`` of phi2 sensor readings for
+        plants in a given zone over a time window.
+
+        Uses a subquery to collect relevant plant IDs first, then aggregates
+        ``sensor_data`` to avoid accidental cross-products.
+
+        Args:
+            zone_id: Zone identifier string.
+            phi2_sensor_type: ``sensor_type`` value to filter on (e.g. ``"phi2"``).
+            cutoff: Only include readings at or after this timestamp.
+
+        Returns:
+            Average as ``float`` or ``None`` if no matching rows exist.
+        """
+        from ..models.subzone import SubzoneConfig
+
+        plant_id_stmt = (
+            select(Plant.plant_id)
+            .join(SubzoneConfig, SubzoneConfig.id == Plant.subzone_id)
+            .where(
+                and_(
+                    SubzoneConfig.parent_zone_id == zone_id,
+                    Plant.deleted_at.is_(None),
+                )
+            )
+        )
+        avg_stmt = select(func.avg(SensorData.processed_value)).where(
+            and_(
+                SensorData.plant_id.in_(plant_id_stmt),
+                SensorData.sensor_type == phi2_sensor_type,
+                SensorData.timestamp >= cutoff,
+                SensorData.processed_value.isnot(None),
+            )
+        )
+        result = await self.session.execute(avg_stmt)
+        avg_value = result.scalar_one_or_none()
+        return float(avg_value) if avg_value is not None else None
 
     async def soft_delete(
         self,

@@ -20,15 +20,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
-from sqlalchemy import and_, func, select
-
 from ...core.logging_config import get_logger
 from ...db.models.audit_log import (
     AuditSeverity,
     AuditSourceType,
 )
-from ...db.models.plant import Plant, PlantLifecycleEvent
-from ...db.models.sensor import SensorData
+from ...db.models.plant import PlantLifecycleEvent
 from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...db.repositories.plant_repo import PlantRepository
 from ...schemas.plant import (
@@ -439,19 +436,11 @@ async def get_plant_measurements(
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
-    stmt = (
-        select(SensorData)
-        .where(
-            and_(
-                SensorData.plant_id == plant_id,
-                SensorData.timestamp >= cutoff,
-            )
-        )
-        .order_by(SensorData.timestamp.desc())
-        .limit(limit)
+    rows = await plant_repo.get_sensor_data_for_plant(
+        plant_id=plant_id,
+        cutoff=cutoff,
+        limit=limit,
     )
-    result = await db.execute(stmt)
-    rows = list(result.scalars().all())
 
     measurements = [
         PlantMeasurementEntry(
@@ -618,53 +607,19 @@ async def get_zone_plant_summary(
     db: DBSession,
     _user: ActiveUser,
 ) -> ZonePlantSummaryResponse:
-    # Local import keeps the SubzoneConfig dependency near its single
-    # use-site and avoids polluting the module-level import graph.
-    from ...db.models.subzone import SubzoneConfig
+    plant_repo = PlantRepository(db)
 
-    # Phase histogram + plant_count in a single grouped query.
-    phase_stmt = (
-        select(Plant.phase, func.count(Plant.plant_id))
-        .join(SubzoneConfig, SubzoneConfig.id == Plant.subzone_id)
-        .where(
-            and_(
-                SubzoneConfig.parent_zone_id == zone_id,
-                Plant.deleted_at.is_(None),
-            )
-        )
-        .group_by(Plant.phase)
-    )
-    phase_result = await db.execute(phase_stmt)
-    phases: dict[str, int] = {phase: int(count) for phase, count in phase_result.all()}
+    phases = await plant_repo.get_zone_phase_histogram(zone_id)
     plant_count = sum(phases.values())
 
-    # Average phi2 over the last 30 days for plants in this zone. We use a
-    # subquery to collect the relevant plant IDs first; this avoids
-    # accidental cross-products when sensor_data has many rows per plant.
     avg_phi2: Optional[float] = None
     if plant_count > 0:
-        plant_id_stmt = (
-            select(Plant.plant_id)
-            .join(SubzoneConfig, SubzoneConfig.id == Plant.subzone_id)
-            .where(
-                and_(
-                    SubzoneConfig.parent_zone_id == zone_id,
-                    Plant.deleted_at.is_(None),
-                )
-            )
-        )
         cutoff = datetime.now(timezone.utc) - timedelta(days=_PHI2_WINDOW_DAYS)
-        avg_stmt = select(func.avg(SensorData.processed_value)).where(
-            and_(
-                SensorData.plant_id.in_(plant_id_stmt),
-                SensorData.sensor_type == _PHI2_SENSOR_TYPE,
-                SensorData.timestamp >= cutoff,
-                SensorData.processed_value.isnot(None),
-            )
+        avg_phi2 = await plant_repo.get_zone_avg_phi2(
+            zone_id=zone_id,
+            phi2_sensor_type=_PHI2_SENSOR_TYPE,
+            cutoff=cutoff,
         )
-        avg_result = await db.execute(avg_stmt)
-        avg_value = avg_result.scalar_one_or_none()
-        avg_phi2 = float(avg_value) if avg_value is not None else None
 
     return ZonePlantSummaryResponse(
         zone_id=zone_id,
