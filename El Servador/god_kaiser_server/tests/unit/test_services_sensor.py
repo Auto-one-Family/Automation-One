@@ -11,6 +11,7 @@ Tests the SensorService business logic layer including:
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
+import src.services.sensor_service as _sensor_service_mod
 from src.services.sensor_service import SensorService, _MEASURE_COOLDOWN_SECONDS
 from src.core.exceptions import MeasurementBusyError
 
@@ -732,7 +733,7 @@ class TestSensorServiceBusyGuard:
 
         # Inject an expired cooldown entry directly
         expired_ts = time.time() - _MEASURE_COOLDOWN_SECONDS - 1.0
-        service._measure_cooldown[("ESP_BUSY02", 11)] = expired_ts
+        _sensor_service_mod._measure_cooldown[("ESP_BUSY02", 11)] = expired_ts
 
         with patch("src.services.sensor_service.CommandContractRepository") as repo_cls:
             repo_cls.return_value.record_intent_publish_sent = AsyncMock()
@@ -750,7 +751,7 @@ class TestSensorServiceBusyGuard:
 
         # Pre-fill cooldown for gpio=20
         import time
-        service._measure_cooldown[("ESP_BUSY03", 20)] = time.time()
+        _sensor_service_mod._measure_cooldown[("ESP_BUSY03", 20)] = time.time()
 
         # gpio=21 on the same ESP must not be blocked
         with patch("src.services.sensor_service.CommandContractRepository") as repo_cls:
