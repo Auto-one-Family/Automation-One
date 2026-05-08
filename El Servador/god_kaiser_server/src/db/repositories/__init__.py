@@ -3,6 +3,7 @@ Repository Layer Exports
 """
 
 from .actuator_repo import ActuatorRepository
+from .api_key_repo import ApiKeyRepository
 from .calibration_session_repo import CalibrationSessionRepository
 from .audit_log_repo import AuditLogRepository
 from .base_repo import BaseRepository
@@ -14,6 +15,7 @@ from .esp_heartbeat_repo import ESPHeartbeatRepository
 from .esp_repo import ESPRepository
 from .logic_repo import LogicRepository
 from .notification_repo import NotificationPreferencesRepository, NotificationRepository
+from .multispeq_repo import MultispeQRepository
 from .plant_repo import PlantRepository
 from .sensor_repo import SensorRepository
 from .sensor_type_defaults_repo import SensorTypeDefaultsRepository
@@ -26,6 +28,7 @@ from .zone_context_repo import ZoneContextRepository
 from .zone_repo import ZoneRepository
 
 __all__ = [
+    "ApiKeyRepository",
     "BaseRepository",
     "CommandContractRepository",
     "DashboardRepository",
@@ -41,6 +44,7 @@ __all__ = [
     "LogicRepository",
     "NotificationPreferencesRepository",
     "NotificationRepository",
+    "MultispeQRepository",
     "PlantRepository",
     "SubzoneRepository",
     "TokenBlacklistRepository",

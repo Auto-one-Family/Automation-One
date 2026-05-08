@@ -18,8 +18,12 @@ References:
 - core/security.py (JWT utilities)
 """
 
+import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
+
+from pydantic import BaseModel, ConfigDict
 
 from fastapi import APIRouter, Depends
 from fastapi.security import OAuth2PasswordRequestForm
@@ -42,6 +46,7 @@ from ...core.security import (
     verify_password,
     verify_token,
 )
+from ...db.repositories.api_key_repo import ApiKeyRepository
 from ...db.repositories.esp_repo import ESPRepository
 from ...db.repositories.system_config_repo import SystemConfigRepository
 from ...db.repositories.token_blacklist_repo import TokenBlacklistRepository
@@ -791,3 +796,249 @@ async def get_mqtt_auth_status(
         broker_connected=broker_connected,
         last_configured=config.get("last_configured"),
     )
+
+
+# =============================================================================
+# API Key Management (Admin only) — AUT-290
+# =============================================================================
+
+# Token length in bytes for secrets.token_urlsafe (results in ~43 chars base64)
+_API_KEY_TOKEN_BYTES: int = 32
+
+# Supported key prefixes and their owner_type mapping
+_PREFIX_TO_OWNER_TYPE: dict[str, str] = {
+    "esp_": "esp",
+    "god_": "god_layer",
+    "svc_": "service",
+}
+
+
+class ApiKeyCreateRequest(BaseModel):
+    """Request body for creating a new API key."""
+
+    owner_type: str
+    """Owner category: 'esp', 'god_layer', or 'service'."""
+
+    owner_id: Optional[str] = None
+    """Optional owner identifier (e.g. ESP device UUID or service name)."""
+
+    scopes: list[str] = []
+    """Permission scopes granted to this key."""
+
+    note: Optional[str] = None
+    """Human-readable note used to derive the key prefix (e.g. 'esp' → 'esp_')."""
+
+
+class ApiKeyCreateResponse(BaseModel):
+    """Response body when a new API key is created.
+
+    The raw_key field is shown ONLY at creation time and cannot be retrieved again.
+    """
+
+    id: uuid.UUID
+    raw_key: str
+    key_prefix: str
+    owner_type: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ApiKeyResponse(BaseModel):
+    """Public representation of a stored API key (no raw key exposed)."""
+
+    id: uuid.UUID
+    key_prefix: str
+    owner_type: str
+    owner_id: Optional[str]
+    scopes: list
+    created_at: datetime
+    last_used_at: Optional[datetime]
+    revoked_at: Optional[datetime]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+def _resolve_prefix(owner_type: str) -> str:
+    """
+    Derive the key prefix from owner_type.
+
+    Args:
+        owner_type: One of "esp", "god_layer", "service"
+
+    Returns:
+        Key prefix string (e.g. "esp_")
+
+    Raises:
+        ValueError: If owner_type is not recognised
+    """
+    for prefix, otype in _PREFIX_TO_OWNER_TYPE.items():
+        if otype == owner_type:
+            return prefix
+    raise ValueError(
+        f"Unknown owner_type {owner_type!r}. "
+        f"Valid values: {list(_PREFIX_TO_OWNER_TYPE.values())}"
+    )
+
+
+@router.post(
+    "/api-keys",
+    response_model=ApiKeyCreateResponse,
+    status_code=201,
+    summary="Create API key",
+    description=(
+        "Generate and store a new API key. "
+        "The raw key is returned ONCE — it cannot be retrieved afterwards. "
+        "Admin only."
+    ),
+)
+async def create_api_key_endpoint(
+    body: ApiKeyCreateRequest,
+    db: DBSession,
+    current_user: AdminUser,
+) -> ApiKeyCreateResponse:
+    """
+    Create a new API key (admin only).
+
+    Generates a cryptographically random key, stores its SHA256 hash,
+    and returns the plaintext key exactly once.
+
+    Args:
+        body: Creation parameters
+        db: Database session
+        current_user: Authenticated admin user
+
+    Returns:
+        ApiKeyCreateResponse including the one-time raw key
+    """
+    try:
+        prefix = _resolve_prefix(body.owner_type)
+    except ValueError as exc:
+        from fastapi import HTTPException as _HTTPException
+
+        raise _HTTPException(status_code=422, detail=str(exc)) from exc
+
+    raw_token = secrets.token_urlsafe(_API_KEY_TOKEN_BYTES)
+    raw_key = f"{prefix}{raw_token}"
+
+    api_key_repo = ApiKeyRepository(db)
+    api_key_record = await api_key_repo.create(
+        raw_key=raw_key,
+        key_prefix=prefix,
+        owner_type=body.owner_type,
+        owner_id=body.owner_id,
+        scopes=body.scopes,
+        created_by=current_user.id,
+    )
+    await db.commit()
+    await db.refresh(api_key_record)
+
+    logger.info(
+        "API key created by %s: owner_type=%r prefix=%r id=%s",
+        current_user.username,
+        body.owner_type,
+        prefix,
+        api_key_record.id,
+    )
+
+    return ApiKeyCreateResponse(
+        id=api_key_record.id,
+        raw_key=raw_key,
+        key_prefix=prefix,
+        owner_type=body.owner_type,
+        created_at=api_key_record.created_at,
+    )
+
+
+@router.post(
+    "/api-keys/{key_id}/revoke",
+    response_model=dict,
+    summary="Revoke API key",
+    description="Revoke an API key by ID. Returns 404 if not found. Admin only.",
+)
+async def revoke_api_key_endpoint(
+    key_id: uuid.UUID,
+    db: DBSession,
+    current_user: AdminUser,
+) -> dict:
+    """
+    Revoke an API key (admin only).
+
+    Sets the revoked_at timestamp so subsequent validation requests fail.
+
+    Args:
+        key_id: UUID of the ApiKey record to revoke
+        db: Database session
+        current_user: Authenticated admin user
+
+    Returns:
+        Confirmation dict with revoked key ID
+
+    Raises:
+        HTTPException: 404 if the key does not exist
+        HTTPException: 409 if the key is already revoked
+    """
+    from fastapi import HTTPException as _HTTPException
+
+    api_key_repo = ApiKeyRepository(db)
+    api_key_record = await api_key_repo.get_by_id(key_id)
+
+    if api_key_record is None:
+        raise _HTTPException(status_code=404, detail="API key not found")
+
+    if not api_key_record.is_valid:
+        raise _HTTPException(status_code=409, detail="API key is already revoked")
+
+    revoked = await api_key_repo.revoke(key_id)
+    if not revoked:
+        raise _HTTPException(status_code=404, detail="API key not found or already revoked")
+
+    await db.commit()
+
+    logger.info(
+        "API key revoked by %s: id=%s owner_type=%r",
+        current_user.username,
+        key_id,
+        api_key_record.owner_type,
+    )
+
+    return {"status": "revoked", "id": str(key_id)}
+
+
+@router.get(
+    "/api-keys",
+    response_model=list[ApiKeyResponse],
+    summary="List API keys",
+    description="Return all API keys (active and revoked). Admin only.",
+)
+async def list_api_keys_endpoint(
+    db: DBSession,
+    _current_user: AdminUser,
+) -> list[ApiKeyResponse]:
+    """
+    List all API keys (admin only).
+
+    Returns both active and revoked keys for audit purposes.
+
+    Args:
+        db: Database session
+        _current_user: Authenticated admin user (auth check only)
+
+    Returns:
+        List of ApiKeyResponse objects (no raw keys exposed)
+    """
+    api_key_repo = ApiKeyRepository(db)
+    records = await api_key_repo.get_all()
+    return [
+        ApiKeyResponse(
+            id=rec.id,
+            key_prefix=rec.key_prefix,
+            owner_type=rec.owner_type,
+            owner_id=rec.owner_id,
+            scopes=rec.scopes,
+            created_at=rec.created_at,
+            last_used_at=rec.last_used_at,
+            revoked_at=rec.revoked_at,
+        )
+        for rec in records
+    ]

@@ -9,6 +9,7 @@ All models should be imported here so that Base.metadata.create_all() includes a
 from . import (  # noqa: F401
     actuator,
     ai,
+    api_key,  # ApiKey model for DB-backed API key validation (AUT-290)
     audit_log,  # AuditLog model for event tracking
     auth,  # TokenBlacklist model
     calibration_session,  # Calibration session tracking (S-P2)
@@ -40,6 +41,7 @@ from . import (  # noqa: F401
 from .actuator import ActuatorConfig, ActuatorState, ActuatorHistory  # noqa: F401
 from .ai import AIPredictions  # noqa: F401
 from .audit_log import AuditLog, AuditEventType, AuditSeverity, AuditSourceType  # noqa: F401
+from .api_key import ApiKey  # noqa: F401
 from .auth import TokenBlacklist  # noqa: F401
 from .calibration_session import CalibrationSession, CalibrationStatus  # noqa: F401
 from .command_contract import CommandIntent, CommandOutcome  # noqa: F401
@@ -83,6 +85,7 @@ __all__ = [
     # Modules
     "actuator",
     "ai",
+    "api_key",
     "audit_log",
     "auth",
     "calibration_session",
@@ -119,6 +122,7 @@ __all__ = [
     "AuditEventType",
     "AuditSeverity",
     "AuditSourceType",
+    "ApiKey",
     "TokenBlacklist",
     "CommandIntent",
     "CommandOutcome",

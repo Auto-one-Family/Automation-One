@@ -34,6 +34,7 @@ from ..core.config import get_settings
 from ..core.logging_config import get_logger
 from ..core.security import verify_token
 from ..db.models.user import User
+from ..db.repositories.api_key_repo import ApiKeyRepository
 from ..db.repositories.token_blacklist_repo import TokenBlacklistRepository
 from ..db.repositories.user_repo import UserRepository
 from ..db.session import get_session
@@ -305,21 +306,30 @@ OperatorUser = Annotated[User, Depends(require_operator)]
 
 
 async def verify_api_key(
+    db: DBSession,
     x_api_key: Annotated[Optional[str], Header(alias="X-API-Key")] = None,
 ) -> str:
     """
-    Verify API key from request header.
+    Verify API key from request header against the api_keys DB table (AUT-290).
 
-    Used for ESP32 device authentication.
+    Authentication flow:
+    1. Debug-mode bypass (non-production only)
+    2. Missing-key guard
+    3. Configured-key fallback (settings.security.api_key)
+    4. DB lookup via SHA256 hash (ApiKeyRepository)
+       - Found + active   → update last_used_at, return key
+       - Found + revoked  → 401
+       - Not found        → 401 (no prefix fallback)
 
     Args:
         x_api_key: API key from X-API-Key header
+        db: Database session (injected by FastAPI)
 
     Returns:
-        API key if valid
+        Raw API key string if authentication succeeded
 
     Raises:
-        HTTPException: 401 if invalid or missing
+        HTTPException: 401 if the key is missing, revoked, or unknown
     """
     # Development mode: Allow without API key (SECURITY: Never in production!)
     if settings.development.debug_mode:
@@ -345,36 +355,32 @@ async def verify_api_key(
             headers={"WWW-Authenticate": "ApiKey"},
         )
 
-    # Check against configured API key
+    # Fallback: configured master key in settings (backwards-compatible)
     configured_key = getattr(settings.security, "api_key", None)
     if configured_key and x_api_key == configured_key:
         return x_api_key
 
-    # AUT-228 (E4): DB-backed API-Key-Validation noch nicht implementiert.
-    # Aktueller Stand: Prefix-Check (esp_ / god_) ohne DB-Lookup.
-    # Folge-Ticket erforderlich: api_keys-Tabelle existiert nicht in
-    # src/db/models/. Bevor das hier umgestellt wird, MUSS db-inspector ein
-    # Schema vorschlagen. Vorgeschlagenes Schema:
-    #   table api_keys:
-    #     id: UUID PK
-    #     key_hash: TEXT NOT NULL  (bcrypt/argon2-Hash, NICHT plaintext)
-    #     key_prefix: VARCHAR(8) NOT NULL  (z.B. "esp_", "god_")
-    #     owner_type: VARCHAR(16) NOT NULL  ("esp", "god_layer", "service")
-    #     owner_id: UUID NULL  (FK auf esp_devices.id wenn owner_type="esp")
-    #     scopes: JSONB NOT NULL DEFAULT '[]'
-    #     created_at, last_used_at, revoked_at: TIMESTAMPTZ
-    #   index unique(key_hash)
-    # Lookup-Pfad: hash(x_api_key) -> SELECT WHERE key_hash=? AND revoked_at IS NULL
-    # Folge-Ticket: AUT-XXX "API-Key DB-Backed Validation" (siehe AUT-228 Report)
-    # Accept keys starting with "esp_" (ESP32 device keys)
-    if x_api_key.startswith("esp_"):
+    # DB-backed validation (AUT-290)
+    api_key_repo = ApiKeyRepository(db)
+    api_key_record = await api_key_repo.get_by_hash(x_api_key)
+
+    if api_key_record is not None:
+        if not api_key_record.is_valid:
+            logger.warning(
+                "Revoked API key used: prefix=%r owner_type=%r",
+                api_key_record.key_prefix,
+                api_key_record.owner_type,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="API key has been revoked",
+                headers={"WWW-Authenticate": "ApiKey"},
+            )
+        # Key is active — record usage and return
+        await api_key_repo.touch_last_used(api_key_record.id)
         return x_api_key
 
-    # Accept keys starting with "god_" (God layer keys)
-    if x_api_key.startswith("god_"):
-        return x_api_key
-
-    logger.warning(f"Invalid API key attempted: {x_api_key[:10]}...")
+    logger.warning("Unknown API key attempted: prefix=%r", x_api_key[:8])
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid API key",
