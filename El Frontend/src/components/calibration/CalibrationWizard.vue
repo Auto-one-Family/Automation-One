@@ -65,6 +65,8 @@ const {
   handleAbort,
   confirmLeave,
   reset,
+  sampleProgress,
+  sampleTotal,
 } = useCalibrationWizard({
   skipSelect: props.skipSelect,
   espId: props.espId,
@@ -347,6 +349,20 @@ defineExpose({
       <div v-if="selectedSensorType === 'ec'" class="calibration-wizard__hint">
         <p>Referenzlösung auf Raumtemperatur bringen (25°C ±2°C). Sonde vollständig eintauchen.</p>
       </div>
+
+      <!-- PKG-03: Sample-Averaging Fortschritt (nur EC, sampleCount > 1) -->
+      <div
+        v-if="isMeasuring && sampleTotal > 1"
+        class="calibration-wizard__sample-progress"
+        role="status"
+        aria-live="polite"
+      >
+        <Loader :size="14" class="calibration-wizard__sample-progress-icon" />
+        <span class="calibration-wizard__sample-progress-text">
+          Sample {{ sampleProgress }}/{{ sampleTotal }}
+        </span>
+      </div>
+
       <CalibrationStep
         :step-number="1"
         :total-steps="currentPreset?.expectedPoints ?? 2"

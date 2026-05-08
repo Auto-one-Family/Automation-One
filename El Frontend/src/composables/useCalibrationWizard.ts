@@ -38,6 +38,8 @@ export interface SensorTypePreset {
   point2Ref?: number
   expectedPoints: 1 | 2
   calibrationMethod: 'moisture_2point' | 'ph_2point' | 'ec_1point'
+  /** Number of ADC samples to average for one calibration point. Default: 1 (no averaging). EC sensors use 3. */
+  sampleCount?: number
 }
 
 export interface UseCalibrationWizardOptions {
@@ -79,6 +81,10 @@ export interface UseCalibrationWizardReturn {
   lifecycleState: Ref<CalibrationLifecycleState>
   lifecycleMessage: Ref<string>
   hasUnsavedWork: ComputedRef<boolean>
+
+  // PKG-03: Sample averaging progress (EC sensors, sampleCount > 1)
+  sampleProgress: Ref<number>
+  sampleTotal: Ref<number>
 
   // Presets
   sensorTypePresets: Record<string, SensorTypePreset>
@@ -129,6 +135,7 @@ export const SENSOR_TYPE_PRESETS: Record<string, SensorTypePreset> = {
     point1Ref: 1413,
     expectedPoints: 1,
     calibrationMethod: 'ec_1point',
+    sampleCount: 3,
   },
   moisture: {
     label: 'Feuchtigkeitssensor',
@@ -226,6 +233,10 @@ export function useCalibrationWizard(
   const measureCooldownTimerId = ref<ReturnType<typeof setTimeout> | null>(null)
   const lifecycleState = ref<CalibrationLifecycleState>('idle')
   const lifecycleMessage = ref('')
+
+  // PKG-03: Sample averaging counters (shown in UI during multi-sample EC measurement)
+  const sampleProgress = ref(0)
+  const sampleTotal = ref(0)
 
   function clearMeasureCooldownTimer(): void {
     if (measureCooldownTimerId.value !== null) {
@@ -660,12 +671,17 @@ export function useCalibrationWizard(
   }
 
   /**
-   * F-P2: Trigger a live measurement via MQTT command.
+   * F-P2 + PKG-03: Trigger a live measurement via MQTT command.
    *
    * Sends POST /sensors/{esp_id}/{gpio}/measure to the server,
    * which publishes a sensor command via MQTT. The ESP32 responds
    * on sensor/{gpio}/response, and the CalibrationResponseHandler (S-P5)
    * processes it and broadcasts via WebSocket (S-P6).
+   *
+   * PKG-03 (EC sensors, sampleCount > 1): triggers N measurements sequentially,
+   * collects raw_values, and stores the arithmetic mean (rounded to integer) as
+   * lastRawValue. Progress is visible via sampleProgress / sampleTotal refs and
+   * lifecycleMessage. All other sensor types use a single measurement (unchanged).
    *
    * The raw value is stored in lastRawValue for the wizard to display.
    * The actual point capture still requires user confirmation with a reference value.
@@ -674,15 +690,22 @@ export function useCalibrationWizard(
     if (selectedGpio.value === null || !selectedEspId.value) return
     if (isMeasuring.value) return
 
+    const preset = currentPreset.value
+    const targetSampleCount = preset?.sampleCount != null && preset.sampleCount > 1
+      ? preset.sampleCount
+      : 1
+
     clearMeasureCooldownTimer()
     isMeasuring.value = true
     isFreshMeasurement.value = false
     lifecycleState.value = 'accepted'
     lifecycleMessage.value = 'Messauftrag akzeptiert.'
     errorMessage.value = ''
+    sampleProgress.value = 0
+    sampleTotal.value = targetSampleCount
+
     try {
       if (!currentSessionId.value) {
-        const preset = currentPreset.value
         if (!preset) {
           throw new Error('Sensortyp-Preset nicht gefunden')
         }
@@ -695,16 +718,71 @@ export function useCalibrationWizard(
         })
         currentSessionId.value = session.id
       }
-      const triggerResult = await sensorsApi.triggerMeasurement(selectedEspId.value, selectedGpio.value)
-      measurementRequestId.value = triggerResult.request_id
-      lifecycleState.value = 'pending'
-      lifecycleMessage.value = `Messung angefordert (Request-ID: ${triggerResult.request_id}).`
+
+      if (targetSampleCount <= 1) {
+        // Single measurement — original path (all non-EC sensors)
+        const triggerResult = await sensorsApi.triggerMeasurement(selectedEspId.value, selectedGpio.value)
+        measurementRequestId.value = triggerResult.request_id
+        lifecycleState.value = 'pending'
+        lifecycleMessage.value = `Messung angefordert (Request-ID: ${triggerResult.request_id}).`
+      } else {
+        // PKG-03: Multi-sample averaging path (EC: sampleCount=3)
+        const collectedRaw: number[] = []
+        const SAMPLE_TIMEOUT_MS = 8_000
+
+        for (let sampleIndex = 0; sampleIndex < targetSampleCount; sampleIndex += 1) {
+          sampleProgress.value = sampleIndex + 1
+          lifecycleState.value = 'pending'
+          lifecycleMessage.value = `Messung ${sampleIndex + 1}/${targetSampleCount} laeuft...`
+
+          const prevRaw = lastRawValue.value
+          const triggerResult = await sensorsApi.triggerMeasurement(selectedEspId.value, selectedGpio.value)
+          measurementRequestId.value = triggerResult.request_id
+
+          // Wait for the WS handler (calibration_measurement_received) to update lastRawValue
+          const sampleReceived = await new Promise<number | null>((resolve) => {
+            const start = Date.now()
+            const poll = setInterval(() => {
+              if (lastRawValue.value !== prevRaw && lastRawValue.value !== null) {
+                clearInterval(poll)
+                resolve(lastRawValue.value)
+              } else if (Date.now() - start > SAMPLE_TIMEOUT_MS) {
+                clearInterval(poll)
+                resolve(null)
+              }
+            }, 50)
+          })
+
+          if (sampleReceived === null) {
+            throw new Error(`Keine Antwort fuer Messung ${sampleIndex + 1}/${targetSampleCount} (Timeout nach ${SAMPLE_TIMEOUT_MS / 1000}s)`)
+          }
+
+          collectedRaw.push(sampleReceived)
+
+          // Brief pause between samples so ESP32 and MQTT settle
+          if (sampleIndex < targetSampleCount - 1) {
+            await new Promise<void>((resolve) => setTimeout(resolve, MEASUREMENT_TRIGGER_COOLDOWN_MS))
+          }
+        }
+
+        // Arithmetic mean, rounded to integer (ADC raw values are integers)
+        const meanRaw = Math.round(
+          collectedRaw.reduce((sum, v) => sum + v, 0) / collectedRaw.length,
+        )
+        setLastRawValue(meanRaw, measurementQuality.value || 'good')
+        isFreshMeasurement.value = true
+        lifecycleState.value = 'pending'
+        lifecycleMessage.value = `Mittelwert aus ${targetSampleCount} Messungen: ${meanRaw} (Werte: ${collectedRaw.join(', ')})`
+        sampleProgress.value = targetSampleCount
+      }
     } catch (err: unknown) {
       errorMessage.value = err instanceof Error ? err.message : 'Messung fehlgeschlagen'
       measurementQuality.value = 'error'
       lifecycleState.value = 'terminal_failed'
       lifecycleMessage.value = errorMessage.value
     } finally {
+      sampleProgress.value = 0
+      sampleTotal.value = 0
       clearMeasureCooldownTimer()
       measureCooldownTimerId.value = setTimeout(() => {
         isMeasuring.value = false
@@ -913,6 +991,8 @@ export function useCalibrationWizard(
     measurementTriggerAt.value = null
     lifecycleState.value = 'idle'
     lifecycleMessage.value = ''
+    sampleProgress.value = 0
+    sampleTotal.value = 0
     clearDraft()
   }
 
@@ -953,6 +1033,10 @@ export function useCalibrationWizard(
     lifecycleState,
     lifecycleMessage,
     hasUnsavedWork,
+
+    // PKG-03: Sample averaging progress
+    sampleProgress,
+    sampleTotal,
 
     // Presets
     sensorTypePresets: SENSOR_TYPE_PRESETS,

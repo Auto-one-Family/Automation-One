@@ -1574,6 +1574,39 @@ async function handleSave() {
   color: var(--color-text-muted);
 }
 
+/* PKG-04: EC calibration status (read-only) */
+.sensor-config__calibration-status {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: rgba(52, 211, 153, 0.06);
+  border: 1px solid rgba(52, 211, 153, 0.2);
+}
+
+.sensor-config__calibration-status-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  padding: var(--space-1) 0;
+}
+
+.sensor-config__calibration-status-row + .sensor-config__calibration-status-row {
+  border-top: 1px solid rgba(52, 211, 153, 0.1);
+}
+
+.sensor-config__calibration-status-row .sensor-config__label {
+  flex-shrink: 0;
+  min-width: 9rem;
+  color: var(--color-text-secondary);
+}
+
+.sensor-config__calibration-status-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-success);
+  font-size: var(--text-xs);
+}
+
 .sensor-config__info-box {
   padding: var(--space-2) var(--space-3);
   background: rgba(96, 165, 250, 0.06);
