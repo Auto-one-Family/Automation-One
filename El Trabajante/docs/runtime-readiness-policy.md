@@ -9,10 +9,13 @@ Nach Reset darf die Firmware den Pending-Zustand nur verlassen, wenn die Runtime
 ## Verbindliche Policy
 
 - Default-Profil: `sensor_required`
-- Pflicht: mindestens ein Aktor (`actuator_count > 0`)
+- Aktoren: **nicht** Pflicht fuer Pending-Exit (`require_actuator = false`).
+  Sensor-only-Devices (z.B. pH + EC ohne Aktoren) sind vollstaendig gueltige Konfigurationen.
 - Offline-Rules sind fuer Pending-Exit optional.
   - Bei `offline_rule_count == 0` bleibt Disconnect-Verhalten fail-safe:
     Aktoren werden sofort auf `default_state` gesetzt.
+  - Sonderfall: `offline_rule_count > 0` und `actuator_count == 0` → `OFFLINE_RULES_ONLY_AUTO_EXIT`
+    (Offline-Rules ohne Aktoren sind inert; Auto-Exit verhindert permanenten Pending-Deadlock).
 - Sensoren:
   - `sensor_required`: mindestens ein Sensor (`sensor_count > 0`)
   - `sensor_optional`: Sensoren sind optional (fuer spaetere profile-basierte Setups)
@@ -21,8 +24,8 @@ Nach Reset darf die Firmware den Pending-Zustand nur verlassen, wenn die Runtime
 
 - `CONFIG_PENDING_EXIT_READY`
 - `MISSING_SENSORS`
-- `MISSING_ACTUATORS`
-- `OFFLINE_RULES_ONLY_AUTO_EXIT` (Offline-Rules vorhanden, aber keine Aktoren)
+- `MISSING_ACTUATORS` (nur aktiv wenn `require_actuator = true`; im Default-Profil nicht ausgeloest)
+- `OFFLINE_RULES_ONLY_AUTO_EXIT` (Offline-Rules vorhanden, aber keine Aktoren → Auto-Exit)
 
 ## State-Transition-Regeln
 

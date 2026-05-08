@@ -48,6 +48,23 @@ inline bool extractString(const JsonObjectConst& obj,
   return false;
 }
 
+inline bool extractFloat(const JsonObjectConst& obj, const char* key, float& out, float default_val = 0.0f) {
+  if (!obj.containsKey(key)) {
+    out = default_val;
+    return false;
+  }
+
+  JsonVariantConst value = obj[key];
+  if (value.is<float>() || value.is<double>() || value.is<long>() || value.is<int>()) {
+    out = value.as<float>();
+    return true;
+  }
+
+  LOG_W(JSON_TAG, "JSON key '" + String(key) + "' is not a float");
+  out = default_val;
+  return false;
+}
+
 inline bool extractBool(const JsonObjectConst& obj, const char* key, bool& out, bool default_val = false) {
   if (!obj.containsKey(key)) {
     out = default_val;
