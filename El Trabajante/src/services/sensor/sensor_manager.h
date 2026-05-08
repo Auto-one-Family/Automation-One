@@ -183,6 +183,9 @@ private:
     SensorConfig sensors_[MAX_SENSORS];
     uint8_t sensor_count_;
     bool initialized_;
+    // AUT-303: Per-sensor busy flag — prevents queue overflow when UI triggers multiple
+    // back-to-back measure commands before the first measurement completes.
+    bool manual_measure_busy_[MAX_SENSORS] = {};
 
     // ============================================
     // SAFETY-P4: Value Cache

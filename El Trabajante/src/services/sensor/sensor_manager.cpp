@@ -1571,6 +1571,18 @@ ManualMeasurementResult SensorManager::triggerManualMeasurement(uint8_t gpio, ui
         return result;
     }
 
+    // AUT-303: Busy-flag guard — reject duplicate measure commands for the same GPIO
+    // while a measurement is already in progress. Prevents publish-queue overflow
+    // (8 slots) when the UI triggers multiple back-to-back measure requests.
+    ptrdiff_t sensor_index = config - sensors_;
+    if (manual_measure_busy_[sensor_index]) {
+        LOG_W(TAG, "SensorManager: GPIO " + String(gpio) +
+                       " already measuring — ignoring duplicate trigger (AUT-303)");
+        result.reason_code = "SENSOR_BUSY";
+        return result;
+    }
+    manual_measure_busy_[sensor_index] = true;
+
     // E-P3: Log Circuit-Breaker state for manual override awareness
     if (config->cb_state == SensorCBState::OPEN) {
         LOG_I(TAG, "SensorManager: Note: Sensor CB is OPEN on GPIO " + String(gpio) +
@@ -1588,6 +1600,7 @@ ManualMeasurementResult SensorManager::triggerManualMeasurement(uint8_t gpio, ui
                            String(kManualSensorMutexWaitMs) + "ms — manual measurement aborted (GPIO " +
                            String(gpio) + ")");
             result.reason_code = "MUTEX_TIMEOUT";
+            manual_measure_busy_[sensor_index] = false;  // AUT-303: release busy flag
             return result;
         }
 
@@ -1616,6 +1629,7 @@ ManualMeasurementResult SensorManager::triggerManualMeasurement(uint8_t gpio, ui
                 result.reason_code = result.timeout_reached ? "MEASURE_TIMEOUT" : "MEASUREMENT_FAILED";
                 result.measurement_ok = false;
                 result.publish_ok = false;
+                manual_measure_busy_[sensor_index] = false;  // AUT-303: release busy flag
                 return result;
             }
 
@@ -1625,6 +1639,7 @@ ManualMeasurementResult SensorManager::triggerManualMeasurement(uint8_t gpio, ui
             result.quality = "good";
             result.raw_value = static_cast<int32_t>(readings[0].raw_value);
             config->last_reading = start_ms;
+            manual_measure_busy_[sensor_index] = false;  // AUT-303: release busy flag
             return result;
         }
 
@@ -1655,11 +1670,13 @@ ManualMeasurementResult SensorManager::triggerManualMeasurement(uint8_t gpio, ui
                 result.reason_code = "NONE";
             }
             config->last_reading = start_ms;
+            manual_measure_busy_[sensor_index] = false;  // AUT-303: release busy flag
             return result;
         }
 
         LOG_E(TAG, "SensorManager: Manual measurement failed for GPIO " + String(gpio));
         result.reason_code = result.timeout_reached ? "MEASURE_TIMEOUT" : "MEASUREMENT_FAILED";
+        manual_measure_busy_[sensor_index] = false;  // AUT-303: release busy flag
         return result;
     }
 }
