@@ -66,6 +66,8 @@ export interface StartSessionRequest {
   sensor_type: string
   method?: CalibrationSessionMethod
   expected_points?: number
+  /** AUT-299: Solution temperature in °C for temperature compensation. Default: 25.0 */
+  calibration_temperature?: number
 }
 
 export interface AddPointRequest {

@@ -45,6 +45,12 @@ export interface SensorWithContext {
   active_zone_id?: string | null
   /** When the active context was set (ISO DateTime) */
   context_since?: string | null
+  /** Sensor operating mode — 'continuous' | 'on_demand' | 'scheduled' | 'paused' */
+  operating_mode?: string | null
+  /** AUT-299: UUID of the linked temperature sensor config for ATC. Null = no sensor linked. */
+  temp_sensor_config_id?: string | null
+  /** AUT-299: Last measurement metadata (e.g. temp_source, temp_compensation_value for EC/pH) */
+  metadata?: Record<string, unknown> | null
 }
 
 export interface ActuatorWithContext {

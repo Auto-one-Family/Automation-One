@@ -105,6 +105,9 @@ const enabled = ref(true)
 // Subzone
 const subzoneId = ref<string | null>(null)
 
+// AUT-299: Linked temperature sensor for ATC (Automatic Temperature Compensation)
+const tempSensorConfigId = ref<string | null>(null)
+
 // Device Scope (T13-R3 WP4) — UI auf Sensor-Ebene entfernt (AUT-251),
 // Werte werden weiterhin geladen/gespeichert um Backend-Kompatibilitaet zu wahren.
 const localScope = ref<DeviceScope>('zone_local')
@@ -155,6 +158,33 @@ const metadata = ref<DeviceMetadata>({})
 
 const sensorConfig = computed(() => SENSOR_TYPE_CONFIG[props.sensorType])
 const defaultUnit = computed(() => getSensorUnit(props.sensorType) || props.unit || '')
+
+// AUT-299: Is this sensor a pH or EC sensor that can use ATC?
+const isAtcCapable = computed(() => {
+  const t = props.sensorType.toLowerCase()
+  return t === 'ph' || t === 'ec'
+})
+
+/** AUT-299: All temperature sensors across all ESPs for ATC dropdown */
+const temperatureSensorOptions = computed<Array<{ value: string; label: string }>>(() => {
+  const TEMP_TYPES = new Set(['temperature', 'ds18b20', 'sht31_temp', 'sht31', 'bme280_temp'])
+  const options: Array<{ value: string; label: string }> = []
+  for (const device of espStore.devices) {
+    const espDeviceId = espStore.getDeviceId(device)
+    for (const sensor of (device.sensors ?? []) as Array<{ sensor_type: string; gpio: number; name?: string | null; config_id?: string; id?: string }>) {
+      const sType = String(sensor.sensor_type ?? '').toLowerCase()
+      if (!TEMP_TYPES.has(sType)) continue
+      const configId: string | null = sensor.config_id ?? sensor.id ?? null
+      if (!configId) continue
+      const sensorName = sensor.name || sType
+      options.push({
+        value: configId,
+        label: `${sensorName} (${espDeviceId}, GPIO ${sensor.gpio})`,
+      })
+    }
+  }
+  return options
+})
 
 // =============================================================================
 // AUT-252: Datasheet metadata (read-only) + Plant context
@@ -436,6 +466,9 @@ onMounted(async () => {
       // Device Scope (T13-R3 WP4)
       localScope.value = (configExt.device_scope as DeviceScope) ?? 'zone_local'
       localAssignedZones.value = (configExt.assigned_zones as string[]) ?? []
+
+      // AUT-299: ATC linked temperature sensor
+      tempSensorConfigId.value = (configExt.temp_sensor_config_id as string | null) ?? null
     }
   } catch {
     // No config in DB — use defaults or Mock fallback (C2)
@@ -620,6 +653,9 @@ async function handleSave() {
     // Device Scope (T13-R3 WP4)
     config.device_scope = localScope.value
     config.assigned_zones = localScope.value === 'zone_local' ? [] : localAssignedZones.value
+
+    // AUT-299: ATC temperature sensor link (null = remove link)
+    config.temp_sensor_config_id = tempSensorConfigId.value ?? null
 
     config.metadata = mergeDeviceMetadata(null, metadata.value)
 
@@ -871,6 +907,23 @@ async function handleSave() {
             />
             <span class="sensor-config__helper">Empfohlener Rekalibrierungszyklus</span>
           </div>
+        </div>
+        <!-- AUT-299: ATC Temperatursensor-Dropdown (nur für pH und EC) -->
+        <div v-if="isAtcCapable" class="sensor-config__field">
+          <label class="sensor-config__label">Temperatursensor für ATC (optional)</label>
+          <select v-model="tempSensorConfigId" class="sensor-config__select">
+            <option :value="null">Keiner (Standardwert 25 °C)</option>
+            <option
+              v-for="opt in temperatureSensorOptions"
+              :key="opt.value"
+              :value="opt.value"
+            >
+              {{ opt.label }}
+            </option>
+          </select>
+          <span class="sensor-config__helper">
+            Wird für automatische Temperaturkompensation bei EC- und pH-Messungen verwendet.
+          </span>
         </div>
       </section>
 

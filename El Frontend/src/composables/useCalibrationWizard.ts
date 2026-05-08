@@ -37,9 +37,11 @@ export interface SensorTypePreset {
   point2Label?: string
   point2Ref?: number
   expectedPoints: 1 | 2
-  calibrationMethod: 'moisture_2point' | 'ph_2point' | 'ec_1point' | 'linear_2point'
+  calibrationMethod: 'moisture_2point' | 'ph_2point' | 'ec_1point' | 'ec_2point' | 'linear_2point'
   /** Number of ADC samples to average for one calibration point. Default: 1 (no averaging). EC sensors use 3. */
   sampleCount?: number
+  /** AUT-299: Whether the first point can be skipped (e.g. EC air reference) */
+  point1Skippable?: boolean
 }
 
 export interface UseCalibrationWizardOptions {
@@ -86,6 +88,9 @@ export interface UseCalibrationWizardReturn {
   sampleProgress: Ref<number>
   sampleTotal: Ref<number>
 
+  // AUT-299: Calibration temperature for ATC
+  calibrationTemperature: Ref<number>
+
   // Presets
   sensorTypePresets: Record<string, SensorTypePreset>
   EC_PRESETS: typeof EC_PRESETS
@@ -104,6 +109,8 @@ export interface UseCalibrationWizardReturn {
   setLastRawValue: (rawValue: number | null, quality?: string) => void
   overwritePoint: (role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference', point: CalibrationPoint) => Promise<void>
   deletePoint: (role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference') => Promise<void>
+  /** AUT-299: Skip current point (e.g. air step for EC) — switches method to ec_1point */
+  skipCurrentPoint: () => Promise<void>
   goBack: () => void
   handleAbort: () => Promise<void>
   confirmLeave: () => Promise<boolean>
@@ -136,6 +143,18 @@ export const SENSOR_TYPE_PRESETS: Record<string, SensorTypePreset> = {
     expectedPoints: 1,
     calibrationMethod: 'ec_1point',
     sampleCount: 3,
+  },
+  /** AUT-299: EC 2-point with optional air reference step */
+  ec_2point: {
+    label: 'EC-Sensor (2-Punkt)',
+    point1Label: 'Schritt 1 (optional): Luft-Referenz',
+    point1Ref: 0,
+    point2Label: 'Schritt 2: Referenzloesung',
+    point2Ref: 1413,
+    expectedPoints: 2,
+    calibrationMethod: 'ec_2point',
+    sampleCount: 3,
+    point1Skippable: true,
   },
   moisture: {
     label: 'Feuchtigkeitssensor',
@@ -231,6 +250,9 @@ export function useCalibrationWizard(
   // PKG-03: Sample averaging counters (shown in UI during multi-sample EC measurement)
   const sampleProgress = ref(0)
   const sampleTotal = ref(0)
+
+  // AUT-299: Calibration temperature for temperature compensation
+  const calibrationTemperature = ref<number>(25.0)
 
   function clearMeasureCooldownTimer(): void {
     if (measureCooldownTimerId.value !== null) {
@@ -459,6 +481,7 @@ export function useCalibrationWizard(
       sensor_type: selectedSensorType.value,
       method: preset.calibrationMethod,
       expected_points: preset.expectedPoints,
+      calibration_temperature: calibrationTemperature.value,
     })
     currentSessionId.value = session.id
     return session.id
@@ -833,6 +856,34 @@ export function useCalibrationWizard(
     }
   }
 
+  /**
+   * AUT-299: Skip the current point (air step for EC 2-point).
+   * Switches session method to ec_1point so the server does not expect the air reference.
+   * Transitions directly to point2 (reference solution step).
+   */
+  async function skipCurrentPoint(): Promise<void> {
+    if (phase.value !== 'point1') return
+    const preset = currentPreset.value
+    if (!preset?.point1Skippable) return
+
+    // If a session is already open, we cannot easily switch method. Guard: only skip if no session yet.
+    if (currentSessionId.value) {
+      // Session already started — abort and restart with ec_1point
+      try {
+        await calibrationApi.rejectSession(currentSessionId.value, 'User skipped air reference — switching to 1-point method')
+      } catch {
+        // Best-effort
+      }
+      currentSessionId.value = null
+      points.value = []
+    }
+
+    // Override to ec_1point by temporarily setting selectedSensorType to 'ec'
+    // (ec preset = 1-point, no air reference)
+    selectedSensorType.value = 'ec'
+    phase.value = 'point2'
+  }
+
   /** Navigate back one phase */
   function goBack() {
     if (isSubmitting.value) return
@@ -992,6 +1043,7 @@ export function useCalibrationWizard(
     lifecycleMessage.value = ''
     sampleProgress.value = 0
     sampleTotal.value = 0
+    calibrationTemperature.value = 25.0
     clearDraft()
   }
 
@@ -1037,6 +1089,9 @@ export function useCalibrationWizard(
     sampleProgress,
     sampleTotal,
 
+    // AUT-299: Calibration temperature for ATC
+    calibrationTemperature,
+
     // Presets
     sensorTypePresets: SENSOR_TYPE_PRESETS,
     EC_PRESETS,
@@ -1055,6 +1110,7 @@ export function useCalibrationWizard(
     setLastRawValue,
     overwritePoint,
     deletePoint,
+    skipCurrentPoint,
     goBack,
     handleAbort,
     confirmLeave,

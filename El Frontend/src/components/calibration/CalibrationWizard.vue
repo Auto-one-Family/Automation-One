@@ -67,6 +67,8 @@ const {
   reset,
   sampleProgress,
   sampleTotal,
+  calibrationTemperature,
+  skipCurrentPoint,
 } = useCalibrationWizard({
   skipSelect: props.skipSelect,
   espId: props.espId,
@@ -358,6 +360,46 @@ defineExpose({
       </div>
       <div v-if="selectedSensorType === 'ec'" class="calibration-wizard__hint">
         <p>Referenzlösung auf Raumtemperatur bringen (25°C ±2°C). Sonde vollständig eintauchen.</p>
+      </div>
+
+      <!-- AUT-299: Temperatur-Eingabe (nur EC und pH) -->
+      <div
+        v-if="normalizedSelectedType === 'ec' || normalizedSelectedType === 'ph' || normalizedSelectedType === 'ec_2point'"
+        class="calibration-wizard__temp-input"
+      >
+        <label class="calibration-wizard__temp-label">
+          Lösungstemperatur (°C)
+        </label>
+        <input
+          v-model.number="calibrationTemperature"
+          type="number"
+          min="0"
+          max="50"
+          step="0.1"
+          class="calibration-wizard__temp-field"
+          placeholder="25.0"
+        />
+        <span class="calibration-wizard__temp-hint">
+          Wird für die Temperaturkompensation des Kalibrierwerts verwendet.
+        </span>
+      </div>
+
+      <!-- AUT-299: Skip-Button für überspringbare Schritte (EC Luft-Referenz) -->
+      <div
+        v-if="currentPreset?.point1Skippable"
+        class="calibration-wizard__skip-row"
+      >
+        <button
+          type="button"
+          class="calibration-wizard__skip-btn"
+          :disabled="isSubmitting"
+          @click="skipCurrentPoint"
+        >
+          Luft-Schritt überspringen
+        </button>
+        <span class="calibration-wizard__skip-hint">
+          Weiter zur Referenzlösung ohne Luft-Referenz (Standard-Kalibrierung).
+        </span>
       </div>
 
       <!-- PKG-03: Sample-Averaging Fortschritt (nur EC, sampleCount > 1) -->
@@ -1321,5 +1363,75 @@ defineExpose({
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+/* AUT-299: Temperature input */
+.calibration-wizard__temp-input {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+
+.calibration-wizard__temp-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.calibration-wizard__temp-field {
+  width: 8rem;
+  padding: 0.375rem 0.625rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-size: 0.875rem;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+}
+
+.calibration-wizard__temp-hint {
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+
+/* AUT-299: Skip row */
+.calibration-wizard__skip-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px dashed rgba(251, 191, 36, 0.35);
+  border-radius: var(--radius-md);
+  background: rgba(251, 191, 36, 0.04);
+}
+
+.calibration-wizard__skip-btn {
+  flex-shrink: 0;
+  padding: 0.375rem 0.75rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  background: transparent;
+  color: var(--color-warning);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.calibration-wizard__skip-btn:hover:not(:disabled) {
+  background: rgba(251, 191, 36, 0.1);
+}
+
+.calibration-wizard__skip-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.calibration-wizard__skip-hint {
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
 }
 </style>

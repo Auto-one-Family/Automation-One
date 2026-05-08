@@ -6,7 +6,7 @@
  * Monitor mode: Name, live value, quality dot, sparkline, ESP-ID
  */
 import { computed, ref, type Component } from 'vue'
-import { Settings, ChevronRight, WifiOff, Clock, BellOff, Thermometer, Droplets, Wind, Sun, Gauge, Leaf, Activity, CircleDot, TrendingUp, TrendingDown, Minus, Info } from 'lucide-vue-next'
+import { Settings, ChevronRight, WifiOff, Clock, BellOff, Thermometer, Droplets, Wind, Sun, Gauge, Leaf, Activity, CircleDot, TrendingUp, TrendingDown, Minus, Info, Loader2, Scan, Check, X, AlertTriangle } from 'lucide-vue-next'
 import { isMockEspId } from '@/composables/useZoneGrouping'
 import type { SensorWithContext } from '@/composables/useZoneGrouping'
 import type { TrendDirection } from '@/utils/trendUtils'
@@ -15,6 +15,8 @@ import StatusBadge from '@/components/base/StatusBadge.vue'
 import { getSensorLabel, getSensorUnit, getSensorDisplayName, getSensorConfig, VIRTUAL_SENSOR_META } from '@/utils/sensorDefaults'
 import { useDeviceContextStore } from '@/shared/stores/deviceContext.store'
 import { useZoneStore } from '@/shared/stores/zone.store'
+import { sensorsApi } from '@/api/sensors'
+import { useToast } from '@/composables/useToast'
 
 /** Default fallback icon for unknown sensor types */
 const DEFAULT_SENSOR_ICON = CircleDot
@@ -233,6 +235,40 @@ function formatValue(value: number | null | undefined): string {
   }).format(Number(value))
 }
 
+// AUT-299: ATC fallback warning badge
+// Show when: EC/pH sensor + temp_sensor_config_id set + last metadata.temp_source === "default_25"
+const atcFallbackWarning = computed<boolean>(() => {
+  const sType = props.sensor.sensor_type.toLowerCase()
+  if (sType !== 'ec' && sType !== 'ph') return false
+  if (!props.sensor.temp_sensor_config_id) return false
+  const meta = props.sensor.metadata
+  if (!meta || typeof meta !== 'object') return false
+  return meta.temp_source === 'default_25'
+})
+
+// On-demand measurement (AUT-298)
+const isOnDemand = computed(() => props.sensor.operating_mode === 'on_demand')
+const isMeasuring = ref(false)
+const measureState = ref<'idle' | 'success' | 'error'>('idle')
+const { success: toastSuccess, error: toastError } = useToast()
+
+async function triggerMeasure(): Promise<void> {
+  if (isMeasuring.value || isEspOffline.value) return
+  isMeasuring.value = true
+  measureState.value = 'idle'
+  try {
+    await sensorsApi.triggerMeasurement(props.sensor.esp_id, props.sensor.gpio)
+    measureState.value = 'success'
+    toastSuccess('Messung ausgelöst')
+  } catch {
+    measureState.value = 'error'
+    toastError('Messung fehlgeschlagen')
+  } finally {
+    isMeasuring.value = false
+    setTimeout(() => { measureState.value = 'idle' }, 2000)
+  }
+}
+
 function handleClick() {
   if (props.mode === 'config') {
     emit('configure', props.sensor)
@@ -337,7 +373,38 @@ function handleClick() {
           <span v-else-if="isTimestampUnknown" class="sensor-card__badge sensor-card__badge--unknown" title="Zeitpunkt des Messwerts unbekannt">
             <Clock class="w-3 h-3" /> Zuletzt: unbekannt
           </span>
+          <!-- AUT-299: ATC fallback badge — shown when temp sensor linked but default 25°C used -->
+          <span
+            v-if="atcFallbackWarning"
+            class="sensor-card__badge sensor-card__badge--atc-fallback"
+            title="Kein frischer Temperaturwert vom verknüpften Sensor — Standardwert 25°C verwendet."
+          >
+            <AlertTriangle class="w-3 h-3" /> ATC: Fallback 25°C
+          </span>
         </div>
+      </div>
+      <!-- On-Demand Measure Button (AUT-298) -->
+      <div
+        v-if="isOnDemand"
+        class="sensor-card__measure-row"
+        @click.stop
+      >
+        <button
+          :class="[
+            'sensor-card__measure-btn',
+            measureState === 'success' && 'sensor-card__measure-btn--success',
+            measureState === 'error' && 'sensor-card__measure-btn--error',
+          ]"
+          :disabled="isMeasuring || isEspOffline"
+          :title="isEspOffline ? 'ESP offline — Messung nicht möglich' : 'Manuelle Messung auslösen'"
+          @click.stop="triggerMeasure"
+        >
+          <Loader2 v-if="isMeasuring" :size="11" class="sensor-card__measure-spinner" />
+          <Check v-else-if="measureState === 'success'" :size="11" />
+          <X v-else-if="measureState === 'error'" :size="11" />
+          <Scan v-else :size="11" />
+          <span>{{ isMeasuring ? 'Messen…' : measureState === 'success' ? 'Ausgelöst' : measureState === 'error' ? 'Fehler' : 'Messen' }}</span>
+        </button>
       </div>
       <!-- Mobile sensor context hint (6.7) -->
       <div
@@ -688,6 +755,13 @@ function handleClick() {
   background: color-mix(in srgb, var(--color-warning) 10%, transparent);
 }
 
+/* AUT-299: ATC fallback warning */
+.sensor-card__badge--atc-fallback {
+  color: var(--color-warning);
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
 .sensor-card__number--no-data {
   font-size: var(--text-sm);
   font-weight: 500;
@@ -845,5 +919,62 @@ function handleClick() {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
   margin: 0;
+}
+
+/* On-Demand Measure Button (AUT-298) */
+.sensor-card__measure-row {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px dashed var(--glass-border);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.sensor-card__measure-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xxs);
+  font-weight: 500;
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(99, 179, 237, 0.3);
+  background: rgba(99, 179, 237, 0.07);
+  color: var(--color-info, #63b3ed);
+  cursor: pointer;
+  white-space: nowrap;
+  min-height: 22px;
+  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+  letter-spacing: 0.02em;
+}
+
+.sensor-card__measure-btn:hover:not(:disabled) {
+  border-color: rgba(99, 179, 237, 0.55);
+  background: rgba(99, 179, 237, 0.14);
+}
+
+.sensor-card__measure-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.sensor-card__measure-btn--success {
+  border-color: rgba(52, 211, 153, 0.4);
+  background: rgba(52, 211, 153, 0.1);
+  color: var(--color-success);
+}
+
+.sensor-card__measure-btn--error {
+  border-color: rgba(248, 113, 113, 0.4);
+  background: rgba(248, 113, 113, 0.1);
+  color: var(--color-error);
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.sensor-card__measure-spinner {
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
 }
 </style>

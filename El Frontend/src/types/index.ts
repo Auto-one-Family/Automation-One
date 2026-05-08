@@ -320,6 +320,14 @@ export interface MockSensor {
   // ═══════════════════════════════════════════════════════════════════════════
   /** Sensor kind: continuous (default) or snapshot (point measurements) */
   sensor_kind?: SensorKind | null
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // AUT-299: ATC (Automatic Temperature Compensation)
+  // ═══════════════════════════════════════════════════════════════════════════
+  /** UUID of the linked temperature sensor config for ATC. Null = no sensor linked. */
+  temp_sensor_config_id?: string | null
+  /** Last measurement metadata (e.g. temp_source, temp_compensation_value for EC/pH sensors) */
+  metadata?: Record<string, unknown> | null
 }
 
 export interface MockActuator {
@@ -773,6 +781,8 @@ export interface SensorConfigCreate {
   assigned_subzones?: string[] | null
   /** Sensor kind: continuous (default) or snapshot (Wave 1, MultispeQ) */
   sensor_kind?: SensorKind
+  /** AUT-299: UUID of the linked temperature sensor config for ATC. Null = no sensor linked. */
+  temp_sensor_config_id?: string | null
 }
 
 export interface SensorConfigResponse {
@@ -824,6 +834,8 @@ export interface SensorConfigResponse {
   updated_at: string
   /** MQTT send_config correlation_id for this save; matches WS config_response / config_published */
   correlation_id?: string | null
+  /** AUT-299: UUID of the linked temperature sensor config for ATC (Automatic Temperature Compensation). Null = no sensor linked. */
+  temp_sensor_config_id?: string | null
 }
 
 // =============================================================================
