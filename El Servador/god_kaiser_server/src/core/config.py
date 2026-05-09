@@ -301,6 +301,20 @@ class NotificationSettings(BaseSettings):
         description="Timeout for webhook notifications (seconds)",
     )
 
+    # ─────────────────────────────────────────────────────────
+    # AUT-194: Daily Analysis Report Email (Feature Flag)
+    # ─────────────────────────────────────────────────────────
+    email_daily_report_enabled: bool = Field(
+        default=False,
+        alias="EMAIL_DAILY_REPORT_ENABLED",
+        description="Send daily AUT-194 stack-analysis reports via email (Default: disabled)",
+    )
+    email_daily_report_recipient: Optional[str] = Field(
+        default=None,
+        alias="EMAIL_DAILY_REPORT_RECIPIENT",
+        description="Recipient email for daily analysis reports (required if enabled)",
+    )
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 

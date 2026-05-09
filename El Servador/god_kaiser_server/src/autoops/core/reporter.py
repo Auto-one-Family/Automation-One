@@ -228,6 +228,127 @@ class AutoOpsReporter:
 
         return "\n".join(lines)
 
+    def generate_daily_report(
+        self,
+        run_date: datetime,
+        run_slot: str,
+        findings: list[Any],
+        period_hours: int,
+    ) -> str:
+        """
+        Generate a daily-analysis report (AUT-194).
+
+        Output is auto-debugger-compatible: contains TASK-PACKAGES + SPECIALIST-PROMPTS
+        sections so the file can be consumed directly as an auto-debugger steering doc.
+
+        Args:
+            run_date: Run date (UTC) — used in filename
+            run_slot: 'morning' (06:00) or 'evening' (18:00)
+            findings: list of ErrorAnalysisFinding (sorted by severity by AiService)
+            period_hours: Aggregation window in hours
+
+        Returns:
+            Path (str) to the generated report file.
+        """
+        date_str = run_date.strftime("%Y-%m-%d")
+        filename = f"daily_report_{date_str}_{run_slot}.md"
+        filepath = self.reports_dir / filename
+
+        lines: list[str] = [
+            f"# DAILY-ANALYSIS-REPORT {date_str} {run_slot}",
+            "",
+            f"**Generated:** {datetime.now(timezone.utc).isoformat()}",
+            f"**Period:** last {period_hours}h (slot={run_slot})",
+            f"**Findings:** {len(findings)}",
+            "",
+            "---",
+            "",
+        ]
+
+        if not findings:
+            lines.extend(
+                [
+                    "## Status",
+                    "",
+                    "Keine Findings ausserhalb der bekannten harmlosen Patterns.",
+                    "",
+                ]
+            )
+            content = "\n".join(lines)
+            filepath.write_text(content, encoding="utf-8")
+            return str(filepath)
+
+        # ----- TASK-PACKAGES (auto-debugger-compatible) -----
+        lines.extend(["## TASK-PACKAGES", ""])
+        for idx, finding in enumerate(findings, start=1):
+            pkg_id = f"PKG-{idx:02d}"
+            verify_gate = f"DA-{run_slot}-{idx:02d}"
+            affected = ", ".join(getattr(finding, "affected_components", []) or []) or "-"
+            severity = getattr(finding, "severity", "medium")
+            title = getattr(finding, "linear_title", "Daily Analysis Finding")
+            description = getattr(finding, "linear_description", "") or ""
+            lines.extend(
+                [
+                    f"### {pkg_id} — {title}",
+                    f"**Prioritaet:** {severity}",
+                    f"**Schicht:** {affected}",
+                    f"**Deliverable:** {description}",
+                    f"**Verify-Gate:** {verify_gate}",
+                    "",
+                ]
+            )
+
+        # ----- SPECIALIST-PROMPTS (auto-debugger-compatible) -----
+        lines.extend(["## SPECIALIST-PROMPTS", ""])
+        for idx, finding in enumerate(findings, start=1):
+            pkg_id = f"PKG-{idx:02d}"
+            agent = self._route_specialist(finding)
+            description = getattr(finding, "linear_description", "") or ""
+            code_refs = getattr(finding, "code_references", []) or []
+            actions = getattr(finding, "recommended_actions", []) or []
+
+            lines.extend(
+                [
+                    f"### {agent} — {pkg_id}",
+                    description,
+                    "",
+                ]
+            )
+            if code_refs:
+                lines.append("**Code-Referenzen:**")
+                for ref in code_refs:
+                    file = getattr(ref, "file", "?")
+                    line_no = getattr(ref, "line", "?")
+                    symbol = getattr(ref, "symbol", "?")
+                    lines.append(f"- `{file}:{line_no}` — {symbol}")
+                lines.append("")
+            if actions:
+                lines.append("**Empfohlene Aktionen:**")
+                for i, action in enumerate(actions, 1):
+                    lines.append(f"{i}. {action}")
+                lines.append("")
+
+        content = "\n".join(lines)
+        filepath.write_text(content, encoding="utf-8")
+        return str(filepath)
+
+    @staticmethod
+    def _route_specialist(finding: Any) -> str:
+        """
+        Map an ErrorAnalysisFinding to the most fitting specialist agent.
+
+        Heuristic: scan ``affected_components`` for layer keywords. Falls back
+        to ``server-dev`` because daily snapshots are server-centric.
+        """
+        components = " ".join(getattr(finding, "affected_components", []) or []).lower()
+        if "esp32" in components or "trabajante" in components or "firmware" in components:
+            return "esp32-dev"
+        if "frontend" in components or "vue" in components or "el frontend" in components:
+            return "frontend-dev"
+        if "mqtt" in components and "broker" in components:
+            return "mqtt-dev"
+        return "server-dev"
+
     def generate_quick_summary(
         self,
         plugin_results: list[tuple[str, PluginResult]],

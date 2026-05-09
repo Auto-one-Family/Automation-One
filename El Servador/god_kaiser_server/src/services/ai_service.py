@@ -1,4 +1,4 @@
-"""AI Analysis Service — Claude API integration for error intelligence (AUT-168)."""
+"""AI Analysis Service — Claude API integration for error intelligence (AUT-168, AUT-194)."""
 
 from __future__ import annotations
 
@@ -43,6 +43,83 @@ class ErrorAnalysisFinding(BaseModel):
     linear_description: str
     severity: Literal["critical", "high", "medium", "low"]
     related_error_codes: list[int]
+
+
+# ---------------------------------------------------------------------------
+# AUT-194: Daily snapshot models (DailyAnalysisJob)
+# ---------------------------------------------------------------------------
+
+
+class ErrorSourceSummary(BaseModel):
+    """Aggregated error source for daily stack diagnostic."""
+
+    error_code: int
+    count: int
+    esp_id: Optional[str] = None
+    source_type: Literal["mqtt", "api"]
+    first_seen: str
+    last_seen: str
+
+
+class HeartbeatHealthSummary(BaseModel):
+    """ESP heartbeat health aggregation over the analysis period."""
+
+    total_esps: int
+    online_esps: int
+    offline_esps: int
+    avg_latency_ms: Optional[float] = None
+    reconnect_events: int
+
+
+class ConfigPushSummary(BaseModel):
+    """Config-push activity over the period."""
+
+    total_pushes: int
+    failed_pushes: int
+    chattering_events: int  # multiple pushes <45s same ESP
+
+
+class NotificationSummary(BaseModel):
+    """Notification system activity over the period."""
+
+    total_sent: int
+    dedup_hits: int
+    failed_sends: int
+
+
+class SchedulerHealthSummary(BaseModel):
+    """CentralScheduler health snapshot."""
+
+    total_jobs: int
+    jobs_by_category: dict[str, int]
+    total_executions: int
+    total_errors: int
+
+
+class FalseErrorPatternFlags(BaseModel):
+    """Counters for the 9 known harmless patterns (false-positive prevention)."""
+
+    heartbeat_ack_delays: int
+    reconnect_storms: int
+    config_push_chattering: int
+    post_restart_races: int
+    lwt_floods: int
+    idle_actuator_states: int
+    validation_errors_by_design: int
+    discovery_ratelimit_by_design: int
+    notification_dedup_hits: int
+
+
+class SystemAnalysisRequest(BaseModel):
+    """Aggregated system snapshot for daily Claude stack analysis (AUT-194)."""
+
+    period_hours: int
+    error_sources: list[ErrorSourceSummary]
+    heartbeat_health: HeartbeatHealthSummary
+    config_push: ConfigPushSummary
+    notifications: NotificationSummary
+    scheduler_health: SchedulerHealthSummary
+    false_error_patterns: FalseErrorPatternFlags
 
 
 _ESP32_ERROR_CONTEXT = """
@@ -95,6 +172,49 @@ AutomationOne besteht aus:
 Deine Aufgabe: Analysiere Fehler-Events und gib strukturierte Befunde zurueck.
 Benenne immer konkrete Datei-Pfade und Zeilennummern wenn moeglich.
 """
+
+
+# ---------------------------------------------------------------------------
+# AUT-194: Daily stack-diagnostic system prompt
+# Reuses the same cached _SYSTEM_PROMPT block (Anthropic prompt-caching:
+# identical text prefix => cache hit) and appends the 9 harmless-pattern
+# guidance for false-positive suppression.
+# ---------------------------------------------------------------------------
+
+_DAILY_HARMLESS_PATTERNS = """
+
+BEKANNTE HARMLOSE PATTERNS (KEIN Finding erzeugen, falls Evidenz innerhalb dieser Definitionen liegt):
+
+1. Heartbeat-ACK-Delay: ACK-Latenzen <60s nach Heartbeat sind im Normalbereich (Mosquitto-Round-Trip + ESP-Verarbeitung).
+2. Reconnect-Storm: Mehrere Heartbeats 0-120s nach einem Reconnect sind erwartet (clean_session=true => ESP republishes).
+3. Config-Push-Chattering: Mehrere Config-Pushes <45s vom selben ESP sind harmlos (Idempotenz-Schutz, Server resendet bei fehlendem ACK).
+4. F-V4-01 Post-Restart Race: Zone/Subzone-ACKs <30s nach Server-Restart koennen verloren gehen (clean_session=true) — KEIN Fehler.
+5. LWT-Flood: Circuit-Breaker-Drops bei >3 simultanen LWTs sind das gewollte Schutzverhalten.
+6. actuator_states "idle"-Werte sind kosmetisches Legacy aus AUT-118 — keine Aktion.
+7. Validation-Fehler ohne ACK = by Design (Server verwirft invalide Payloads ohne ACK).
+8. Discovery-Rate-Limit ohne ACK = by Design (Server droppt zu haeufige Discovery-Pings).
+9. Notification-Dedup-Treffer = aktiver ISA-18.2-Schutz, keine Aktion.
+
+WICHTIG: clean_session=true => Config-Push-Verlust nach Reconnect ist KEIN Error. Nur echte Auffaelligkeiten ausserhalb dieser Patterns als Findings melden.
+"""
+
+_DAILY_SYSTEM_PROMPT = (
+    _SYSTEM_PROMPT
+    + _DAILY_HARMLESS_PATTERNS
+    + """
+Aufgabe: Analysiere diesen aggregierten 12h-Stack-Snapshot des Servers und gib eine
+sortierte Liste strukturierter ErrorAnalysisFinding-Eintraege zurueck (Severity-Reihenfolge:
+critical -> high -> medium -> low). Nur Auffaelligkeiten OUTSIDE der bekannten harmlosen
+Patterns oben werden zu Findings. Filtere by-design-Verhalten konsequent heraus.
+Jedes Finding MUSS belastbare code_references mit Datei:Zeile haben.
+"""
+)
+
+
+class _DailyAnalysisFindings(BaseModel):
+    """Wrapper schema for messages.parse() — Claude returns structured list."""
+
+    findings: list[ErrorAnalysisFinding]
 
 
 class AiService:
@@ -173,6 +293,54 @@ class AiService:
         if result is None:
             raise ValueError("Claude returned no parsed output for error analysis request")
         return result
+
+    async def analyze_daily_snapshot(
+        self, request: SystemAnalysisRequest
+    ) -> list[ErrorAnalysisFinding]:
+        """
+        Run a 2x/day stack-diagnostic on aggregated server telemetry (AUT-194).
+
+        Reuses the same cached system-prompt prefix as ``analyze_error`` (Anthropic
+        prompt-caching ``cache_control={"type": "ephemeral"}``) and appends the
+        9 known-harmless-pattern guidance. Claude returns a list of
+        ErrorAnalysisFinding sorted by severity (critical -> low).
+
+        Args:
+            request: Aggregated SystemAnalysisRequest from DailySnapshotService
+
+        Returns:
+            list[ErrorAnalysisFinding] sorted by severity, empty list if no
+            findings outside the harmless patterns.
+        """
+        response = await self._get_client().messages.parse(
+            model="claude-opus-4-7",
+            max_tokens=8192,
+            system=[
+                {
+                    "type": "text",
+                    "text": _DAILY_SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            output_format=_DailyAnalysisFindings,
+            messages=[
+                {
+                    "role": "user",
+                    "content": request.model_dump_json(),
+                }
+            ],
+        )
+        result = response.parsed_output
+        if result is None:
+            logger.warning("Claude returned no parsed output for daily snapshot request")
+            return []
+
+        # Stable severity sort (critical -> high -> medium -> low)
+        severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        return sorted(
+            result.findings,
+            key=lambda f: severity_order.get(f.severity, 99),
+        )
 
 
 ai_service = AiService()

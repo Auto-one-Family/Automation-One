@@ -38,6 +38,7 @@ from .zone_context import router as zone_context_router
 from .calibration_sessions import router as calibration_sessions_router
 from .component_export import router as component_export_router
 from .multispeq import router as multispeq_router
+from .scheduler import router as scheduler_router
 from .schema_registry import router as schema_registry_router
 
 # PLANNED routers - stubs with no endpoints yet, included for discoverability.
@@ -81,6 +82,7 @@ api_v1_router.include_router(component_export_router)  # Phase K4 - AI-Ready Exp
 api_v1_router.include_router(schema_registry_router)  # Phase K4 L0.2 - Schema Registry
 api_v1_router.include_router(calibration_sessions_router)  # S-P3 - Calibration Sessions
 api_v1_router.include_router(multispeq_router)  # AUT-217 - MultispeQ Ingress
+api_v1_router.include_router(scheduler_router)  # AUT-194 - Scheduler Health Endpoint
 
 # Export individual routers for direct access if needed
 __all__ = [
@@ -99,6 +101,7 @@ __all__ = [
     "logic_router",
     "logs_router",
     "multispeq_router",
+    "scheduler_router",
     "notifications_router",
     "intent_outcomes_router",
     "plants_router",

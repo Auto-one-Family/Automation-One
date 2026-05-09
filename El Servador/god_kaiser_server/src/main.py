@@ -916,6 +916,51 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("Daily diagnostic scheduler DISABLED")
 
+        # Step 6.2b: Daily Analysis Job (AUT-194)
+        # 2x/day Claude stack-diagnostic at 06:00 + 18:00 UTC.
+        # Reuses ai_service prompt-cache; idempotency via plugin_executions.
+        # Runs even when ANTHROPIC_API_KEY is missing (writes empty report).
+        try:
+            from .autoops.core.reporter import AutoOpsReporter
+            from .services.ai_service import ai_service as _ai_service_singleton
+            from .services.daily_analysis_job import DailyAnalysisJob
+            from .services.daily_snapshot_service import DailySnapshotService
+            from .services.email_service import get_email_service
+            from .core.scheduler import JobCategory as _JobCategory
+
+            _daily_snapshot_service = DailySnapshotService(scheduler=_central_scheduler)
+            _daily_reporter = AutoOpsReporter()
+            _daily_email_service = get_email_service()
+            _daily_analysis_job = DailyAnalysisJob(
+                snapshot_service=_daily_snapshot_service,
+                ai_service=_ai_service_singleton,
+                reporter=_daily_reporter,
+                email_service=_daily_email_service,
+                session_factory=get_session,
+            )
+
+            _central_scheduler.add_cron_job(
+                job_id="morning",
+                func=_daily_analysis_job.run,
+                cron_expression={"hour": 6, "minute": 0},
+                kwargs={"slot": "morning"},
+                category=_JobCategory.DAILY_ANALYSIS,
+            )
+            _central_scheduler.add_cron_job(
+                job_id="evening",
+                func=_daily_analysis_job.run,
+                cron_expression={"hour": 18, "minute": 0},
+                kwargs={"slot": "evening"},
+                category=_JobCategory.DAILY_ANALYSIS,
+            )
+            logger.info(
+                "DailyAnalysisJob (AUT-194) scheduled: morning=06:00 UTC, evening=18:00 UTC"
+            )
+        except Exception as _aut194_err:
+            logger.warning(
+                f"DailyAnalysisJob registration failed (non-critical): {_aut194_err}"
+            )
+
         # Step 6.3: Plugin Schedule Registration (Phase B V3.1)
         # Load plugin schedules from DB and register as APScheduler cron jobs
         logger.info("Registering plugin schedules from DB...")
