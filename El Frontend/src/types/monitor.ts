@@ -14,6 +14,10 @@ export interface SubzoneSensorEntry {
   unit: string
   quality: string
   last_read: string | null
+  /** Operating mode from sensor config — 'continuous' | 'on_demand' | 'scheduled' | 'paused' */
+  operating_mode?: string | null
+  /** Server-side staleness flag */
+  is_stale?: boolean
 }
 
 export interface SubzoneActuatorEntry {

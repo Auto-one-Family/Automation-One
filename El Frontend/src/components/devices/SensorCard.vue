@@ -259,6 +259,8 @@ const isOnDemandStaleDue = computed(() => isOnDemand.value && props.sensor.is_st
 const isMeasuring = ref(false)
 const measureState = ref<'idle' | 'success' | 'error'>('idle')
 let measureTriggerTime = 0
+let preMeasureTriggerValue: number | null = null
+let preMeasureLastRead: string | null = null
 let measureTimeoutId: ReturnType<typeof setTimeout> | null = null
 const { success: toastSuccess, error: toastError } = useToast()
 
@@ -269,19 +271,36 @@ function clearMeasureTimeout(): void {
   }
 }
 
-// AUT-298 Finalitätsmodell: wait for WS sensor_data to arrive after trigger
-// Detected via reactive prop — store updates last_read when sensor_data event arrives
-watch(() => props.sensor.last_read, (newVal) => {
-  if (!isMeasuring.value || !newVal || !measureTriggerTime) return
-  const dataTs = new Date(newVal).getTime()
-  if (dataTs > measureTriggerTime) {
-    clearMeasureTimeout()
-    isMeasuring.value = false
-    measureState.value = 'success'
-    toastSuccess('Messwert empfangen')
-    setTimeout(() => { measureState.value = 'idle' }, 2000)
+function resolveMeasureSuccess(): void {
+  clearMeasureTimeout()
+  isMeasuring.value = false
+  measureState.value = 'success'
+  measureTriggerTime = 0
+  preMeasureTriggerValue = null
+  preMeasureLastRead = null
+  toastSuccess('Messwert empfangen')
+  setTimeout(() => { measureState.value = 'idle' }, 2000)
+}
+
+// AUT-298 Finalitätsmodell: wait for WS sensor_data after trigger.
+// Primary: last_read timestamp newer than trigger time, or any change in last_read.
+// Fallback: raw_value changed (covers ESP payloads with null timestamp — sensor_handler.py
+// broadcasts esp32_timestamp_raw which can be null, causing normalizeRawTimestamp → null).
+// Bug fixes: lastReadChanged detects any new timestamp; valueMutated without null-guard
+// detects null→value (first measurement) correctly.
+watch(
+  () => [props.sensor.last_read, props.sensor.raw_value] as const,
+  ([newLastRead, newRawValue]) => {
+    if (!measureTriggerTime) return
+    if (!isMeasuring.value && measureState.value !== 'error') return
+    const timestampFresh = newLastRead != null && new Date(newLastRead).getTime() > measureTriggerTime
+    const lastReadChanged = newLastRead !== preMeasureLastRead
+    const valueMutated = newRawValue !== preMeasureTriggerValue
+    if (timestampFresh || lastReadChanged || valueMutated) {
+      resolveMeasureSuccess()
+    }
   }
-})
+)
 
 onUnmounted(clearMeasureTimeout)
 
@@ -290,21 +309,32 @@ async function triggerMeasure(): Promise<void> {
   isMeasuring.value = true
   measureState.value = 'idle'
   measureTriggerTime = Date.now()
+  preMeasureTriggerValue = props.sensor.raw_value ?? null
+  preMeasureLastRead = props.sensor.last_read ?? null
   try {
     await sensorsApi.triggerMeasurement(props.sensor.esp_id, props.sensor.gpio)
     // Command published to ESP — wait for WS sensor_data (finality via watch above)
     measureTimeoutId = setTimeout(() => {
       isMeasuring.value = false
       measureState.value = 'error'
-      measureTriggerTime = 0
+      // Keep measureTriggerTime + preMeasureTriggerValue — watch can still catch late data in 2s grace window
       toastError('Kein Messwert erhalten (Timeout)')
-      setTimeout(() => { measureState.value = 'idle' }, 2000)
+      setTimeout(() => {
+        if (measureState.value !== 'success') {
+          measureTriggerTime = 0
+          preMeasureTriggerValue = null
+          preMeasureLastRead = null
+        }
+        measureState.value = 'idle'
+      }, 2000)
     }, 10_000)
   } catch {
     clearMeasureTimeout()
     isMeasuring.value = false
     measureState.value = 'error'
     measureTriggerTime = 0
+    preMeasureTriggerValue = null
+    preMeasureLastRead = null
     toastError('Messung fehlgeschlagen')
     setTimeout(() => { measureState.value = 'idle' }, 2000)
   }

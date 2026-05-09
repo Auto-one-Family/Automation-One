@@ -746,7 +746,7 @@ export interface SystemEvent extends WebSocketEventBase {
 
 /**
  * Sensor health event
- * Sent on sensor timeout or recovery
+ * Sent on sensor timeout or freshness exceeded (maintenance/jobs/sensor_health.py).
  */
 export interface SensorHealthEvent extends WebSocketEventBase {
   event: 'sensor_health'
@@ -756,9 +756,16 @@ export interface SensorHealthEvent extends WebSocketEventBase {
     esp_id: string
     gpio: number
     sensor_type: string
-    status: 'timeout' | 'recovered' | 'stale'
-    last_reading?: number
-    timeout_seconds?: number
+    sensor_name: string | null
+    is_stale: boolean
+    stale_reason: 'timeout_exceeded' | 'no_data' | 'sensor_error' | 'freshness_exceeded'
+    last_reading_at: string | null
+    timeout_seconds: number
+    freshness_hours?: number | null
+    seconds_overdue: number
+    operating_mode: string
+    config_source: 'instance' | 'type_default' | 'system_default'
+    timestamp: number
   }
 }
 

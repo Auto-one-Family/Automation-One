@@ -1440,7 +1440,11 @@ const zoneDeviceGroup = computed<ZoneDeviceSubzone[]>(() => {
         )
         const raw_value = liveSensor?.raw_value ?? s.raw_value ?? 0
         const quality = (liveSensor?.quality ?? s.quality) as SensorWithContext['quality']
-        const last_read = liveSensor?.last_reading_at ?? liveSensor?.last_read ?? s.last_read ?? null
+        // AUT-298 fix: use most recent of all timestamp sources so sensor_data WS events
+        // propagate to SensorCard.last_read even when sensor_health already set last_reading_at.
+        const last_read = [liveSensor?.last_reading_at, liveSensor?.last_read, s.last_read]
+          .filter((t): t is string => Boolean(t))
+          .reduce<string | null>((best, ts) => !best || ts > best ? ts : best, null)
         return {
           ...s,
           raw_value,
@@ -1454,6 +1458,11 @@ const zoneDeviceGroup = computed<ZoneDeviceSubzone[]>(() => {
           esp_state: device?.system_state,
           device_scope: liveSensor?.device_scope ?? (s as Partial<SensorWithContext>).device_scope ?? null,
           assigned_zones: liveSensor?.assigned_zones ?? (s as Partial<SensorWithContext>).assigned_zones ?? [],
+          // AUT-298: operating_mode is config, not live data — API is authoritative.
+          // Store value is fallback only (sensor_health WS may not cover all sensors).
+          // Never let a store value from a sibling sensor (same GPIO) override the API config.
+          operating_mode: (s as Partial<SensorWithContext>).operating_mode ?? liveSensor?.operating_mode ?? null,
+          is_stale: liveSensor?.is_stale ?? (s as Partial<SensorWithContext>).is_stale ?? false,
         }
       }) as SensorWithContext[]),
       actuators: sortActuatorsStable(sz.actuators.map(a => ({

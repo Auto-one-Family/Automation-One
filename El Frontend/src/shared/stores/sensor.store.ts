@@ -362,6 +362,7 @@ export const useSensorStore = defineStore('sensor', () => {
 
       const sensors = (device.sensors as Array<{
         gpio: number
+        sensor_type?: string
         is_stale?: boolean
         stale_reason?: string
         last_reading_at?: string | null
@@ -370,9 +371,13 @@ export const useSensorStore = defineStore('sensor', () => {
         freshness_hours?: number | null
       }>).map((sensor) => ({ ...sensor }))
 
-      const sensorIndex = sensors.findIndex(s => s.gpio === event.gpio)
+      // Match by gpio AND sensor_type to avoid contaminating sibling sensors on the same GPIO
+      // (e.g. moisture+ec both on GPIO 33 — without sensor_type filter, one event clobbers the other)
+      const sensorIndex = sensors.findIndex(
+        s => s.gpio === event.gpio && s.sensor_type === event.sensor_type,
+      )
       if (sensorIndex === -1) {
-        logger.debug(`sensor_health: Sensor GPIO ${event.gpio} not found on ${event.esp_id}`)
+        logger.debug(`sensor_health: Sensor GPIO ${event.gpio} (${event.sensor_type}) not found on ${event.esp_id}`)
         return device
       }
 
