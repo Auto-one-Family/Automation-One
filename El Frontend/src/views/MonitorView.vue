@@ -2356,7 +2356,7 @@ function handleFabWidgetSelected(widgetType: string) {
               :class="['monitor-subzone__chevron', { 'monitor-subzone__chevron--expanded': isSubzoneExpanded(getSubzoneKey(selectedZoneId, subzone.subzoneId)) }]"
             />
             <StatusBadge :level="sensorStatusToLevel(getWorstQualityStatus(subzone.sensors))" compact />
-            <span class="monitor-subzone__name">{{ subzone.subzoneName }}</span>
+            <span class="monitor-subzone__name" :title="subzone.subzoneName">{{ subzone.subzoneName }}</span>
             <span class="monitor-subzone__count">
               {{ subzone.sensors.length }}S · {{ subzone.actuators.length }}A
             </span>
@@ -2367,7 +2367,7 @@ function handleFabWidgetSelected(widgetType: string) {
             class="monitor-subzone__header monitor-subzone__header--static monitor-subzone__header--zoneweit"
           >
             <StatusBadge :level="sensorStatusToLevel(getWorstQualityStatus(subzone.sensors))" compact />
-            <span class="monitor-subzone__name">{{ subzone.subzoneName }}</span>
+            <span class="monitor-subzone__name" :title="subzone.subzoneName">{{ subzone.subzoneName }}</span>
             <span class="monitor-subzone__count">
               {{ subzone.sensors.length }}S · {{ subzone.actuators.length }}A
             </span>
@@ -3343,6 +3343,10 @@ function handleFabWidgetSelected(widgetType: string) {
 .monitor-subzone__name {
   font-weight: 600;
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* AUT-250: Subzone status dots now rendered by StatusBadge compact. */
@@ -3545,6 +3549,19 @@ function handleFabWidgetSelected(widgetType: string) {
 .monitor-card-grid {
   gap: var(--space-3);
   max-width: 100%;
+}
+
+/* AUT-25: Widescreen breakpoints — 4 columns at 1600px, 5 columns at 1920px */
+@media (min-width: 1600px) {
+  .monitor-card-grid.grid-auto-sm {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1920px) {
+  .monitor-card-grid.grid-auto-sm {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
 }
 
 /* Sensor Card wrapper (SensorCard handles its own visual styling) */
