@@ -6,7 +6,7 @@ Phase 2A: Added operating mode fields for per-sensor override of type defaults.
 
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy import (
     Boolean,
@@ -297,6 +297,25 @@ class SensorConfig(Base, TimestampMixin):
         "ESPDevice",
         back_populates="sensors",
         doc="ESP device this sensor belongs to",
+    )
+
+    # AUT-299: Self-referential relationships for temp sensor ATC link
+    temp_sensor: Mapped[Optional["SensorConfig"]] = relationship(
+        "SensorConfig",
+        foreign_keys="[SensorConfig.temp_sensor_config_id]",
+        primaryjoin="SensorConfig.temp_sensor_config_id == SensorConfig.id",
+        remote_side="SensorConfig.id",
+        back_populates="compensated_sensors",
+        lazy="select",
+        doc="Linked temperature SensorConfig for ATC (AUT-299). None = same-ESP auto-discovery.",
+    )
+    compensated_sensors: Mapped[List["SensorConfig"]] = relationship(
+        "SensorConfig",
+        foreign_keys="[SensorConfig.temp_sensor_config_id]",
+        primaryjoin="SensorConfig.id == SensorConfig.temp_sensor_config_id",
+        back_populates="temp_sensor",
+        lazy="select",
+        doc="pH/EC SensorConfigs that use this sensor as their ATC temperature source (AUT-299).",
     )
 
     # Table Constraints

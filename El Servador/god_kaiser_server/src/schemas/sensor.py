@@ -68,6 +68,15 @@ QUALITY_LEVELS = [
     "unknown",
 ]
 
+# AUT-299: Sensor types that are valid ATC temperature sources.
+# Used both for schema documentation and for API-layer validation in sensors.py.
+_TEMPERATURE_SENSOR_TYPES: frozenset[str] = frozenset({
+    "ds18b20",
+    "temperature",
+    "sht31_temp",
+    "bmp280_temp",
+})
+
 
 # =============================================================================
 # Sensor Configuration
@@ -270,7 +279,11 @@ class SensorConfigCreate(SensorConfigBase):
     # AUT-299: Optional linked temperature sensor for ATC
     temp_sensor_config_id: Optional[uuid.UUID] = Field(
         None,
-        description="UUID of a temperature SensorConfig to use for ATC. NULL = auto-discover same-ESP temperature sensor.",
+        description=(
+            "UUID of a temperature SensorConfig to use for ATC. "
+            "Must reference a sensor_type in: ds18b20, temperature, sht31_temp, bmp280_temp. "
+            "NULL = auto-discover same-ESP temperature sensor."
+        ),
     )
 
     model_config = ConfigDict(
@@ -370,7 +383,11 @@ class SensorConfigUpdate(BaseModel):
     # AUT-299: Optional linked temperature sensor for ATC
     temp_sensor_config_id: Optional[uuid.UUID] = Field(
         None,
-        description="UUID of a temperature SensorConfig to use for ATC. NULL = auto-discover same-ESP temperature sensor.",
+        description=(
+            "UUID of a temperature SensorConfig to use for ATC. "
+            "Must reference a sensor_type in: ds18b20, temperature, sht31_temp, bmp280_temp. "
+            "NULL = auto-discover same-ESP temperature sensor."
+        ),
     )
 
 
