@@ -300,9 +300,10 @@ class SensorDataHandler:
                     # Step 8: Determine processing mode
                     processing_mode = "raw"
                     processed_value = None
-                    # AUT-299: initialised before pi_enhanced block so metadata build (step 8d)
-                    # can read ATC provenance regardless of processing path.
+                    # AUT-299/AUT-320: initialised before pi_enhanced block so metadata build
+                    # (step 8d) can read ATC provenance regardless of processing path.
                     ec_extra_params: dict = {}
+                    ph_extra_params: dict = {}
 
                     if sensor_config and sensor_config.pi_enhanced and raw_mode:
                         # Pi-Enhanced processing needed
@@ -337,6 +338,41 @@ class SensorDataHandler:
                             # but we strip it explicitly below to keep the interface clean).
                             ec_extra_params["_atc_source"] = atc_source
 
+                        # AUT-320: ATC pre-lookup for pH sensors.
+                        # PHSensorProcessor._apply_temperature_compensation() applies
+                        # pH_compensated = pH_raw + slope_factor * (T - 25.0) when
+                        # params["temperature_compensation"] is present.
+                        # Default without a linked temp sensor: 25.0°C → no change.
+                        if sensor_type == "ph":
+                            ph_atc_temp, ph_atc_source = await self._try_get_atc_temperature(
+                                esp_device, session, sensor_config=sensor_config, log_prefix="pH-ATC"
+                            )
+                            if ph_atc_temp is not None:
+                                ph_extra_params["temperature_compensation"] = ph_atc_temp
+                                logger.debug(
+                                    "[pH-ATC] Using temperature %.2f°C for ATC on %s GPIO %s (source=%s)",
+                                    ph_atc_temp,
+                                    esp_id_str,
+                                    gpio,
+                                    ph_atc_source,
+                                )
+                            else:
+                                ph_atc_temp = 25.0  # PHSensorProcessor reference temp fallback
+                                ph_atc_source = "default_25c"
+                                ph_extra_params["temperature_compensation"] = ph_atc_temp
+                                logger.debug(
+                                    "[pH-ATC] No temperature sensor available — using reference temp 25.0°C for ATC on %s GPIO %s",
+                                    esp_id_str,
+                                    gpio,
+                                )
+                            # Transport ATC source for metadata enrichment.
+                            # Stripped before passing to processor (internal transport key).
+                            ph_extra_params["_atc_source"] = ph_atc_source
+
+                        # Merge sensor-specific extra params (EC or pH; mutually exclusive
+                        # for any single sensor_type within one message).
+                        merged_extra_params = {**ec_extra_params, **ph_extra_params}
+
                         # Trigger Pi-Enhanced processing (pass raw_mode!)
                         pi_result = await self._trigger_pi_enhanced_processing(
                             esp_id_str,
@@ -345,7 +381,7 @@ class SensorDataHandler:
                             raw_value,
                             sensor_config,
                             raw_mode=raw_mode,  # Pass raw_mode to processor
-                            extra_params=ec_extra_params,
+                            extra_params=merged_extra_params,
                         )
 
                         if pi_result:
@@ -506,6 +542,13 @@ class SensorDataHandler:
                             "temperature_compensation", 25.0
                         )
                         sensor_metadata["temp_source"] = atc_source_meta
+                    # AUT-320: Enrich metadata for pH sensors with ATC provenance
+                    if sensor_type == "ph" and ph_extra_params:
+                        ph_atc_source_meta = ph_extra_params.get("_atc_source", "default_25c")
+                        sensor_metadata["temp_used"] = ph_extra_params.get(
+                            "temperature_compensation", 25.0
+                        )
+                        sensor_metadata["temp_source"] = ph_atc_source_meta
 
                     sensor_data = await sensor_repo.save_data(
                         esp_id=esp_device.id,
@@ -919,20 +962,23 @@ class SensorDataHandler:
         except Exception as e:
             logger.warning(f"Failed to broadcast VPD data via WebSocket: {e}")
 
-    # ─── EC Temperature Compensation (ATC) ───────────────────────
+    # ─── ATC Temperature Lookup (shared: EC + pH) ─────────────────
 
-    # Max age for temperature reading used in EC automatic temperature compensation.
-    # EC is an on-demand sensor; allow a wider window than VPD since temperature
-    # rarely changes rapidly in a greenhouse environment.
+    # Max age for temperature reading used in automatic temperature compensation.
+    # Both EC and pH are on-demand sensors; allow a wider window than VPD since
+    # temperature rarely changes rapidly in a greenhouse environment.
     _ATC_MAX_AGE = timedelta(minutes=5)
 
-    async def _try_get_ec_temperature(
+    async def _try_get_atc_temperature(
         self,
         esp_device,
         session,
         sensor_config=None,
+        log_prefix: str = "ATC",
     ) -> tuple[Optional[float], str]:
-        """Look up the latest temperature reading for EC automatic temperature compensation.
+        """Look up the latest temperature reading for automatic temperature compensation.
+
+        Shared implementation used by both EC (AUT-299) and pH (AUT-320) sensors.
 
         Priority 1 (AUT-299): If sensor_config.temp_sensor_config_id is set, fetch the
         reading from the explicitly linked temperature sensor (cross-ESP capable).
@@ -947,16 +993,17 @@ class SensorDataHandler:
         Args:
             esp_device: ESPDevice ORM instance (provides device UUID)
             session: Active async database session
-            sensor_config: Optional SensorConfig ORM instance for AUT-299 explicit link
+            sensor_config: Optional SensorConfig ORM instance for explicit temp link
+            log_prefix: Log tag prefix for sensor-type-specific log lines (e.g. "EC-ATC", "pH-ATC")
 
         Returns:
             Tuple of (temperature_celsius_or_None, source_label) where source_label is
-            one of "config:<uuid>", "same_esp", or "default_25".
+            one of "config:<uuid>", "same_esp", or "default_25c".
         """
         sensor_repo = SensorRepository(session)
         now_utc = datetime.now(timezone.utc)
 
-        # Priority 1 (AUT-299): Explicitly configured temp sensor (cross-ESP capable)
+        # Priority 1: Explicitly configured temp sensor (cross-ESP capable)
         if sensor_config is not None and sensor_config.temp_sensor_config_id is not None:
             linked_config = await sensor_repo.get_by_id(sensor_config.temp_sensor_config_id)
             if linked_config is not None:
@@ -973,14 +1020,16 @@ class SensorDataHandler:
                     if age <= self._ATC_MAX_AGE:
                         source_label = f"config:{sensor_config.temp_sensor_config_id}"
                         logger.debug(
-                            "[EC-ATC] Using linked temp sensor %s (%.2f°C, age=%.0fs) for ATC",
+                            "[%s] Using linked temp sensor %s (%.2f°C, age=%.0fs) for ATC",
+                            log_prefix,
                             sensor_config.temp_sensor_config_id,
                             float(reading.processed_value),
                             age.total_seconds(),
                         )
                         return (float(reading.processed_value), source_label)
                     logger.debug(
-                        "[EC-ATC] Linked temp sensor reading too stale (age=%.0fs > %.0fs), falling back to same-ESP",
+                        "[%s] Linked temp sensor reading too stale (age=%.0fs > %.0fs), falling back to same-ESP",
+                        log_prefix,
                         age.total_seconds(),
                         self._ATC_MAX_AGE.total_seconds(),
                     )
@@ -1001,14 +1050,33 @@ class SensorDataHandler:
             age = now_utc - ts
             if age > self._ATC_MAX_AGE:
                 logger.debug(
-                    "[EC-ATC] Temperature reading too stale (age=%.0fs > %.0fs), skipping ATC",
+                    "[%s] Temperature reading too stale (age=%.0fs > %.0fs), skipping ATC",
+                    log_prefix,
                     age.total_seconds(),
                     self._ATC_MAX_AGE.total_seconds(),
                 )
                 continue
             return (float(reading.processed_value), "same_esp")
 
-        return (None, "default_25")
+        return (None, "default_25c")
+
+    async def _try_get_ec_temperature(
+        self,
+        esp_device,
+        session,
+        sensor_config=None,
+    ) -> tuple[Optional[float], str]:
+        """Backward-compatible shim: delegates to _try_get_atc_temperature for EC sensors.
+
+        Kept for call-site compatibility (AUT-299). New callers should use
+        _try_get_atc_temperature() directly with an explicit log_prefix.
+        """
+        return await self._try_get_atc_temperature(
+            esp_device=esp_device,
+            session=session,
+            sensor_config=sensor_config,
+            log_prefix="EC-ATC",
+        )
 
     # ─── Threshold Evaluation ─────────────────────────────────────
 
