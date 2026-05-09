@@ -41,6 +41,7 @@ bool PumpActuator::begin(const ActuatorConfig& config) {
 
   config_ = config;
   gpio_ = config.gpio;
+  protection_.max_runtime_ms = config.runtime_protection.max_runtime_ms;
 
   if (!gpio_manager_->requestPin(gpio_, "actuator", config_.actuator_name.c_str())) {
     LOG_E(TAG, "PumpActuator: failed to reserve GPIO " + String(gpio_));
@@ -137,11 +138,13 @@ bool PumpActuator::applyState(bool state, bool force) {
   unsigned long now = millis();
   if (state) {
     activation_start_ms_ = now;
+    config_.runtime_protection.activation_start_ms = now;
     recordActivation(now);
   } else if (activation_start_ms_ != 0) {
     accumulated_runtime_ms_ += now - activation_start_ms_;
     config_.accumulated_runtime_ms = accumulated_runtime_ms_;
     activation_start_ms_ = 0;
+    config_.runtime_protection.activation_start_ms = 0;
     last_stop_ms_ = now;
   }
 

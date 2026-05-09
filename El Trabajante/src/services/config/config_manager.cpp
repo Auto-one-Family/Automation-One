@@ -30,7 +30,7 @@ ConfigManager::ConfigManager()
     zone_config_loaded_(false),
     system_config_loaded_(false),
     subzone_count_cache_(0),
-    subzone_count_initialized_(true) {
+    subzone_count_initialized_(false) {
 }
 
 // ============================================
