@@ -102,6 +102,23 @@ class IntentOutcomeHandler:
                         payload.get("intent_id"),
                     )
 
+            if not str(payload.get("outcome") or "").strip():
+                # AUT-304: pre-fix firmware (esp32_dev < AUT-304) can omit ``outcome``
+                # under ArduinoJson budget pressure. Mirror the ``flow`` sentinel pattern:
+                # default to "unknown" so validation passes; canonicalization marks it
+                # as a contract violation for observability.
+                payload["outcome"] = "unknown"
+                if not payload.get("code"):
+                    payload["code"] = "CONTRACT_MISSING_OUTCOME"
+                if not payload.get("reason"):
+                    payload["reason"] = "Contract violation: missing outcome"
+                payload.setdefault("retryable", False)
+                logger.warning(
+                    "intent_outcome missing outcome defaulted to 'unknown': esp_id=%s intent_id=%s",
+                    esp_id,
+                    payload.get("intent_id"),
+                )
+
             validation_error = self._validate_payload(payload)
             if validation_error:
                 logger.error(

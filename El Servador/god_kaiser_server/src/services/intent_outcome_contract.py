@@ -59,10 +59,12 @@ def merge_intent_outcome_nested_data(payload: dict[str, Any]) -> None:
         "epoch",
         "ttl_ms",
         "created_at_ms",
-        # ``flow`` may be nested under ``data`` by legacy firmware or dropped
-        # silently from the top level when ArduinoJson serialization hits the
-        # DynamicJsonDocument size budget (Lauf-4 Live-Hartetest / AUT-108).
+        # ``flow`` / ``outcome`` may be nested under ``data`` by legacy firmware
+        # or dropped from the top level when ArduinoJson hits its size budget
+        # (Lauf-4 Live-Hartetest / AUT-108, AUT-304).
         "flow",
+        "outcome",
+        "ts",
     ):
         if key not in data:
             continue
