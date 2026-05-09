@@ -20,16 +20,13 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from sqlalchemy import text
 
 from src.core.config import get_settings
 from src.core.logging_config import get_logger
-from src.core.security import hash_password
-from src.db.base import Base
 from src.db.repositories.esp_repo import ESPRepository
 from src.db.repositories.system_config_repo import SystemConfigRepository
 from src.db.repositories.user_repo import UserRepository
-from src.db.session import get_engine, get_session, init_db
+from src.db.session import get_session
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -127,7 +124,6 @@ async def create_wokwi_esp() -> bool:
     Returns:
         True if created, False if already exists
     """
-    from datetime import timezone
     from src.db.models.esp import ESPDevice
 
     WOKWI_ESP_ID = "ESP_WOKWI001"
