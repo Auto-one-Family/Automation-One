@@ -1481,6 +1481,8 @@ static void buildActuatorKey(char* buffer, size_t buffer_size, uint8_t index, co
 #define NVS_ACT_INV        "act_%d_inv"      // act_0_inv = 9 chars ✅
 #define NVS_ACT_DEF_ST     "act_%d_def_st"   // act_0_def_st = 12 chars ✅
 #define NVS_ACT_DEF_PWM    "act_%d_def_pwm"  // act_0_def_pwm = 13 chars ✅
+#define NVS_ACT_FSOD       "act_%d_fsod"    // max 15 chars NVS limit
+#define NVS_ACT_FSOD_OVR   "act_%d_fsod_o"
 
 // Legacy keys (deprecated, some >15 chars - kept for migration only)
 #define NVS_ACT_COUNT_OLD      "actuator_count"       // 14 chars ✅ (was OK)
@@ -2343,6 +2345,12 @@ bool ConfigManager::saveActuatorConfig(const ActuatorConfig actuators[], uint8_t
     snprintf(key, sizeof(key), NVS_ACT_DEF_PWM, i);
     success &= storageManager.putUInt8(key, config.default_pwm);
 
+    // AUT-66: fail_safe_on_disconnect policy
+    snprintf(key, sizeof(key), NVS_ACT_FSOD, i);
+    success &= storageManager.putBool(key, config.fail_safe_on_disconnect);
+    snprintf(key, sizeof(key), NVS_ACT_FSOD_OVR, i);
+    success &= storageManager.putBool(key, config.has_fail_safe_override);
+
     if (!success) {
       LOG_E(TAG, "ConfigManager: Failed to save actuator " + String(i));
     }
@@ -2472,6 +2480,12 @@ bool ConfigManager::loadActuatorConfig(ActuatorConfig actuators[], uint8_t max_a
     snprintf(new_key, sizeof(new_key), NVS_ACT_DEF_PWM, i);
     snprintf(old_key, sizeof(old_key), NVS_ACT_DEF_PWM_OLD, i);
     config.default_pwm = migrateReadUInt8(new_key, old_key, 0);
+
+    // AUT-66: fail_safe_on_disconnect — default derives from critical flag if not persisted
+    snprintf(new_key, sizeof(new_key), NVS_ACT_FSOD, i);
+    config.fail_safe_on_disconnect = storageManager.getBool(new_key, config.critical);
+    snprintf(new_key, sizeof(new_key), NVS_ACT_FSOD_OVR, i);
+    config.has_fail_safe_override = storageManager.getBool(new_key, false);
 
     // Validate & Store
     if (validateActuatorConfig(config)) {

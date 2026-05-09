@@ -2119,6 +2119,25 @@ void routeIncomingMessage(const char* t, const char* p) {
             mqttClient.publish(system_command_topic + "/response", response);
             LOG_I(TAG, "Safe mode deactivated via command");
         }
+        // ─── Force Safe State ─────────────────────────────────────────────────────
+        // AUT-66: Manual-Recovery — forces all actuators to safe state regardless of
+        // offline rules or fail_safe_on_disconnect policy.
+        else if (command == "force_safe_state") {
+            LOG_W(TAG, "=== FORCE_SAFE_STATE COMMAND RECEIVED ===");
+            if (actuatorManager.isInitialized()) {
+                actuatorManager.setAllActuatorsToSafeState();
+            }
+            DynamicJsonDocument response_doc(256);
+            response_doc["command"] = "force_safe_state";
+            response_doc["success"] = true;
+            response_doc["esp_id"]  = g_system_config.esp_id;
+            response_doc["ts"]      = (unsigned long)timeManager.getUnixTimestamp();
+            response_doc["seq"]     = mqttClient.getNextSeq();
+            String response;
+            serializeJson(response_doc, response);
+            mqttClient.publish(system_command_topic + "/response", response);
+            LOG_W(TAG, "force_safe_state: all actuators set to safe state");
+        }
         // ─── Set Log Level ───────────────────────────────────────────────────
         else if (command == "set_log_level") {
             LOG_I(TAG, "=== SET_LOG_LEVEL COMMAND RECEIVED ===");

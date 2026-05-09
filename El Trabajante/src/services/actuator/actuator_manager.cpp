@@ -632,18 +632,25 @@ void ActuatorManager::setUncoveredActuatorsToSafeState() {
         publishLatchedOffline(gpio, "offline_rule_hold", is_on);
       }
     } else {
-      controlActuatorBinary(gpio, actuators_[i].config.default_state);
-      if (is_on) {
-        forced++;
-        LOG_W(TAG, "[SAFETY] GPIO " + String(gpio) +
-                   " safety_forced_off (no P4 rule" +
-                   String(actuators_[i].config.critical ? ", CRITICAL" : "") + ")");
-        publishActuatorAlert(gpio, "safety_forced_off",
-                             String("No offline rule — forced to default_state") +
-                             (actuators_[i].config.critical ? " (critical)" : ""));
-        // AUT-117: Structured telemetry parallel to alert (QoS 0).
-        // pre_disconnect_state=true: actuator was ON before being forced to default_state.
-        publishLatchedOffline(gpio, "safety_forced_off", is_on);
+      // AUT-66: Respect per-actuator fail_safe_on_disconnect policy.
+      if (actuators_[i].config.fail_safe_on_disconnect) {
+        controlActuatorBinary(gpio, actuators_[i].config.default_state);
+        if (is_on) {
+          forced++;
+          LOG_W(TAG, "[SAFETY] GPIO " + String(gpio) +
+                     " safety_forced_off (fail_safe=true, no P4 rule" +
+                     String(actuators_[i].config.critical ? ", CRITICAL" : "") + ")");
+          publishActuatorAlert(gpio, "safety_forced_off",
+                               String("fail_safe=true, no offline rule"));
+          publishLatchedOffline(gpio, "safety_forced_off", is_on);
+        }
+      } else {
+        // fail_safe=false: keep last state
+        if (is_on) {
+          LOG_I(TAG, "[SAFETY] GPIO " + String(gpio) +
+                     " fail_safe=false, keeping last state at disconnect");
+          publishLatchedOffline(gpio, "offline_rule_hold", is_on);
+        }
       }
     }
   }
@@ -932,6 +939,18 @@ bool ActuatorManager::parseActuatorDefinition(const JsonObjectConst& obj,
 
   if (JsonHelpers::extractBool(obj, "default_state", bool_value, false)) {
     config.default_state = bool_value;
+  }
+
+  // AUT-66: Server-configurable fail-safe policy on MQTT disconnect.
+  if (obj.containsKey("fail_safe_on_disconnect")) {
+    if (JsonHelpers::extractBool(obj, "fail_safe_on_disconnect", bool_value, true)) {
+      config.fail_safe_on_disconnect = bool_value;
+      config.has_fail_safe_override  = true;
+    }
+  } else {
+    // No server override: critical actuators → fail-safe; non-critical → hold
+    config.fail_safe_on_disconnect = config.critical;
+    config.has_fail_safe_override  = false;
   }
 
   int default_pwm_value = 0;
