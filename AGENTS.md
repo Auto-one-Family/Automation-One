@@ -26,7 +26,7 @@ AutomationOne ist ein IoT-Framework mit 3 Schichten:
 
 - 9 Sensortypen: pH, EC, Temp, Humidity, Soil, Pressure, CO2, Light, Flow
 - 4 Aktortypen: Pump, Valve, PWM, Relay
-- PostgreSQL (32 Tabellen), MQTT (Mosquitto), Grafana+Prometheus Monitoring
+- PostgreSQL (41 Tabellen), MQTT (Mosquitto), Grafana+Prometheus Monitoring
 - HardwareView: 3-Level-Zoom (L1 Uebersicht → L2 Orbital/Device → L3 Modals), Route-basiert
 - Sensor-Konfiguration NUR in HardwareView (SensorConfigPanel). Komponenten-Tab (/sensors) = Wissensdatenbank
 - Mock vs. Real ESP klar trennen. Zone auf Geraetebene, Subzone pro Sensor
