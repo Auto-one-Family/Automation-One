@@ -252,10 +252,35 @@ const atcFallbackWarning = computed<boolean>(() => {
   return meta.temp_source === 'default_25'
 })
 
+// AUT-322: ATC cached temperature badge (yellow)
+// Show when: EC/pH sensor + metadata.temp_source === "cached_temp"
+const atcCachedTemp = computed<boolean>(() => {
+  const sType = props.sensor.sensor_type.toLowerCase()
+  if (sType !== 'ec' && sType !== 'ph') return false
+  const meta = props.sensor.metadata
+  if (!meta || typeof meta !== 'object') return false
+  return meta.temp_source === 'cached_temp'
+})
+
+// AUT-322: ATC temp read failed badge (red)
+// Show when: EC/pH sensor + metadata.temp_source === "read_failed" or "temp_read_failed"
+const atcReadFailed = computed<boolean>(() => {
+  const sType = props.sensor.sensor_type.toLowerCase()
+  if (sType !== 'ec' && sType !== 'ph') return false
+  const meta = props.sensor.metadata
+  if (!meta || typeof meta !== 'object') return false
+  return meta.temp_source === 'read_failed' || meta.temp_source === 'temp_read_failed'
+})
+
 // On-demand measurement (AUT-298)
 const isOnDemand = computed(() => props.sensor.operating_mode === 'on_demand')
 // AUT-300: Stale-due uses server flag (measurement_freshness_hours threshold), not frontend 120s threshold
 const isOnDemandStaleDue = computed(() => isOnDemand.value && props.sensor.is_stale === true && !isEspOffline.value)
+// AUT-314: Analog probe sensors need settling time — show hint before measuring
+const isAnalogProbeSensor = computed(() => {
+  const t = props.sensor.sensor_type.toLowerCase()
+  return t.includes('ph') || t.includes('ec')
+})
 const isMeasuring = ref(false)
 const measureState = ref<'idle' | 'success' | 'error'>('idle')
 let measureTriggerTime = 0
@@ -327,7 +352,7 @@ async function triggerMeasure(): Promise<void> {
         }
         measureState.value = 'idle'
       }, 2000)
-    }, 10_000)
+    }, 20_000)
   } catch {
     clearMeasureTimeout()
     isMeasuring.value = false
@@ -480,6 +505,22 @@ function handleClick() {
           >
             <AlertTriangle class="w-3 h-3" /> ATC: Fallback 25°C
           </span>
+          <!-- AUT-322: ATC cached temperature badge — approximated temp from cache -->
+          <span
+            v-if="atcCachedTemp"
+            class="sensor-card__badge sensor-card__badge--atc-cached"
+            title="Temperatur aus Cache (< 60 s) — Messung basiert auf gecachtem Temperaturwert."
+          >
+            ~T
+          </span>
+          <!-- AUT-322: ATC temp read failed badge — measurement aborted -->
+          <span
+            v-if="atcReadFailed"
+            class="sensor-card__badge sensor-card__badge--atc-read-failed"
+            title="Temp-Read fehlgeschlagen — Messung wurde abgebrochen. Temperaturerfassung prüfen."
+          >
+            <AlertTriangle class="w-3 h-3" />
+          </span>
         </div>
       </div>
       <!-- On-Demand Measure Button (AUT-298) -->
@@ -488,6 +529,9 @@ function handleClick() {
         class="sensor-card__measure-row"
         @click.stop
       >
+        <span v-if="isAnalogProbeSensor && !isMeasuring" class="sensor-card__measure-hint">
+          Sonde ≥5s eintauchen lassen
+        </span>
         <button
           :class="[
             'sensor-card__measure-btn',
@@ -861,6 +905,22 @@ function handleClick() {
   border: 1px solid rgba(251, 191, 36, 0.3);
 }
 
+/* AUT-322: ATC cached temperature (yellow/warning — approximated value) */
+.sensor-card__badge--atc-cached {
+  color: var(--color-warning);
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  letter-spacing: 0.03em;
+}
+
+/* AUT-322: ATC temp read failed (red/danger — measurement aborted) */
+.sensor-card__badge--atc-read-failed {
+  color: var(--color-error);
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+}
+
 /* AUT-300: On-demand sensor state badges */
 .sensor-card__badge--on-demand-waiting {
   color: var(--color-text-secondary);
@@ -1054,6 +1114,13 @@ function handleClick() {
   border-top: 1px dashed var(--glass-border);
   display: flex;
   justify-content: flex-end;
+}
+
+.sensor-card__measure-hint {
+  font-size: var(--text-xxs);
+  color: var(--color-warning, #eab308);
+  opacity: 0.8;
+  letter-spacing: 0.02em;
 }
 
 .sensor-card__measure-btn {
