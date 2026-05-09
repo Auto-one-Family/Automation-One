@@ -26,6 +26,7 @@ class SubzoneSensorEntry(BaseModel):
     unit: str = ""
     quality: str = "unknown"
     last_read: Optional[str] = None
+    operating_mode: Optional[str] = None
 
 
 class SubzoneActuatorEntry(BaseModel):

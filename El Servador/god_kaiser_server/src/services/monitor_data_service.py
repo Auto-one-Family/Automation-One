@@ -151,6 +151,7 @@ class MonitorDataService:
                 unit=unit,
                 quality=quality,
                 last_read=last_read,
+                operating_mode=sc.operating_mode,
             )
             if key not in sensor_entries:
                 sensor_entries[key] = []
