@@ -315,6 +315,22 @@ class SensorDataHandler:
                             atc_temp, atc_source = await self._try_get_ec_temperature(
                                 esp_device, session, sensor_config=sensor_config
                             )
+                            if atc_source == "read_failed":
+                                # AUT-321: Temp sensor assigned but cache expired and read failed.
+                                # Abort EC measurement — no silent 25 °C fallback.
+                                logger.error(
+                                    "[EC-ATC] Temperature read failed for %s GPIO %s — "
+                                    "aborting EC measurement (no 25 °C fallback)",
+                                    esp_id_str,
+                                    gpio,
+                                )
+                                await self._emit_atc_read_failed_event(
+                                    esp_id_str=esp_id_str,
+                                    gpio=gpio,
+                                    sensor_type=sensor_type,
+                                    session=session,
+                                )
+                                return True
                             if atc_temp is not None:
                                 ec_extra_params["temperature_compensation"] = atc_temp
                                 logger.debug(
@@ -347,6 +363,22 @@ class SensorDataHandler:
                             ph_atc_temp, ph_atc_source = await self._try_get_atc_temperature(
                                 esp_device, session, sensor_config=sensor_config, log_prefix="pH-ATC"
                             )
+                            if ph_atc_source == "read_failed":
+                                # AUT-321: Temp sensor assigned but cache expired and read failed.
+                                # Abort pH measurement — no silent 25 °C fallback.
+                                logger.error(
+                                    "[pH-ATC] Temperature read failed for %s GPIO %s — "
+                                    "aborting pH measurement (no 25 °C fallback)",
+                                    esp_id_str,
+                                    gpio,
+                                )
+                                await self._emit_atc_read_failed_event(
+                                    esp_id_str=esp_id_str,
+                                    gpio=gpio,
+                                    sensor_type=sensor_type,
+                                    session=session,
+                                )
+                                return True
                             if ph_atc_temp is not None:
                                 ph_extra_params["temperature_compensation"] = ph_atc_temp
                                 logger.debug(
@@ -964,10 +996,20 @@ class SensorDataHandler:
 
     # ─── ATC Temperature Lookup (shared: EC + pH) ─────────────────
 
-    # Max age for temperature reading used in automatic temperature compensation.
-    # Both EC and pH are on-demand sensors; allow a wider window than VPD since
-    # temperature rarely changes rapidly in a greenhouse environment.
+    # Age thresholds for ATC temperature cache classification (AUT-321).
+    #
+    # Three-tier cache policy:
+    #   < _ATC_FRESH_AGE  : fresh reading → use directly, source = "ok" variant
+    #   < _ATC_STALE_AGE  : stale but usable → use with source = "cached_temp"
+    #   >= _ATC_STALE_AGE : too old or absent → no usable cache → source = "read_failed"
+    #                        (only when a temp sensor IS configured/discoverable;
+    #                         returns "default_25c" when NO temp sensor exists at all)
+    #
+    # The legacy _ATC_MAX_AGE (5 min) is kept as the outer guard for Priority 2
+    # auto-discovery so that very old readings are still excluded.
     _ATC_MAX_AGE = timedelta(minutes=5)
+    _ATC_FRESH_AGE = timedelta(seconds=5)
+    _ATC_STALE_AGE = timedelta(seconds=60)
 
     async def _try_get_atc_temperature(
         self,
@@ -987,8 +1029,14 @@ class SensorDataHandler:
         recent temperature reading (sensor_type "temperature" or "sht31_temp") on the
         same ESP device regardless of GPIO pin.
 
-        Returns None as float component when no fresh reading is available — callers
-        should fall back to 25.0°C (NIST reference).
+        AUT-321 — Three-tier cache policy:
+            age < 5 s   → fresh → returns existing source label ("config:<uuid>" / "same_esp")
+            5 s ≤ age < 60 s → stale but usable → returns source label "cached_temp"
+            age ≥ 60 s  → too old; if a linked/discoverable sensor exists but reading is
+                          absent or expired → returns (None, "read_failed") so callers can
+                          abort the measurement instead of silently falling back to 25 °C.
+            no temp sensor assigned/discoverable at all → returns (None, "default_25c")
+              (no-sensor case: 25 °C fallback is correct NIST reference, not an error)
 
         Args:
             esp_device: ESPDevice ORM instance (provides device UUID)
@@ -998,7 +1046,7 @@ class SensorDataHandler:
 
         Returns:
             Tuple of (temperature_celsius_or_None, source_label) where source_label is
-            one of "config:<uuid>", "same_esp", or "default_25c".
+            one of "config:<uuid>", "same_esp", "cached_temp", "read_failed", or "default_25c".
         """
         sensor_repo = SensorRepository(session)
         now_utc = datetime.now(timezone.utc)
@@ -1017,24 +1065,48 @@ class SensorDataHandler:
                     if ts.tzinfo is None:
                         ts = ts.replace(tzinfo=timezone.utc)
                     age = now_utc - ts
-                    if age <= self._ATC_MAX_AGE:
+                    if age < self._ATC_FRESH_AGE:
+                        # Fresh reading — use directly with explicit config label
                         source_label = f"config:{sensor_config.temp_sensor_config_id}"
                         logger.debug(
-                            "[%s] Using linked temp sensor %s (%.2f°C, age=%.0fs) for ATC",
+                            "[%s] Using linked temp sensor %s (%.2f°C, age=%.0fs, fresh) for ATC",
                             log_prefix,
                             sensor_config.temp_sensor_config_id,
                             float(reading.processed_value),
                             age.total_seconds(),
                         )
                         return (float(reading.processed_value), source_label)
-                    logger.debug(
-                        "[%s] Linked temp sensor reading too stale (age=%.0fs > %.0fs), falling back to same-ESP",
+                    if age < self._ATC_STALE_AGE:
+                        # Stale but within usable window — mark as cached_temp
+                        logger.debug(
+                            "[%s] Using linked temp sensor %s (%.2f°C, age=%.0fs, cached_temp) for ATC",
+                            log_prefix,
+                            sensor_config.temp_sensor_config_id,
+                            float(reading.processed_value),
+                            age.total_seconds(),
+                        )
+                        return (float(reading.processed_value), "cached_temp")
+                    # Reading too old — linked sensor exists but cache expired
+                    logger.warning(
+                        "[%s] Linked temp sensor %s reading expired (age=%.0fs >= %.0fs) — read_failed",
                         log_prefix,
+                        sensor_config.temp_sensor_config_id,
                         age.total_seconds(),
-                        self._ATC_MAX_AGE.total_seconds(),
+                        self._ATC_STALE_AGE.total_seconds(),
                     )
+                    return (None, "read_failed")
+                # Linked sensor exists but has no valid reading
+                logger.warning(
+                    "[%s] Linked temp sensor %s has no valid reading — read_failed",
+                    log_prefix,
+                    sensor_config.temp_sensor_config_id,
+                )
+                return (None, "read_failed")
 
         # Priority 2: Same-ESP auto-discovery (existing behavior)
+        # Track whether a temp sensor was found on this ESP at all (to distinguish
+        # "no sensor" → default_25c from "sensor present but cache expired" → read_failed).
+        found_temp_sensor_on_esp = False
         for temp_type in ("temperature", "sht31_temp"):
             reading = await sensor_repo.get_latest_reading_for_esp(
                 esp_id=esp_device.id,
@@ -1044,21 +1116,130 @@ class SensorDataHandler:
                 continue
             if reading.processed_value is None:
                 continue
+            found_temp_sensor_on_esp = True
             ts = reading.timestamp
             if ts.tzinfo is None:
                 ts = ts.replace(tzinfo=timezone.utc)
             age = now_utc - ts
-            if age > self._ATC_MAX_AGE:
+            if age < self._ATC_FRESH_AGE:
+                # Fresh reading from same-ESP discovery
+                return (float(reading.processed_value), "same_esp")
+            if age < self._ATC_STALE_AGE:
+                # Stale but usable — mark as cached_temp
                 logger.debug(
-                    "[%s] Temperature reading too stale (age=%.0fs > %.0fs), skipping ATC",
+                    "[%s] Same-ESP temp sensor %s (%.2f°C, age=%.0fs, cached_temp) for ATC",
                     log_prefix,
+                    temp_type,
+                    float(reading.processed_value),
                     age.total_seconds(),
-                    self._ATC_MAX_AGE.total_seconds(),
                 )
-                continue
-            return (float(reading.processed_value), "same_esp")
+                return (float(reading.processed_value), "cached_temp")
+            if age <= self._ATC_MAX_AGE:
+                # Beyond stale window but within the old 5-min outer guard.
+                # A sensor IS present, cache IS expired → read_failed.
+                logger.warning(
+                    "[%s] Same-ESP temp sensor %s reading expired (age=%.0fs >= %.0fs) — read_failed",
+                    log_prefix,
+                    temp_type,
+                    age.total_seconds(),
+                    self._ATC_STALE_AGE.total_seconds(),
+                )
+                return (None, "read_failed")
+            # Beyond the outer 5-min guard — treat as absent (too stale to trust)
+            logger.debug(
+                "[%s] Same-ESP temp sensor %s reading too stale (age=%.0fs > %.0fs), skipping",
+                log_prefix,
+                temp_type,
+                age.total_seconds(),
+                self._ATC_MAX_AGE.total_seconds(),
+            )
 
+        if found_temp_sensor_on_esp:
+            # Sensor existed but all readings were beyond the outer 5-min guard
+            logger.warning(
+                "[%s] Same-ESP temp sensor found but all readings beyond max age (%.0fs) — read_failed",
+                log_prefix,
+                self._ATC_MAX_AGE.total_seconds(),
+            )
+            return (None, "read_failed")
+
+        # No temperature sensor configured or discoverable — 25 °C reference is correct
         return (None, "default_25c")
+
+    async def _emit_atc_read_failed_event(
+        self,
+        esp_id_str: str,
+        gpio: int,
+        sensor_type: str,
+        session,
+    ) -> None:
+        """Emit WS error_event and write audit log when ATC temperature read fails (AUT-321).
+
+        Called when _try_get_atc_temperature() returns "read_failed" for a pH or EC sensor
+        that has a temperature sensor assigned. The raw measurement is NOT persisted; this
+        method provides the operator-visible signal for the abort.
+
+        Args:
+            esp_id_str: ESP device ID string
+            gpio: GPIO pin number of the pH/EC sensor
+            sensor_type: "ph" or "ec"
+            session: Active async database session (for audit log write)
+        """
+        error_message = (
+            f"ATC temperature read failed for {sensor_type.upper()} sensor on "
+            f"{esp_id_str} GPIO {gpio} — measurement aborted (no 25 °C fallback)"
+        )
+
+        # Audit log (pattern from error_handler.py / heartbeat_handler.py)
+        try:
+            from ...db.repositories.audit_log_repo import AuditLogRepository
+            from ...db.models.audit_log import AuditEventType, AuditSeverity
+
+            audit_repo = AuditLogRepository(session)
+            await audit_repo.log_device_event(
+                esp_id=esp_id_str,
+                event_type=AuditEventType.MQTT_ERROR,
+                status="failed",
+                message=error_message,
+                severity=AuditSeverity.WARNING,
+                details={
+                    "gpio": gpio,
+                    "sensor_type": sensor_type,
+                    "atc_source": "read_failed",
+                    "action": "measurement_aborted",
+                },
+            )
+        except Exception as audit_err:
+            logger.warning(
+                "[%s-ATC] Failed to write audit log for read_failed event: %s",
+                sensor_type.upper(),
+                audit_err,
+            )
+
+        # WebSocket error_event broadcast (best-effort, pattern from handle_sensor_data)
+        try:
+            from ...websocket.manager import WebSocketManager
+
+            ws_manager = await WebSocketManager.get_instance()
+            await ws_manager.broadcast(
+                "error_event",
+                {
+                    "esp_id": esp_id_str,
+                    "message": error_message,
+                    "severity": "warning",
+                    "device_id": esp_id_str,
+                    "gpio": gpio,
+                    "sensor_type": sensor_type,
+                    "error_type": "atc_read_failed",
+                    "atc_source": "read_failed",
+                },
+            )
+        except Exception as ws_err:
+            logger.warning(
+                "[%s-ATC] Failed to broadcast read_failed event via WebSocket: %s",
+                sensor_type.upper(),
+                ws_err,
+            )
 
     async def _try_get_ec_temperature(
         self,
