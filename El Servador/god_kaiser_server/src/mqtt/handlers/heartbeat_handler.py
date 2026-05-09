@@ -66,7 +66,9 @@ logger = get_logger(__name__)
 HEARTBEAT_TIMEOUT_SECONDS = get_settings().maintenance.heartbeat_timeout_seconds
 
 # Full-State-Push: Reconnect threshold (seconds offline before triggering)
-RECONNECT_THRESHOLD_SECONDS = 60
+# Must be > heartbeat interval (60s) to avoid false-positive reconnect detection
+# when heartbeats arrive slightly late (e.g. 60.5s → offline_seconds=60.5 > 60).
+RECONNECT_THRESHOLD_SECONDS = 150
 # Full-State-Push: Cooldown between pushes (prevent rapid-fire on boot)
 # Note: As of SAFETY-P5 Fix-3, the heartbeat ACK is sent early (before DB writes)
 # and independently of config push. Config push is triggered via _has_pending_config().
