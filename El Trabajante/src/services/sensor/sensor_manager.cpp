@@ -1643,39 +1643,78 @@ ManualMeasurementResult SensorManager::triggerManualMeasurement(uint8_t gpio, ui
             return result;
         }
 
-        // Single-value sensor - standard measurement
-        SensorReading reading;
-        if (performMeasurement(gpio, reading)) {
-            // E-P3: Timeout-Guard — check elapsed time after measurement
-            unsigned long elapsed = millis() - start_ms;
-            if (elapsed > timeout_ms) {
-                result.timeout_reached = true;
-                LOG_W(TAG, "SensorManager: Manual measurement TIMEOUT on GPIO " + String(gpio) +
-                         " (elapsed: " + String(elapsed) + "ms, limit: " + String(timeout_ms) + "ms)");
-                errorTracker.trackError(ERROR_SENSOR_TIMEOUT, ERROR_SEVERITY_WARNING,
-                                       "Manual measurement exceeded timeout");
-            }
+        // Single-value sensor
+        // AUT-314: 3-sample median for analog probes (pH, EC, moisture) — reduces settling noise.
+        // Delay 200ms between samples; total overhead ~400ms, well within 5s timeout.
+        String lower_type_aut314 = String(config->sensor_type);
+        lower_type_aut314.toLowerCase();
+        bool is_analog_probe = (lower_type_aut314.indexOf("ph") >= 0 ||
+                                 lower_type_aut314.indexOf("ec") >= 0 ||
+                                 lower_type_aut314.indexOf("moisture") >= 0 ||
+                                 lower_type_aut314.indexOf("soil") >= 0);
 
-            bool publish_ok = publishSensorReading(reading);
-            result.measurement_ok = true;
-            result.publish_ok = publish_ok;
-            result.quality = reading.quality;
-            result.raw_value = static_cast<int32_t>(reading.raw_value);
-            result.sensor_type = reading.sensor_type;
-            if (result.timeout_reached) {
-                result.reason_code = "MEASURE_TIMEOUT";
-            } else if (!publish_ok) {
-                result.reason_code = "PUBLISH_SKIPPED";
-            } else {
-                result.reason_code = "NONE";
+        SensorReading reading;
+        if (is_analog_probe) {
+            SensorReading samples[3];
+            uint8_t valid_count = 0;
+            for (uint8_t i = 0; i < 3; i++) {
+                if (i > 0) delay(200);
+                if (performMeasurement(gpio, samples[valid_count])) {
+                    valid_count++;
+                }
             }
-            config->last_reading = start_ms;
-            manual_measure_busy_[sensor_index] = false;  // AUT-303: release busy flag
-            return result;
+            if (valid_count == 0) {
+                LOG_E(TAG, "SensorManager: Manual measurement failed (all 3 samples) for GPIO " + String(gpio));
+                result.reason_code = "MEASUREMENT_FAILED";
+                manual_measure_busy_[sensor_index] = false;  // AUT-303: release busy flag
+                return result;
+            }
+            // Bubble-sort by raw_value, pick median
+            for (uint8_t i = 0; i < valid_count - 1; i++) {
+                for (uint8_t j = 0; j < valid_count - 1 - i; j++) {
+                    if (samples[j].raw_value > samples[j + 1].raw_value) {
+                        SensorReading tmp = samples[j];
+                        samples[j] = samples[j + 1];
+                        samples[j + 1] = tmp;
+                    }
+                }
+            }
+            reading = samples[valid_count / 2];
+            LOG_I(TAG, "SensorManager: Manual multi-sample: " + String(valid_count) +
+                      "/3 valid, median raw=" + String(reading.raw_value) + " (GPIO " + String(gpio) + ")");
+        } else {
+            if (!performMeasurement(gpio, reading)) {
+                LOG_E(TAG, "SensorManager: Manual measurement failed for GPIO " + String(gpio));
+                result.reason_code = "MEASUREMENT_FAILED";
+                manual_measure_busy_[sensor_index] = false;  // AUT-303: release busy flag
+                return result;
+            }
         }
 
-        LOG_E(TAG, "SensorManager: Manual measurement failed for GPIO " + String(gpio));
-        result.reason_code = result.timeout_reached ? "MEASURE_TIMEOUT" : "MEASUREMENT_FAILED";
+        // E-P3: Timeout-Guard — check elapsed time after measurement
+        unsigned long elapsed = millis() - start_ms;
+        if (elapsed > timeout_ms) {
+            result.timeout_reached = true;
+            LOG_W(TAG, "SensorManager: Manual measurement TIMEOUT on GPIO " + String(gpio) +
+                     " (elapsed: " + String(elapsed) + "ms, limit: " + String(timeout_ms) + "ms)");
+            errorTracker.trackError(ERROR_SENSOR_TIMEOUT, ERROR_SEVERITY_WARNING,
+                                   "Manual measurement exceeded timeout");
+        }
+
+        bool publish_ok = publishSensorReading(reading);
+        result.measurement_ok = true;
+        result.publish_ok = publish_ok;
+        result.quality = reading.quality;
+        result.raw_value = static_cast<int32_t>(reading.raw_value);
+        result.sensor_type = reading.sensor_type;
+        if (result.timeout_reached) {
+            result.reason_code = "MEASURE_TIMEOUT";
+        } else if (!publish_ok) {
+            result.reason_code = "PUBLISH_SKIPPED";
+        } else {
+            result.reason_code = "NONE";
+        }
+        config->last_reading = start_ms;
         manual_measure_busy_[sensor_index] = false;  // AUT-303: release busy flag
         return result;
     }
