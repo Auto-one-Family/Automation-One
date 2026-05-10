@@ -10,7 +10,7 @@
  * - Edit/Remove actions
  */
 
-import { computed, ref } from 'vue'
+import { computed, ref, watch, onUnmounted } from 'vue'
 import { Gauge, Info, Edit, Trash2, AlertTriangle, Activity, Clock, Calendar, Pause, HelpCircle, Play, Beaker, Timer } from 'lucide-vue-next'
 import { sensorsApi } from '@/api/sensors'
 import { useToast } from '@/composables/useToast'
@@ -49,6 +49,8 @@ interface Sensor {
   calibration_data?: Record<string, unknown> | null
   // Wave 1: Snapshot-Sensor Kennzeichnung (MultispeQ etc.)
   sensor_kind?: SensorKind | null
+  // AUT-313: Finality-Watch field (WS sensor_data event)
+  last_read?: string | null
 }
 
 interface Props {
@@ -70,44 +72,96 @@ const props = withDefaults(defineProps<Props>(), {
 // Toast notifications
 const toast = useToast()
 
-// State for measurement button
+// AUT-313: Finality-Pattern (mirroring SensorCard.vue:285-303 as canonical source)
 const isMeasuring = ref(false)
+type MeasureState = 'idle' | 'success' | 'error'
+const measureState = ref<MeasureState>('idle')
+let measureTriggerTime = 0
+let preMeasureTriggerValue: number | null = null
+let preMeasureLastRead: string | null = null
+let measureTimeoutId: ReturnType<typeof setTimeout> | null = null
+
+function clearMeasureTimeout(): void {
+  if (measureTimeoutId) {
+    clearTimeout(measureTimeoutId)
+    measureTimeoutId = null
+  }
+}
+
+function resolveMeasureSuccess(): void {
+  clearMeasureTimeout()
+  isMeasuring.value = false
+  measureState.value = 'success'
+  measureTriggerTime = 0
+  preMeasureTriggerValue = null
+  preMeasureLastRead = null
+  toast.success('Messwert empfangen')
+  setTimeout(() => { measureState.value = 'idle' }, 2000)
+}
+
+watch(
+  () => [props.sensor.last_read, props.sensor.raw_value] as const,
+  ([newLastRead, newRawValue]) => {
+    if (!measureTriggerTime) return
+    if (!isMeasuring.value && measureState.value !== 'error') return
+    const timestampFresh = newLastRead != null && new Date(newLastRead).getTime() > measureTriggerTime
+    const lastReadChanged = newLastRead !== preMeasureLastRead
+    const valueMutated = newRawValue !== preMeasureTriggerValue
+    if (timestampFresh || lastReadChanged || valueMutated) {
+      resolveMeasureSuccess()
+    }
+  }
+)
+
+onUnmounted(clearMeasureTimeout)
 
 // Computed: Button nur für nicht-continuous Modi anzeigen
 const showMeasureButton = computed(() => {
   const mode = props.sensor.operating_mode
-  // Zeige Button für on_demand, paused, oder scheduled
-  // NICHT für continuous (die messen automatisch)
   return mode && mode !== 'continuous'
 })
 
-// Handler für Measurement-Trigger
-async function handleTriggerMeasurement() {
+// AUT-314: Analog probe sensors need settling time
+const isAnalogProbeSensor = computed(() => {
+  const t = props.sensor.sensor_type.toLowerCase()
+  return t.includes('ph') || t.includes('ec')
+})
+
+async function handleTriggerMeasurement(): Promise<void> {
   if (isMeasuring.value) return
-
   isMeasuring.value = true
-
+  measureState.value = 'idle'
+  measureTriggerTime = Date.now()
+  preMeasureTriggerValue = props.sensor.raw_value ?? null
+  preMeasureLastRead = props.sensor.last_read ?? null
   try {
-    const result = await sensorsApi.triggerMeasurement(props.espId, props.sensor.gpio)
-
-    toast.success(`Messung gestartet für GPIO ${props.sensor.gpio}`)
-
-    log.info('Measurement triggered', result)
-
+    await sensorsApi.triggerMeasurement(props.espId, props.sensor.gpio)
+    log.info('Measurement command sent, waiting for WS finality', { gpio: props.sensor.gpio })
+    measureTimeoutId = setTimeout(() => {
+      isMeasuring.value = false
+      measureState.value = 'error'
+      toast.error('Kein Messwert erhalten (Timeout)')
+      setTimeout(() => {
+        if (measureState.value !== 'success') {
+          measureTriggerTime = 0
+          preMeasureTriggerValue = null
+          preMeasureLastRead = null
+        }
+        measureState.value = 'idle'
+      }, 2000)
+    }, 20_000)
   } catch (err: unknown) {
+    clearMeasureTimeout()
+    isMeasuring.value = false
+    measureState.value = 'error'
+    measureTriggerTime = 0
+    preMeasureTriggerValue = null
+    preMeasureLastRead = null
     log.error('Measurement trigger failed', err)
-
     const errorMessage = (err as { response?: { data?: { detail?: string } } })
       .response?.data?.detail || 'Messung konnte nicht gestartet werden'
-
     toast.error(errorMessage)
-
-  } finally {
-    // Kurze Verzögerung bevor Button wieder aktiv wird
-    // (gibt ESP32 Zeit für Messung + MQTT Response)
-    setTimeout(() => {
-      isMeasuring.value = false
-    }, 2000)
+    setTimeout(() => { measureState.value = 'idle' }, 2000)
   }
 }
 
@@ -329,6 +383,11 @@ const isSnapshot = computed(() => props.sensor.sensor_kind === 'snapshot')
         </Badge>
       </div>
 
+      <!-- AUT-314: Settling hint for analog probe sensors -->
+      <span v-if="showMeasureButton && isAnalogProbeSensor && !isMeasuring" class="sensor-value-card__measure-hint">
+        Sonde ≥5s eintauchen lassen
+      </span>
+
       <!-- Phase 2D: Messung starten Button (nur für nicht-continuous Modi) -->
       <button
         v-if="showMeasureButton"
@@ -356,10 +415,13 @@ const isSnapshot = computed(() => props.sensor.sensor_kind === 'snapshot')
           />
         </svg>
 
-        <!-- Play Icon (wenn nicht loading) -->
+        <!-- Error Icon (Timeout/Fehler-Zustand) -->
+        <AlertTriangle v-else-if="measureState === 'error'" class="w-4 h-4 text-red-400" />
+
+        <!-- Play Icon (Normalzustand) -->
         <Play v-else class="w-4 h-4" />
 
-        <span>{{ isMeasuring ? 'Messe...' : 'Messung starten' }}</span>
+        <span>{{ isMeasuring ? 'Messe...' : measureState === 'error' ? 'Fehler' : 'Messung starten' }}</span>
       </button>
 
       <!-- Technical details (expandable) -->
