@@ -748,7 +748,10 @@ bool publishIntentOutcome(const char* flow,
     processIntentOutcomeOutbox();
 
     String topic = TopicBuilder::buildIntentOutcomeTopic();
-    bool ok = mqttClient.safePublish(topic, payload, 1);
+    // AUT-326: Non-terminal outcomes (accepted/processing) need no delivery guarantee.
+    // QoS 0 = no OUTBOX slot consumed; reduces OUTBOX pressure during measurement bursts.
+    uint8_t outcome_qos = isTerminalOutcome(normalized_outcome) ? 1 : 0;
+    bool ok = mqttClient.safePublish(topic, payload, outcome_qos);
     bool persisted_for_replay = false;
     if (ok) {
         if (command_flow) {

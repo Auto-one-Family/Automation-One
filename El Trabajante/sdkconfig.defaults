@@ -4,3 +4,8 @@ CONFIG_MQTT_TASK_CORE_SELECTION_ENABLED=y
 CONFIG_MQTT_TASK_CORE_SELECTION=0
 # MQTT task stack increased from default 6144 to 10240 — stack overflow on connect with 11 topics
 CONFIG_MQTT_TASK_STACK_SIZE=10240
+
+# AUT-326: Reduce OUTBOX expiry from 30s default to 10s.
+# Prevents heap exhaustion when PUBACK is delayed by TCP send-buffer pressure.
+# 10s covers realistic reconnect windows. Non-critical data loss on slow brokers: accepted.
+CONFIG_MQTT_OUTBOX_EXPIRED_TIMEOUT_MS=10000
