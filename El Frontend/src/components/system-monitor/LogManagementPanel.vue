@@ -505,9 +505,9 @@ onUnmounted(() => {
   gap: 0.5rem;
   padding: 0.625rem 0.75rem;
   font-size: 0.8125rem;
-  color: var(--color-error);
-  background: var(--color-error-bg);
-  border: 1px solid var(--color-error-border);
+  color: rgb(248, 113, 113);
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
   border-radius: var(--radius-md);
 }
 
@@ -526,9 +526,9 @@ onUnmounted(() => {
   gap: 0.5rem;
   padding: 0.625rem 0.75rem;
   font-size: 0.8125rem;
-  color: var(--color-success);
-  background: var(--color-success-bg);
-  border: 1px solid var(--color-success-border);
+  color: rgb(74, 222, 128);
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.2);
   border-radius: var(--radius-md);
 }
 
@@ -545,12 +545,12 @@ onUnmounted(() => {
   gap: 0.25rem;
   padding: 0.25rem 0.5rem;
   font-size: 0.75rem;
-  border: 1px solid var(--color-success-border) !important;
+  border: 1px solid rgba(34, 197, 94, 0.3) !important;
   border-radius: var(--radius-xs);
 }
 
 .mgmt-success__download:hover {
-  background: var(--color-success-bg-hover) !important;
+  background: rgba(34, 197, 94, 0.15) !important;
 }
 
 /* =============================================================================
@@ -617,7 +617,7 @@ onUnmounted(() => {
 .mgmt-stat__icon {
   width: 1.25rem;
   height: 1.25rem;
-  color: var(--color-info);
+  color: rgb(96, 165, 250);
   flex-shrink: 0;
 }
 
@@ -645,7 +645,7 @@ onUnmounted(() => {
    ============================================================================= */
 .mgmt-select-all {
   font-size: 0.75rem;
-  color: var(--color-info);
+  color: rgb(96, 165, 250);
   background: none;
   border: none;
   cursor: pointer;
@@ -654,7 +654,7 @@ onUnmounted(() => {
 }
 
 .mgmt-select-all:hover {
-  background: var(--color-info-bg);
+  background: rgba(96, 165, 250, 0.1);
 }
 
 /* =============================================================================
@@ -676,7 +676,7 @@ onUnmounted(() => {
 }
 
 .mgmt-file--selected {
-  background-color: var(--color-info-bg);
+  background-color: rgba(96, 165, 250, 0.06);
 }
 
 .mgmt-file--current {
@@ -699,7 +699,7 @@ onUnmounted(() => {
   flex-shrink: 0;
   width: 1rem;
   height: 1rem;
-  accent-color: var(--color-info);
+  accent-color: rgb(96, 165, 250);
 }
 
 .mgmt-file__icon {
@@ -741,9 +741,9 @@ onUnmounted(() => {
 .mgmt-selection {
   margin-top: 0.5rem;
   padding-top: 0.5rem;
-  border-top: 1px solid var(--glass-border);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
   font-size: 0.75rem;
-  color: var(--color-info);
+  color: rgb(96, 165, 250);
 }
 
 /* =============================================================================
@@ -762,7 +762,7 @@ onUnmounted(() => {
 .mgmt-backup-toggle__checkbox {
   width: 1rem;
   height: 1rem;
-  accent-color: var(--color-info);
+  accent-color: rgb(96, 165, 250);
 }
 
 /* =============================================================================
@@ -782,8 +782,8 @@ onUnmounted(() => {
   padding: 0.5rem 1rem;
   font-size: 0.8125rem;
   font-weight: 500;
-  color: var(--color-text-inverse);
-  background-color: color-mix(in srgb, var(--color-error) 80%, black);
+  color: white;
+  background-color: rgb(220, 38, 38);
   border: none;
   border-radius: var(--radius-md);
   cursor: pointer;
@@ -791,7 +791,7 @@ onUnmounted(() => {
 }
 
 .mgmt-delete-btn:hover:not(:disabled) {
-  background-color: var(--color-error);
+  background-color: rgb(239, 68, 68);
 }
 
 .mgmt-delete-btn:disabled {
@@ -808,7 +808,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--slide-over-backdrop);
+  background: rgba(0, 0, 0, 0.5);
   border-radius: var(--radius-lg);
 }
 
@@ -817,16 +817,16 @@ onUnmounted(() => {
   max-width: 24rem;
   padding: 1.5rem;
   border-radius: var(--radius-md);
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-error-border);
-  box-shadow: var(--elevation-floating);
+  background: rgba(25, 25, 30, 0.98);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.3);
   text-align: center;
 }
 
 .mgmt-confirm__icon {
   width: 2.5rem;
   height: 2.5rem;
-  color: var(--color-warning);
+  color: rgb(245, 158, 11);
   margin: 0 auto 0.75rem;
 }
 
@@ -852,7 +852,7 @@ onUnmounted(() => {
   font-size: 0.75rem;
   font-family: var(--font-mono);
   color: var(--color-text-muted);
-  background: var(--color-bg-primary);
+  background: rgba(0, 0, 0, 0.3);
   border-radius: var(--radius-sm);
   max-height: 8rem;
   overflow-y: auto;
@@ -876,8 +876,8 @@ onUnmounted(() => {
   padding: 0.5rem 1rem;
   font-size: 0.8125rem;
   font-weight: 500;
-  color: var(--color-text-inverse);
-  background-color: color-mix(in srgb, var(--color-error) 80%, black);
+  color: white;
+  background-color: rgb(220, 38, 38);
   border: none;
   border-radius: var(--radius-md);
   cursor: pointer;
@@ -885,7 +885,7 @@ onUnmounted(() => {
 }
 
 .mgmt-confirm__delete:hover {
-  background-color: var(--color-error);
+  background-color: rgb(239, 68, 68);
 }
 
 /* =============================================================================

@@ -102,14 +102,6 @@ Server-Logs nutzen Bind-Mounts; MQTT-Broker, PostgreSQL und ESP32 nur stdout (ke
 
 ---
 
-## Windows: Dev-Vorbereitung
-
-- `docker-compose.yml` deklariert `shared-infra-net` als **external**; vor dem ersten `docker compose up` das Netzwerk anlegen oder:  
-  `powershell -ExecutionPolicy Bypass -File scripts/windows/ensure-dev-prerequisites.ps1` (Projektroot).  
-- Das Skript legt optional `.env` aus `.env.example` an und **ueberschreibt** keine bestehende `.env`. Details: `AGENTS.md` (Gotchas).
-
----
-
 ## Loki-Debug (Agent-Nutzung)
 
 Agents koennen Loki-Logs per CLI oder API abfragen:

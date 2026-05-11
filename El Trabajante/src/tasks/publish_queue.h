@@ -38,16 +38,11 @@ struct PublishRequest {
 };
 
 // AUT-55: Telemetry snapshot for queue pressure reporting in heartbeat.
-// AUT-134 PKG-03: oversize_skip_count tracks publishes rejected on the
-// enqueue boundary because their payload exceeds PUBLISH_PAYLOAD_MAX_LEN.
-// Distinct from drop_count (queue-full) so heartbeat-oversize regressions
-// remain visible without producing a queue-full storm.
 struct PublishQueuePressureStats {
-    uint8_t  fill_level;          // Current queue occupancy (0..PUBLISH_QUEUE_SIZE)
-    uint8_t  high_watermark;      // Peak fill level observed since boot
-    uint32_t shed_count;          // Non-critical messages proactively shed (backpressure)
-    uint32_t drop_count;          // Messages dropped because queue was completely full
-    uint32_t oversize_skip_count; // Publishes rejected because payload > PUBLISH_PAYLOAD_MAX_LEN
+    uint8_t  fill_level;     // Current queue occupancy (0..PUBLISH_QUEUE_SIZE)
+    uint8_t  high_watermark; // Peak fill level observed since boot
+    uint32_t shed_count;     // Non-critical messages proactively shed (backpressure)
+    uint32_t drop_count;     // Messages dropped because queue was completely full
 };
 
 extern QueueHandle_t g_publish_queue;
@@ -67,12 +62,6 @@ bool queuePublish(const char* topic,
 
 // AUT-55: Query current queue pressure stats for heartbeat telemetry.
 PublishQueuePressureStats getPublishQueuePressureStats();
-
-// AUT-134 PKG-03: increment the oversize-skip counter from the heartbeat
-// builder (Core 0) when a payload exceeds PUBLISH_PAYLOAD_MAX_LEN before it
-// would have entered the publish lane. Keeps oversize accounting in one
-// place so heartbeat-vs-queue regressions remain visible via the same knob.
-void noteHeartbeatOversizeSkip();
 
 // AUT-69: pause queue draining until session/announce PUBACK or guard timeout.
 void pauseForAnnounceAck(uint32_t guard_timeout_ms = 300);

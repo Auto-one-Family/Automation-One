@@ -15,6 +15,7 @@
 import { ref, computed, watch } from 'vue'
 import { X, Loader2, Trash2 } from 'lucide-vue-next'
 import { useEspStore } from '@/stores/esp'
+import { sensorsApi } from '@/api/sensors'
 import { useToast } from '@/composables/useToast'
 import { SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
 import { createLogger } from '@/utils/logger'
@@ -209,7 +210,7 @@ async function triggerMeasureNow() {
   isMeasuring.value = true
   measureSuccess.value = null
   try {
-    await espStore.setSensorValue(props.espId, editingSensor.value.gpio, 0, 'good', true)
+    await sensorsApi.triggerMeasurement(props.espId, editingSensor.value.gpio)
     measureSuccess.value = 'Messung angefordert'
     setTimeout(() => { measureSuccess.value = null }, 3000)
   } catch (err: any) {

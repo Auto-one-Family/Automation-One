@@ -16,40 +16,7 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 # ESP32 Development Skill
 
 > **Architektur:** Server-Centric. ESP32 = dumme Agenten. ALLE Logik auf Server.
-> **Codebase:** `El Trabajante/` (Firmware unter `src/`, Einstieg `src/main.cpp`).
-
----
-
-## 0. Stack-Anker (Ist — nur `El Trabajante/platformio.ini`)
-
-| Aspekt | Ist im Repo |
-|--------|-------------|
-| **Platform / Framework** | `platform = espressif32`, `framework = arduino` (alle ESP-Umgebungen) |
-| **Boards** | `esp32dev` (`env:esp32_dev`), `seeed_xiao_esp32c3` (`env:seeed_xiao_esp32c3`); Wokwi erbt von `esp32_dev` |
-| **MQTT-Backend** | Standard: ESP-IDF `esp_mqtt_client` über SDK-Header `<mqtt_client.h>` in `services/communication/mqtt_client.h`. **`MQTT_USE_PUBSUBCLIENT=1`:** `seeed_xiao_esp32c3`, `wokwi_simulation` / `wokwi_esp01|02|03` (PubSubClient in `lib_deps`) |
-| **Zentrale `lib_deps` (esp32_dev)** | u. a. `ArduinoJson`, `NTPClient`, `OneWire`, `DallasTemperature`, `WebServer`, `DNSServer`, Adafruit BME280, `Unity`; **kein** PubSubClient |
-| **Native Tests** | `env:native` + Unity; aktive Tests u. a. unter `test/test_infra/`, `test/test_managers/` (siehe `test_ignore` in `platformio.ini`) |
-| **Feature-Makros** | u. a. `ESP32_DEV_MODE` / `XIAO_ESP32C3_MODE`, `MAX_SENSORS`, `MAX_ACTUATORS`, `MQTT_MAX_PACKET_SIZE`, `KAISER_FIRMWARE_VERSION_STRING` |
-
-**Header-Konflikt vermeiden:** In `mqtt_client.h` dokumentiert: SDK `<mqtt_client.h>` vs. lokaler Dateiname — Winkelklammern für ESP-IDF-API, nicht mit lokalem Header verwechseln.
-
----
-
-## 0.1 Kontrakte & Spiegelstellen (Ende-zu-Ende im Monorepo)
-
-Änderungen an Topics, Payload-Feldern, QoS oder Config sind **nicht** „nur eine `.cpp`-Datei“:
-
-| Thema | Wo definieren / prüfen |
-|-------|-------------------------|
-| Topic-Strings, Puffer | `El Trabajante/src/utils/topic_builder.h`, `topic_builder.cpp` (u. a. `topic_buffer_[256]`, `validateTopicBuffer`) |
-| Sensor-Array / `g_sensor_mutex` | `El Trabajante/src/tasks/rtos_globals.h`; Halter: `configureSensor`, `performAllMeasurements`, Messblock in `triggerManualMeasurement` (`sensor_manager.cpp` — serialisiert manuell vs. autonom) |
-| MQTT-Soll (Tabellen, Payloads) | `.claude/reference/api/MQTT_TOPICS.md`; ergänzend eingecheckt: `El Trabajante/docs/Mqtt_Protocoll.md` (Inventory zu verwaisten Topics in `topic_builder.h`) |
-| Subscribe-/Publish-QoS in der Firmware | `El Trabajante/src/main.cpp` (z. B. `mqttClient.subscribe(..., qos)`), `mqtt_client.cpp` — kann von der Markdown-Tabelle in `MQTT_TOPICS.md` abweichen; **immer Code prüfen** |
-| Sensor-/Aktor-Rohdaten | `raw_mode: true` (Skill + `.cursor/rules/firmware.mdc`); Verarbeitung auf dem Server |
-| Error-Codes | `El Trabajante/src/models/error_codes.h`, `.claude/reference/errors/ERROR_CODES.md` |
-| Pins / ADC2 vs. WiFi | `El Trabajante/src/config/hardware/esp32_dev.h`, `xiao_esp32c3.h` (u. a. `RESERVED_GPIO_PINS`, `ADC2_GPIO_PINS`, Kommentar ADC2+WiFi) |
-
-**Hinweis QoS:** `.cursor/rules/firmware.mdc` nennt für Aktor-Befehle QoS 2; `MQTT_TOPICS.md` listet Server→ESP teils als QoS 2; die Firmware subscribed in `main.cpp` u. a. mit **QoS 1**. Keine Annahme treffen — drei Stellen oder gezielter `Grep` nach `subscribe(` / `publish(`.
+> **Codebase:** `El Trabajante/` (~13.300 Zeilen C++)
 
 ---
 
@@ -120,33 +87,41 @@ El Trabajante/
 
 ## Build Commands
 
-**Wichtig:** PlatformIO-Befehle müssen aus `El Trabajante/` ausgeführt werden (dort liegt `platformio.ini`).
+**Wichtig:** PlatformIO-Befehle muessen aus `El Trabajante/` ausgefuehrt werden (dort liegt `platformio.ini`).
 
-- **Umgebungsnamen exakt:** In `platformio.ini` heißen die Envs u. a. `esp32_dev` (ESP32 DevKit / WROOM-32), `seeed_xiao_esp32c3` (Seeed XIAO ESP32-C3), `wokwi_simulation`, `wokwi_esp01` … `wokwi_esp03`, `native`. Der Kurzname `seeed` als `-e`-Ziel existiert **nicht** — siehe `.claude/CLAUDE.md` Verifikationstabelle.
-- **Git Bash (Agent):** `pio` oft nicht im PATH → typisch `~/.platformio/penv/Scripts/pio.exe` (Windows) bzw. `pio` nach PATH-Setup.
-- **PowerShell:** `&&` in PS 5.x unzuverlässig → Befehle mit `;` trennen oder Zeilenweise.
+- **Git Bash (Agent):** `pio` nicht im PATH → `~/.platformio/penv/Scripts/pio.exe`. Build, Flash UND zeitbegrenzter Monitor funktionieren (COM5/CH340 verifiziert 2026-02-26)
+- **PowerShell (User):** `&&` geht NICHT in PS 5.x → Befehle einzeln oder mit `;` trennen. Interaktiver Monitor mit Ctrl+C
 
-### Git Bash / Shell (Build, Flash, kurzer Monitor)
+### Git Bash (Agent-Befehle: Build, Flash, zeitbegrenzter Monitor)
 
 ```bash
 cd "El Trabajante"
-~/.platformio/penv/Scripts/pio.exe run -e esp32_dev
-~/.platformio/penv/Scripts/pio.exe run -e esp32_dev -t upload
-timeout 30 ~/.platformio/penv/Scripts/pio.exe device monitor -e esp32_dev
+~/.platformio/penv/Scripts/pio.exe run -e esp32_dev                          # Build
+~/.platformio/penv/Scripts/pio.exe run -e esp32_dev -t upload                # Flash (COM5)
+timeout 30 ~/.platformio/penv/Scripts/pio.exe device monitor -e esp32_dev    # Monitor (30s Capture)
 ~/.platformio/penv/Scripts/pio.exe run -e seeed_xiao_esp32c3
-~/.platformio/penv/Scripts/pio.exe run -e wokwi_esp01
-~/.platformio/penv/Scripts/pio.exe run -e wokwi_esp02
-~/.platformio/penv/Scripts/pio.exe run -e wokwi_esp03
-~/.platformio/penv/Scripts/pio.exe test -e native -vvv
+~/.platformio/penv/Scripts/pio.exe run -e wokwi_esp01   # ESP_00000001
+~/.platformio/penv/Scripts/pio.exe run -e wokwi_esp02   # ESP_00000002
+~/.platformio/penv/Scripts/pio.exe run -e wokwi_esp03   # ESP_00000003
+~/.platformio/penv/Scripts/pio.exe test -e native -vvv   # 22 Native Unit Tests
 ```
 
-### PowerShell (Beispiel — Pfade an eigene Installation anpassen)
+### PowerShell (User-Befehle: interaktiver Monitor)
 
 ```powershell
-cd "El Trabajante"
-& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e esp32_dev
-& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e esp32_dev -t upload
-& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device monitor -e esp32_dev
+cd "C:\Users\PCUser\Documents\PlatformIO\Projects\Auto-one\El Trabajante"
+
+# Build
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev
+
+# Flash
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev -t upload
+
+# Serial Monitor (interaktiv, Ctrl+C beendet)
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -e esp32_dev
+
+# Flash + Monitor (nacheinander, ; statt &&)
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev -t upload; C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -e esp32_dev
 ```
 
 ### Wokwi-Limitierungen (ts=0)
@@ -259,9 +234,6 @@ config.i2c_address = 0x44;          // Für I2C (7-bit Adresse)
 ## Actuator-Workflow
 
 ### IActuatorDriver Interface
-
-**Strings:** Das Interface nutzt `String` (Arduino) — siehe `services/actuator/actuator_drivers/iactuator_driver.h`. **Neuer Code:** wo möglich Heap-schonend arbeiten; `.cursor/rules/firmware.mdc` fordert `const char*` / `std::string` statt zusätzlicher `String`-Last — bei Erweiterungen bestehende Signaturen nicht ignorieren, aber keine neuen großen `String`-Ketten einführen.
-
 ```cpp
 class IActuatorDriver {
     // Lifecycle
@@ -301,12 +273,14 @@ class IActuatorDriver {
 4. Type-Token in `models/actuator_types.h` definieren
 
 ### Factory-Pattern
-
-Implementierung: `ActuatorManager::createDriver()` in `services/actuator/actuator_manager.cpp` — Typvergleiche über **`ActuatorTypeTokens`** in `models/actuator_types.h` (nicht ad-hoc String-Literale duplizieren).
-
 ```cpp
-// Vereinfacht — echte Zuordnung siehe actuator_manager.cpp
-if (actuator_type == ActuatorTypeTokens::PUMP) { /* PumpActuator */ }
+// actuator_manager.cpp
+std::unique_ptr<IActuatorDriver> createDriver(const String& type) {
+    if (type == "pump" || type == "relay") return std::make_unique<PumpActuator>();
+    if (type == "pwm") return std::make_unique<PWMActuator>();
+    if (type == "valve") return std::make_unique<ValveActuator>();
+    return nullptr;
+}
 ```
 
 ### Command Duration (Auto-Off)
@@ -360,9 +334,8 @@ void publishSensorReading(const SensorReading& reading) {
 }
 ```
 
-### QoS-Verwendung (Firmware-Defaults)
+### QoS-Verwendung
 
-<<<<<<< Updated upstream
 | Message | QoS |
 |---------|-----|
 | Sensor Data | 1 |
@@ -370,15 +343,6 @@ void publishSensorReading(const SensorReading& reading) {
 | Session Announce | 1 |
 | Heartbeat | 0 |
 | Emergency Stop | 1 |
-=======
-| Message | Typischer QoS (Firmware) |
-|---------|---------------------------|
-| Sensor Data (Publish) | 1 |
-| Heartbeat (Publish) | 0 |
-| Emergency / kritische Publishes | oft 1 |
-
-**Abgleich:** Server- und Doku-QoS (`MQTT_TOPICS.md`) können von `subscribe`/`publish`-Aufrufen in `main.cpp` / `mqtt_client.cpp` abweichen — vor Änderungen beide lesen.
->>>>>>> Stashed changes
 
 ---
 
@@ -513,58 +477,27 @@ XManager& xManager = XManager::getInstance();
 
 ---
 
-## Coding-Agenten: typische Fehler und Soll-Verhalten
+## Regeln
 
-### Typische Fehler (vermeiden)
-
-- Falsche PlatformIO-Umgebung oder nicht existierende `-e`-Namen (nur Namen aus `platformio.ini` verwenden).
-- GPIO/ADC-I2C-Pins erfinden statt `config/hardware/esp32_dev.h` / `xiao_esp32c3.h` und `gpio_manager` zu lesen (ADC2 + WiFi auf klassischem ESP32, Strapping, `INPUT_ONLY_PINS`).
-- Topics oder JSON-Felder ändern ohne `topic_builder`, `MQTT_TOPICS.md` und betroffene `subscribe`/`publish`-Stellen.
-- `delay()` oder lange blockierende Schleifen in Pfaden, die MQTT/WiFi/Watchdog erwarten (siehe `.cursor/rules/firmware.mdc`).
-- Große `DynamicJsonDocument`-Kapazitäten willkürlich erhöhen — Speicherbudget beachten (`MQTT_MAX_PACKET_SIZE` u. a. in `platformio.ini`).
-- NVS/Config ohne bestehende Manager-Patterns (`ConfigManager`, `StorageManager`) — Kollisionen und Partial-Writes.
-- `SafetyController`, Emergency-Pfade oder Watchdog-Logik „nebenbei“ umbauen ohne Auftrag.
-- Umfang ausweiten: große Refactors oder zweites MQTT-Client-Design statt Erweiterung der Singleton-Pipeline.
-- Tests auslassen: wenn native oder Wokwi-Szenarien für den geänderten Bereich üblich sind (`pio test -e native`, `env:wokwi_*`).
-
-### Soll-Verhalten (immer)
-
-- Zuerst `Glob`/`Grep` nach gleichartigem Sensor, Aktor oder MQTT-Handler im Repo.
-- Minimal-invasive Änderungen; gleiche Fehlerbehandlung wie Nachbarcode (`ErrorTracker`, `LOG_*` mit TAG aus `logger.h`).
-- Pins und Busse mit Hardware-Config und Manager abgleichen; Unsicherheit → Code/Doku lesen, nicht raten.
-- MQTT/Config so erweitern, dass `MQTT_TOPICS.md` / `Mqtt_Protocoll.md` und Firmware konsistent bleiben oder bewusst dokumentiert werden.
-- Build mit passendem `-e` ausführen; Compiler-Warnungen ernst nehmen, wenn CI sie als Fehler wertet.
-- Safety- und Echtzeit-Pfade nur mit klarer Anforderung anfassen.
-
-### Kurz-Workflow: Sensor oder Aktor erweitern
-
-1. **Analoges Modul finden** (`sensor_manager`, `actuator_manager`, bestehender Driver unter `actuator_drivers/`).
-2. **Registry/Typen** — `models/`, Factory in `actuator_manager.cpp` / Sensor-Registrierung wie bestehende Typen.
-3. **MQTT** — nur `TopicBuilder`-API; Payload wie Nachbar-Sensor/-Aktor.
-4. **Verifizieren** — `pio run -e esp32_dev` (und ggf. `pio test -e native` bei betroffenen Pure-Logic-Teilen).
-
----
-
-## Regeln (Kern)
-
-1. **Server-Centric:** Keine Business-Logik auf dem ESP32.
-2. **GPIO:** Zuerst `initializeAllPinsToSafeMode()`, dann `gpioManager.requestPin()` / HAL über `drivers/hal/igpio_hal.h`.
-3. **Error-Codes:** Bereich 1000–4999, Definition in `error_codes.h` + Referenz-Doku.
-4. **Speicher:** RAII (`std::unique_ptr`), keine manuellen `new`/`delete`.
-5. **Build:** Vor Abschluss passende `pio run`/`pio test`-Umgebung ausführen.
+1. **Server-Centric:** KEINE Business-Logic auf ESP32
+2. **GPIO Safe-Mode:** IMMER `initializeAllPinsToSafeMode()` zuerst
+3. **Pin-Reservation:** IMMER `gpioManager.requestPin()` vor GPIO-Nutzung
+4. **Error-Codes:** IMMER aus `error_codes.h` verwenden
+5. **RAII:** KEINE `new`/`delete`, nur `std::unique_ptr`
+6. **Build verifizieren:** `pio run` vor Abschluss
 
 ---
 
 ## Workflow
-
 ```
-1. ANALYSE      → Quick Reference + Kontrakte-Abschnitt oben
-2. API PRÜFEN   → MODULE_REGISTRY.md bei Detailfragen
-3. PATTERN      → Bestehenden Code als Vorlage (Grep)
-4. IMPLEMENT    → Singleton / Factory / TopicBuilder / Safety-Pfade respektieren
-5. VERIFY       → pio run -e esp32_dev (oder Ziel-Board-Env)
+1. ANALYSE      → Modul in Quick Reference finden
+2. API PRÜFEN   → MODULE_REGISTRY.md für Details
+3. PATTERN      → Bestehenden Code als Vorlage
+4. IMPLEMENT    → Singleton/Factory/RAII beachten
+5. VERIFY       → pio run -e esp32_dev
 ```
 
 ---
 
-*Kompakter Skill für ESP32-Entwicklung. Details in `MODULE_REGISTRY.md`.*
+*Kompakter Skill für ESP32-Entwicklung. Details in MODULE_REGISTRY.md*
+```

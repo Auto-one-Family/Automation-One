@@ -1,5 +1,4 @@
 #include "config_update_queue.h"
-#include <cstdio>
 #include <cstring>
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -22,14 +21,6 @@ extern bool handleActuatorConfig(JsonObject doc, const String& correlationId);
 extern bool handleOfflineRulesConfig(JsonObject doc, const String& correlationId);
 extern bool evaluatePendingExit(const char* trigger_source);
 extern SystemConfig g_system_config;
-
-// ─── M3: Core-1 handlers for GPIO-touching MQTT messages (AUT-285) ───────────
-// These functions are defined in main.cpp, extracted from the MQTT callback so
-// they run on Core 1 Safety-Task (serialised via this queue) rather than Core 0.
-extern void handleZoneAssignOnCore1(const char* payload);
-extern void handleSubzoneAssignOnCore1(const char* payload);
-extern void handleSubzoneRemoveOnCore1(const char* payload);
-extern void handleSubzoneSafeOnCore1(const char* payload);
 
 static const char* CFG_Q_TAG = "SYNC";
 static bool s_pending_replay_done = false;
@@ -414,20 +405,16 @@ bool queueConfigUpdate(ConfigUpdateRequest::Type type, const char* json_payload)
     return queueConfigUpdateWithMetadata(type, json_payload, &metadata);
 }
 
-// Module-level static for Core-0 MQTT-task enqueue operations.
-// Shared between queueConfigUpdateWithMetadata() and enqueueM3GpioRequest().
-// Safe: both functions run on Core 0 MQTT-task, sequentially (never concurrent).
-// xQueueSend copies the struct into queue storage before returning — no aliasing risk.
-// AUT-285: s_m3_enqueue_req was merged here to avoid adding 4352 B to BSS.
-static ConfigUpdateRequest s_core0_enqueue_req;
-
 bool queueConfigUpdateWithMetadata(ConfigUpdateRequest::Type type,
                                    const char* json_payload,
                                    const IntentMetadata* metadata) {
     if (g_config_update_queue == NULL) return false;
 
-    // Uses module-level s_core0_enqueue_req (see above) instead of function-local static.
-    ConfigUpdateRequest& req = s_core0_enqueue_req;
+    // static: moves sizeof(ConfigUpdateRequest) from mqtt_task stack to BSS.
+    // Safe: queueConfigUpdate() is called exclusively from mqtt_task (main.cpp:290).
+    // xQueueSend copies req into the queue's internal storage before returning,
+    // so overwriting req on the next call cannot corrupt already-queued data.
+    static ConfigUpdateRequest req;
     req.type = type;
     strncpy(req.json_payload, json_payload, sizeof(req.json_payload) - 1);
     req.json_payload[sizeof(req.json_payload) - 1] = '\0';
@@ -479,12 +466,6 @@ bool queueConfigUpdateWithMetadata(ConfigUpdateRequest::Type type,
         LOG_W(CFG_Q_TAG, "[SYNC] Config update queue full — config push dropped");
         return false;
     }
-    {
-        char qline[128];
-        snprintf(qline, sizeof(qline), "[CFG_Q] enqueued corr=%.40s intent=%.40s", req.metadata.correlation_id,
-                 req.metadata.intent_id);
-        LOG_I(CFG_Q_TAG, qline);
-    }
     persistPendingIntent(req);
     publishIntentOutcome("config",
                          req.metadata,
@@ -496,9 +477,6 @@ bool queueConfigUpdateWithMetadata(ConfigUpdateRequest::Type type,
     return true;
 }
 
-// Forward declaration — defined below processConfigUpdateQueue (AUT-285 M3).
-static void dispatchM3Request(const ConfigUpdateRequest& req, uint8_t& processed);
-
 void processConfigUpdateQueue(uint8_t max_items) {
     if (g_config_update_queue == NULL) return;
     replayPendingIntents();
@@ -509,21 +487,7 @@ void processConfigUpdateQueue(uint8_t max_items) {
     uint8_t processed = 0;
     uint32_t current_epoch = getSafetyEpoch();
     while (processed < max_items && xQueueReceive(g_config_update_queue, &req, 0) == pdTRUE) {
-        // ─── M3: Zone/Subzone GPIO-touching handlers (AUT-285) ───────────────
-        // Dispatched before CONFIG_PUSH intent-contract checks (no generation/TTL metadata).
-        // Running on Core 1 Safety-Task serialises GPIO access against sensor/actuator loops.
-        if (req.type != ConfigUpdateRequest::CONFIG_PUSH) {
-            dispatchM3Request(req, processed);
-            continue;
-        }
-
         LOG_I(CFG_Q_TAG, "[SYNC] Processing config update on Core " + String(xPortGetCoreID()));
-        {
-            char qline[128];
-            snprintf(qline, sizeof(qline), "[CFG_Q] dequeue core=%u corr=%.40s",
-                     static_cast<unsigned>(xPortGetCoreID()), req.metadata.correlation_id);
-            LOG_I(CFG_Q_TAG, qline);
-        }
 
         IntentInvalidationReason invalidation_reason =
             getIntentInvalidationReason(req.metadata, current_epoch);
@@ -620,14 +584,6 @@ void processConfigUpdateQueue(uint8_t max_items) {
         bool reject_actuator_scope = false;
         bool reject_offline_scope = false;
 
-        {
-            char scopes[128];
-            snprintf(scopes, sizeof(scopes), "[CFG_Q] scopes s=%d a=%d o=%d gen_in=%lu",
-                     has_sensor_scope ? 1 : 0, has_actuator_scope ? 1 : 0, has_offline_scope ? 1 : 0,
-                     static_cast<unsigned long>(incoming_generation));
-            LOG_D(CFG_Q_TAG, scopes);
-        }
-
         if (incoming_generation > 0) {
             uint32_t sensor_applied_generation = loadScopeGeneration(CONFIG_APPLIED_GENERATION_SENSOR_KEY);
             uint32_t actuator_applied_generation = loadScopeGeneration(CONFIG_APPLIED_GENERATION_ACTUATOR_KEY);
@@ -668,12 +624,6 @@ void processConfigUpdateQueue(uint8_t max_items) {
         bool offline_ok = false;
         if (g_config_lane_mutex != nullptr &&
             xSemaphoreTake(g_config_lane_mutex, pdMS_TO_TICKS(500)) != pdTRUE) {
-            {
-                char to[128];
-                snprintf(to, sizeof(to), "[CFG_Q] lane_timeout corr=%.40s intent=%.40s", req.metadata.correlation_id,
-                         req.metadata.intent_id);
-                LOG_E(CFG_Q_TAG, to);
-            }
             ConfigResponseBuilder::publishError(
                 ConfigType::SYSTEM,
                 ConfigErrorCode::WRITE_TIMEOUT,
@@ -773,46 +723,4 @@ void processConfigUpdateQueue(uint8_t max_items) {
         removePendingIntentById(req.metadata.intent_id);
         processed++;
     }
-}
-
-// ─── M3: Core-1 dispatch shims (AUT-285) ─────────────────────────────────────
-// Called from processConfigUpdateQueue() above when req.type != CONFIG_PUSH.
-// Defined here so the while-loop body stays readable; real logic is in main.cpp.
-static void dispatchM3Request(const ConfigUpdateRequest& req, uint8_t& processed) {
-    if (req.type == ConfigUpdateRequest::ZONE_ASSIGN) {
-        LOG_I(CFG_Q_TAG, "[M3] ZONE_ASSIGN on Core " + String(xPortGetCoreID()));
-        handleZoneAssignOnCore1(req.json_payload);
-    } else if (req.type == ConfigUpdateRequest::SUBZONE_ASSIGN) {
-        LOG_I(CFG_Q_TAG, "[M3] SUBZONE_ASSIGN on Core " + String(xPortGetCoreID()));
-        handleSubzoneAssignOnCore1(req.json_payload);
-    } else if (req.type == ConfigUpdateRequest::SUBZONE_REMOVE) {
-        LOG_I(CFG_Q_TAG, "[M3] SUBZONE_REMOVE on Core " + String(xPortGetCoreID()));
-        handleSubzoneRemoveOnCore1(req.json_payload);
-    } else if (req.type == ConfigUpdateRequest::SUBZONE_SAFE) {
-        LOG_I(CFG_Q_TAG, "[M3] SUBZONE_SAFE on Core " + String(xPortGetCoreID()));
-        handleSubzoneSafeOnCore1(req.json_payload);
-    } else {
-        LOG_W(CFG_Q_TAG, "[M3] Unknown queue type=" + String((uint8_t)req.type) + " — dropped");
-    }
-    processed++;
-}
-
-// ─── AUT-285 M3: Zone/Subzone enqueue helper ─────────────────────────────────
-// Reuses s_core0_enqueue_req (shared with queueConfigUpdateWithMetadata) — no extra BSS.
-// Safe: enqueueM3GpioRequest() is called only from MQTT-task (Core 0), sequentially.
-// xQueueSend copies the struct into queue storage before returning.
-bool enqueueM3GpioRequest(ConfigUpdateRequest::Type type, const char* json_payload,
-                           const char* busy_ack_desc) {
-    if (g_config_update_queue == NULL) return false;
-    s_core0_enqueue_req.type = type;
-    strncpy(s_core0_enqueue_req.json_payload, json_payload != nullptr ? json_payload : "",
-            sizeof(s_core0_enqueue_req.json_payload) - 1);
-    s_core0_enqueue_req.json_payload[sizeof(s_core0_enqueue_req.json_payload) - 1] = '\0';
-    initIntentMetadata(&s_core0_enqueue_req.metadata);
-    BaseType_t result = xQueueSend(g_config_update_queue, &s_core0_enqueue_req, pdMS_TO_TICKS(50));
-    if (result != pdTRUE) {
-        LOG_W(CFG_Q_TAG, String("[M3] Queue full — dropped: ") + (busy_ack_desc != nullptr ? busy_ack_desc : "?"));
-        return false;
-    }
-    return true;
 }

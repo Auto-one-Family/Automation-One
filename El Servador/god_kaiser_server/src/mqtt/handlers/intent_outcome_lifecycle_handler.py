@@ -18,6 +18,7 @@ from ...db.models.audit_log import AuditSeverity
 from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...db.session import resilient_session
 from ..topics import TopicBuilder
+from .tracing_degraded_emit import emit_tracing_degraded
 
 logger = get_logger(__name__)
 
@@ -36,8 +37,13 @@ class IntentOutcomeLifecycleHandler:
             if err:
                 # Treat malformed lifecycle events as non-fatal noise: they should
                 # not bubble up as handler failures that pollute transport health logs.
-                logger.warning(
-                    "Dropping malformed intent_outcome/lifecycle payload: esp_id=%s reason=%s",
+                emit_tracing_degraded(
+                    esp_id,
+                    "malformed_lifecycle_payload",
+                    (
+                        "tracing_degraded esp_id=%s reason=malformed_intent_outcome_lifecycle "
+                        "validation=%s (AUT-347)"
+                    ),
                     esp_id,
                     err,
                 )

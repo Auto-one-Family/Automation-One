@@ -5,8 +5,6 @@ Phase: 5 (Week 9-10) - API Layer
 Tests: Sensor endpoints (config CRUD, data query)
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
 from datetime import datetime
 from httpx import AsyncClient, ASGITransport
@@ -198,108 +196,6 @@ class TestDeleteSensor:
         assert response.status_code == 200
         data = response.json()
         assert data["gpio"] == test_sensor.gpio
-
-    @pytest.mark.asyncio
-    async def test_delete_sensor_send_config_excludes_deleted_and_returns_correlation_id(
-        self,
-        auth_headers: dict,
-        test_esp: ESPDevice,
-        db_session: AsyncSession,
-    ):
-        """PKG-HW-01: DELETE triggers send_config without deleted row; response exposes MQTT correlation_id."""
-        s_ph = SensorConfig(
-            esp_id=test_esp.id,
-            gpio=34,
-            sensor_type="ph",
-            sensor_name="pH A",
-            interface_type="ANALOG",
-            enabled=True,
-            sample_interval_ms=30000,
-            pi_enhanced=False,
-            calibration_data={},
-            thresholds={},
-            sensor_metadata={},
-        )
-        s_moist = SensorConfig(
-            esp_id=test_esp.id,
-            gpio=35,
-            sensor_type="moisture",
-            sensor_name="Soil",
-            interface_type="ANALOG",
-            enabled=True,
-            sample_interval_ms=30000,
-            pi_enhanced=False,
-            calibration_data={},
-            thresholds={},
-            sensor_metadata={},
-        )
-        db_session.add_all([s_ph, s_moist])
-        await db_session.commit()
-        await db_session.refresh(s_ph)
-        await db_session.refresh(s_moist)
-
-        esp_service = MagicMock()
-        esp_service.send_config = AsyncMock(
-            return_value={"success": True, "correlation_id": "corr-pkg-hw-01-del"}
-        )
-
-        with patch("src.api.v1.sensors.get_esp_service", return_value=esp_service):
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-                response = await client.delete(
-                    f"/api/v1/sensors/{test_esp.device_id}/{s_ph.id}",
-                    headers=auth_headers,
-                )
-
-        assert response.status_code == 200
-        body = response.json()
-        assert body.get("correlation_id") == "corr-pkg-hw-01-del"
-        esp_service.send_config.assert_awaited_once()
-        call_args = esp_service.send_config.call_args[0]
-        assert call_args[0] == test_esp.device_id
-        cfg = call_args[1]
-        pairs = {(s.get("gpio"), s.get("sensor_type")) for s in (cfg.get("sensors") or [])}
-        assert (34, "ph") not in pairs
-        assert (35, "moisture") in pairs
-
-    @pytest.mark.asyncio
-    async def test_delete_sensor_send_config_failure_still_200_correlation_id_optional(
-        self,
-        auth_headers: dict,
-        test_esp: ESPDevice,
-        db_session: AsyncSession,
-    ):
-        """PKG-HW-01: MQTT config push may fail; DB delete still succeeds; correlation_id optional."""
-        s_ph = SensorConfig(
-            esp_id=test_esp.id,
-            gpio=34,
-            sensor_type="ph",
-            sensor_name="pH lone",
-            interface_type="ANALOG",
-            enabled=True,
-            sample_interval_ms=30000,
-            pi_enhanced=False,
-            calibration_data={},
-            thresholds={},
-            sensor_metadata={},
-        )
-        db_session.add(s_ph)
-        await db_session.commit()
-        await db_session.refresh(s_ph)
-
-        esp_service = MagicMock()
-        esp_service.send_config = AsyncMock(return_value={"success": False})
-
-        with patch("src.api.v1.sensors.get_esp_service", return_value=esp_service):
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-                response = await client.delete(
-                    f"/api/v1/sensors/{test_esp.device_id}/{s_ph.id}",
-                    headers=auth_headers,
-                )
-
-        assert response.status_code == 200
-        body = response.json()
-        assert body.get("correlation_id") is None
-        esp_service.send_config.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_delete_sensor_removes_gpio_from_subzones(

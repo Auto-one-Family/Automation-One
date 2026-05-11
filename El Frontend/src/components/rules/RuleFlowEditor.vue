@@ -14,7 +14,7 @@
  * - Auto-layout for imported rules
  */
 
-import { ref, computed, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { VueFlow, Position, MarkerType, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -39,43 +39,13 @@ import {
   Redo2,
   Puzzle,
   Stethoscope,
-  Cpu,
-  Server,
-  CheckCircle2,
-  AlertTriangle,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import type { LogicRule, SensorCondition, TimeCondition, HysteresisCondition, CompoundCondition, ActuatorAction, NotificationAction, DelayAction, PluginAction, DiagnosticsCondition, DiagnosticsAction, LogicCondition, LogicAction } from '@/types/logic'
 import { useLogicStore } from '@/shared/stores/logic.store'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
-import { useRuleDeployment, classifyRuleDeployment } from '@/composables/useRuleDeployment'
 import { tokens } from '@/utils/cssTokens'
-import { formatRelativeTime } from '@/utils/formatters'
-import { getNodeColumnX } from '@/utils/ruleNodeColumns'
-import BaseToggle from '@/shared/design/primitives/BaseToggle.vue'
-
-/**
- * AUT-248: Maximum number of offline_rules per ESP.
- * Mirrors MAX_OFFLINE_RULES in:
- *   El Trabajante/src/models/offline_rule.h
- *   El Servador/god_kaiser_server/src/services/config_builder.py
- */
-const OFFLINE_RULES_LIMIT_PER_ESP = 8
-
-/** AUT-248: Operator-readable labels for server-only constructs. */
-const SERVER_ONLY_REASON_LABELS: Record<string, string> = {
-  notification_action: 'Benachrichtigung',
-  plugin_action: 'Plugin-Aktion',
-  delay_action: 'Verzögerung',
-  cross_esp_action: 'Aktor auf anderem ESP',
-  compound_condition: 'Verschachtelte Bedingung',
-  diagnostics_condition: 'Diagnose-Bedingung',
-  sensor_diff_condition: 'Sensor-Differenz-Bedingung',
-  calibration_required_sensor: 'Sensor mit Kalibrierung (pH/EC/Feuchte)',
-  unsupported_operator: 'Nicht-konvertierbarer Operator (==, !=)',
-  or_compound_rule: 'ODER-Logik mit mehreren Bedingungen',
-}
 
 // Vue Flow CSS
 import '@vue-flow/core/dist/style.css'
@@ -97,10 +67,6 @@ const emit = defineEmits<{
   'node-selected': [node: Node | null]
   'graph-changed': []
   'metadata-restored': [metadata: { priority?: number; cooldown_seconds?: number }]
-  /** AUT-249: User toggled rule.enabled in the editor header. */
-  'update:active': [enabled: boolean]
-  /** AUT-249: User clicked the "last execution" pill — open execution history. */
-  'show-history': []
 }>()
 
 const logicStore = useLogicStore()
@@ -141,235 +107,6 @@ let nodeIdCounter = 0
 let pendingFitView = false
 let templateLoadGuard = false  // Prevents watch from clearing nodes after loadFromRuleData
 const validationErrorsByNodeId = ref<Record<string, Record<string, string[]>>>({})
-
-// ======================== AUT-248: DEPLOYMENT BANNER ========================
-
-/**
- * Lightweight extractor for the deployment banner only — derives a minimal
- * {conditions, actions, logic_operator} view from the canvas. Lives here
- * (not in graphToRuleData below) so it can be referenced from a computed
- * before graphToRuleData is defined.
- */
-function extractCanvasRule(): LogicRule {
-  const conditions: LogicCondition[] = []
-  const actions: LogicAction[] = []
-  let logicOperator: 'AND' | 'OR' = 'AND'
-
-  for (const node of nodes.value) {
-    switch (node.type) {
-      case 'sensor': {
-        const isHysteresis =
-          node.data?.isHysteresis === true || node.data?.operator === 'hysteresis'
-        if (isHysteresis) {
-          const hyst: HysteresisCondition = {
-            type: 'hysteresis',
-            esp_id: (node.data?.espId as string) || '',
-            gpio: Number(node.data?.gpio ?? 0),
-            ...(node.data?.sensorType
-              ? { sensor_type: String(node.data.sensorType) }
-              : {}),
-          }
-          if (node.data?.activateAbove != null && node.data?.deactivateBelow != null) {
-            hyst.activate_above = Number(node.data.activateAbove)
-            hyst.deactivate_below = Number(node.data.deactivateBelow)
-          }
-          if (node.data?.activateBelow != null && node.data?.deactivateAbove != null) {
-            hyst.activate_below = Number(node.data.activateBelow)
-            hyst.deactivate_above = Number(node.data.deactivateAbove)
-          }
-          conditions.push(hyst)
-        } else {
-          conditions.push({
-            type: 'sensor',
-            esp_id: (node.data?.espId as string) || '',
-            gpio: Number(node.data?.gpio ?? 0),
-            sensor_type: (node.data?.sensorType as string) || 'DS18B20',
-            operator: (node.data?.operator as SensorCondition['operator']) || '>',
-            value: Number(node.data?.value ?? 0),
-          } as SensorCondition)
-        }
-        break
-      }
-      case 'time':
-        conditions.push({
-          type: 'time_window',
-          start_hour: Number(node.data?.startHour ?? 0),
-          end_hour: Number(node.data?.endHour ?? 23),
-        } as TimeCondition)
-        break
-      case 'logic':
-        logicOperator = (node.data?.operator as 'AND' | 'OR') || 'AND'
-        break
-      case 'actuator':
-        actions.push({
-          type: 'actuator',
-          esp_id: (node.data?.espId as string) || '',
-          gpio: Number(node.data?.gpio ?? 0),
-          command: (node.data?.command as ActuatorAction['command']) || 'ON',
-          value: Number(node.data?.pwmValue ?? 100) / 100,
-        } as ActuatorAction)
-        break
-      case 'notification':
-        actions.push({
-          type: 'notification',
-          channel: (node.data?.channel as NotificationAction['channel']) || 'websocket',
-          target: (node.data?.target as string) || '',
-          message_template: (node.data?.messageTemplate as string) || '',
-        } as NotificationAction)
-        break
-      case 'delay':
-        actions.push({
-          type: 'delay',
-          seconds: Number(node.data?.seconds ?? 0),
-        } as DelayAction)
-        break
-      case 'plugin':
-        actions.push({
-          type: 'plugin',
-          plugin_id: (node.data?.pluginId as string) || '',
-          config: (node.data?.config as Record<string, unknown>) || {},
-        } as PluginAction)
-        break
-      case 'diagnostics_status':
-        conditions.push({
-          type: 'diagnostics_status',
-          check_name: (node.data?.checkName as string) || 'mqtt',
-          expected_status:
-            (node.data?.expectedStatus as DiagnosticsCondition['expected_status']) ||
-            'critical',
-        } as DiagnosticsCondition)
-        break
-      case 'run_diagnostic':
-        actions.push({
-          type: 'run_diagnostic',
-          ...(node.data?.checkName
-            ? { check_name: String(node.data.checkName) }
-            : {}),
-        } as DiagnosticsAction)
-        break
-    }
-  }
-
-  return {
-    id: '',
-    name: '',
-    enabled: true,
-    conditions,
-    actions,
-    logic_operator: logicOperator,
-    priority: 5,
-    cooldown_seconds: 0,
-    created_at: '',
-    updated_at: '',
-  }
-}
-
-const liveRule = computed<LogicRule | null>(() => {
-  if (props.rule) return props.rule
-  if (nodes.value.length === 0) return null
-  return extractCanvasRule()
-})
-
-const { deployment: ruleDeployment } = useRuleDeployment(liveRule)
-
-const offlineEspDisplayName = computed<string>(() => {
-  const espId = ruleDeployment.value.offlineEspId
-  if (!espId) return ''
-  const device = espStore.devices.find((d) => espStore.getDeviceId(d) === espId)
-  return device?.name || espId
-})
-
-const offlineRulesUsedOnEsp = computed<number>(() => {
-  const espId = ruleDeployment.value.offlineEspId
-  if (!espId) return 0
-  const editingRuleId = props.rule?.id ?? null
-  let count = 0
-  for (const rule of logicStore.rules) {
-    if (rule.id === editingRuleId) continue
-    if (!rule.enabled) continue
-    // Use classifyRuleDeployment to count all offline-capable rule types
-    // (hysteresis, sensor_threshold, time_window) consistently.
-    const info = classifyRuleDeployment(rule)
-    if (info.hasOfflineCapablePair && info.offlineEspId === espId) {
-      count += 1
-    }
-  }
-  if (ruleDeployment.value.hasOfflineCapablePair) count += 1
-  return count
-})
-
-const offlineQuotaLabel = computed<string>(
-  () =>
-    `${offlineRulesUsedOnEsp.value} / ${OFFLINE_RULES_LIMIT_PER_ESP} Offline-Regeln auf ${offlineEspDisplayName.value}`,
-)
-
-const showOfflineQuotaBadge = computed<boolean>(
-  () =>
-    ruleDeployment.value.hasOfflineCapablePair &&
-    Boolean(ruleDeployment.value.offlineEspId),
-)
-
-const isOfflineQuotaExceeded = computed<boolean>(
-  () => offlineRulesUsedOnEsp.value > OFFLINE_RULES_LIMIT_PER_ESP,
-)
-
-const serverOnlyReasonText = computed<string>(() => {
-  const reasons = ruleDeployment.value.serverOnlyReasons.filter(
-    (r) => r !== 'no_hysteresis',
-  )
-  if (reasons.length === 0) return ''
-  return reasons.map((r) => SERVER_ONLY_REASON_LABELS[r] ?? r).join(', ')
-})
-
-// ======================== AUT-249: HEADER METADATA (Cooldown / Rate-Limit / Active) ========================
-
-/** Cooldown in seconds for the currently edited rule (props.metadata wins over props.rule). */
-const cooldownSecondsValue = computed<number>(() => {
-  const meta = props.metadata?.cooldown_seconds
-  if (typeof meta === 'number' && Number.isFinite(meta)) return Math.max(0, meta)
-  return Math.max(0, props.rule?.cooldown_seconds ?? 0)
-})
-
-const showCooldownPill = computed<boolean>(() => cooldownSecondsValue.value > 0)
-
-const cooldownLabel = computed<string>(() => `${cooldownSecondsValue.value}s`)
-
-const maxExecutionsPerHour = computed<number | null>(() => {
-  const v = props.rule?.max_executions_per_hour
-  return typeof v === 'number' && v > 0 ? v : null
-})
-
-const showRateLimitPill = computed<boolean>(() => maxExecutionsPerHour.value !== null)
-
-const lastTriggeredLabel = computed<string>(() => {
-  const ts = props.rule?.last_triggered
-  if (!ts) return 'noch nie'
-  return formatRelativeTime(ts)
-})
-
-const isRuleActive = computed<boolean>(() => props.rule?.enabled === true)
-
-const canToggleActive = computed<boolean>(() => Boolean(props.rule?.id))
-
-function onToggleActive(value: boolean): void {
-  if (!canToggleActive.value) return
-  emit('update:active', value)
-}
-
-function onShowHistory(): void {
-  emit('show-history')
-}
-
-function isActuatorOnOfflineEsp(espId: string | undefined): boolean {
-  if (!espId) return false
-  for (const node of nodes.value) {
-    if (node.type !== 'sensor') continue
-    const isHyst =
-      node.data?.isHysteresis === true || node.data?.operator === 'hysteresis'
-    if (isHyst && node.data?.espId === espId) return true
-  }
-  return false
-}
 
 // Initial node dimensions prevent Vue Flow clampNodeExtent crash (dimensions undefined before render)
 const NODE_INIT_DIMS: Record<string, { width: number; height: number }> = {
@@ -487,15 +224,10 @@ function onDrop(event: DragEvent) {
   const bounds = flowWrapper.value?.getBoundingClientRect()
   if (!bounds) return
 
-  // AUT-249: Snap new node onto its column (visual three-column layout).
-  // The drop x-coordinate is replaced by the column anchor so users do not
-  // have to hit the column precisely while dragging from the palette.
-  const dropPos = project({
+  const position = project({
     x: event.clientX - bounds.left,
     y: event.clientY - bounds.top,
   })
-  const columnX = getNodeColumnX(data.type, bounds.width)
-  const position = { x: columnX, y: dropPos.y }
 
   const id = `${data.type}-${Date.now()}-${nodeIdCounter++}`
   const nodeData = getDefaultNodeData(data.type, data.defaults || {})
@@ -661,14 +393,8 @@ onNodeDragStop(() => {
 function ruleToGraph(rule: LogicRule): { nodes: Node[]; edges: Edge[] } {
   const resultNodes: Node[] = []
   const resultEdges: Edge[] = []
+  const COLUMN_SPACING = 300
   const ROW_SPACING = 140
-  // AUT-249: Soft migration into the three-column layout. We use the actual
-  // wrapper width when available so column anchors line up with the visible
-  // background guides; fall back to a sensible default otherwise.
-  const canvasWidth = flowWrapper.value?.getBoundingClientRect().width || 1100
-  const triggerX = getNodeColumnX('sensor', canvasWidth)
-  const conditionX = getNodeColumnX('logic', canvasWidth)
-  const actionX = getNodeColumnX('actuator', canvasWidth)
 
   // Create condition nodes (left column, x=50)
   const conditionIds: string[] = []
@@ -682,7 +408,7 @@ function ruleToGraph(rule: LogicRule): { nodes: Node[]; edges: Edge[] } {
       resultNodes.push({
         id,
         type: 'sensor',
-        position: { x: triggerX, y: 60 + nodeRow * ROW_SPACING },
+        position: { x: 50, y: 60 + nodeRow * ROW_SPACING },
         data: {
           espId: sc.esp_id,
           gpio: sc.gpio,
@@ -708,7 +434,7 @@ function ruleToGraph(rule: LogicRule): { nodes: Node[]; edges: Edge[] } {
       resultNodes.push({
         id,
         type: 'time',
-        position: { x: triggerX, y: 60 + nodeRow * ROW_SPACING },
+        position: { x: 50, y: 60 + nodeRow * ROW_SPACING },
         data: {
           startHour: tc.start_hour,
           startMinute: tc.start_minute ?? (Number.isFinite(parsedStartMinute) ? parsedStartMinute : 0),
@@ -724,7 +450,7 @@ function ruleToGraph(rule: LogicRule): { nodes: Node[]; edges: Edge[] } {
       resultNodes.push({
         id,
         type: 'sensor',
-        position: { x: triggerX, y: 60 + nodeRow * ROW_SPACING },
+        position: { x: 50, y: 60 + nodeRow * ROW_SPACING },
         data: {
           espId: hc.esp_id,
           gpio: hc.gpio,
@@ -745,7 +471,7 @@ function ruleToGraph(rule: LogicRule): { nodes: Node[]; edges: Edge[] } {
       resultNodes.push({
         id,
         type: 'diagnostics_status',
-        position: { x: triggerX, y: 60 + nodeRow * ROW_SPACING },
+        position: { x: 50, y: 60 + nodeRow * ROW_SPACING },
         data: {
           checkName: dc.check_name,
           expectedStatus: dc.expected_status,
@@ -765,7 +491,7 @@ function ruleToGraph(rule: LogicRule): { nodes: Node[]; edges: Edge[] } {
           resultNodes.push({
             id: subId,
             type: 'sensor',
-            position: { x: triggerX, y: 60 + nodeRow * ROW_SPACING },
+            position: { x: 50, y: 60 + nodeRow * ROW_SPACING },
             data: {
               espId: sc.esp_id,
               gpio: sc.gpio,
@@ -791,7 +517,7 @@ function ruleToGraph(rule: LogicRule): { nodes: Node[]; edges: Edge[] } {
   resultNodes.push({
     id: logicId,
     type: 'logic',
-    position: { x: conditionX, y: avgY },
+    position: { x: 50 + COLUMN_SPACING, y: avgY },
     data: { operator: rule.logic_operator },
   })
 
@@ -810,7 +536,7 @@ function ruleToGraph(rule: LogicRule): { nodes: Node[]; edges: Edge[] } {
   sourceIds = [logicId]
 
   // Create action nodes (right column)
-  // actionX is computed at the top of ruleToGraph (column-based layout, AUT-249)
+  const actionX = 50 + COLUMN_SPACING * 2
   rule.actions.forEach((action, i) => {
     const id = `action-${i}`
 
@@ -1308,111 +1034,6 @@ defineExpose({
     @drop="onDrop"
     @keydown="handleKeyboard"
   >
-    <!-- ======================== AUT-248: DEPLOYMENT BANNER ======================== -->
-    <div
-      class="deployment-banner"
-      :class="`deployment-banner--${ruleDeployment.target}`"
-      role="status"
-      aria-live="polite"
-    >
-      <div class="deployment-banner__icon-wrap">
-        <Server v-if="ruleDeployment.target === 'server'" class="deployment-banner__icon" aria-hidden="true" />
-        <CheckCircle2 v-else-if="ruleDeployment.target === 'esp'" class="deployment-banner__icon" aria-hidden="true" />
-        <AlertTriangle v-else class="deployment-banner__icon" aria-hidden="true" />
-      </div>
-      <div class="deployment-banner__text">
-        <template v-if="ruleDeployment.target === 'server'">
-          <strong>Diese Regel läuft auf: SERVER</strong>
-          <span class="deployment-banner__sub">— Wird immer vom Server ausgewertet. Aktor-Befehle an offline ESPs werden übersprungen.</span>
-        </template>
-        <template v-else-if="ruleDeployment.target === 'esp'">
-          <strong>Diese Regel läuft auf: {{ offlineEspDisplayName }} (offline-fähig)</strong>
-          <span class="deployment-banner__sub">— Greift nach 30 s ohne Server-Verbindung. Funktioniert ohne MQTT/Internet.</span>
-        </template>
-        <template v-else>
-          <strong>Hybrid:</strong>
-          <span class="deployment-banner__sub">
-            Hysterese-Teil offline-fähig ({{ offlineEspDisplayName }}),
-            <template v-if="serverOnlyReasonText">{{ serverOnlyReasonText }}</template>
-            <template v-else>weitere Aktion</template>
-            nur online (Server).
-          </span>
-        </template>
-      </div>
-      <span
-        v-if="showOfflineQuotaBadge"
-        class="deployment-banner__quota"
-        :class="{ 'deployment-banner__quota--exceeded': isOfflineQuotaExceeded }"
-        :title="isOfflineQuotaExceeded
-          ? 'Limit überschritten — Server lädt nur die ersten 20 Regeln auf den ESP.'
-          : 'Anzahl aktiver Offline-Regeln auf diesem ESP. Server-Limit: 20.'"
-      >
-        <Cpu class="deployment-banner__quota-icon" aria-hidden="true" />
-        {{ offlineQuotaLabel }}
-      </span>
-    </div>
-
-    <!-- ======================== AUT-249: HEADER BAR (Cooldown / Rate-Limit / Last-Triggered / Active-Toggle) ======================== -->
-    <div class="rule-editor-header" role="region" aria-label="Regel-Steuerung">
-      <div class="rule-editor-header__pills">
-        <span
-          v-if="showCooldownPill"
-          class="rule-editor-header__pill"
-          title="Mindestabstand zwischen zwei Ausführungen dieser Regel."
-        >
-          <span class="rule-editor-header__pill-label">Cooldown</span>
-          <span class="rule-editor-header__pill-value">{{ cooldownLabel }}</span>
-        </span>
-        <span
-          v-if="showRateLimitPill"
-          class="rule-editor-header__pill"
-          title="Maximale Anzahl an Ausführungen pro Stunde."
-        >
-          <span class="rule-editor-header__pill-label">Max</span>
-          <span class="rule-editor-header__pill-value">{{ maxExecutionsPerHour }}/Std</span>
-        </span>
-        <button
-          v-if="props.rule"
-          type="button"
-          class="rule-editor-header__pill rule-editor-header__pill--button"
-          :title="props.rule.last_triggered ? 'Klicken: Ausführungs-Historie öffnen.' : 'Diese Regel wurde noch nie ausgeführt.'"
-          @click="onShowHistory"
-        >
-          <span class="rule-editor-header__pill-label">Letzte Ausführung</span>
-          <span class="rule-editor-header__pill-value">{{ lastTriggeredLabel }}</span>
-        </button>
-      </div>
-
-      <div v-if="canToggleActive" class="rule-editor-header__active">
-        <BaseToggle
-          :model-value="isRuleActive"
-          size="md"
-          :active-color="isRuleActive ? 'green' : 'red'"
-          :aria-label="isRuleActive ? 'Regel deaktivieren' : 'Regel aktivieren'"
-          @update:model-value="onToggleActive"
-        />
-        <span
-          class="rule-editor-header__active-label"
-          :class="isRuleActive ? 'rule-editor-header__active-label--on' : 'rule-editor-header__active-label--off'"
-        >
-          {{ isRuleActive ? 'Aktiv' : 'Deaktiviert' }}
-        </span>
-      </div>
-    </div>
-
-    <!-- ======================== AUT-249: THREE-COLUMN BACKGROUND OVERLAY ======================== -->
-    <div class="rule-columns" aria-hidden="true">
-      <div class="rule-columns__col rule-columns__col--trigger">
-        <span class="rule-columns__label">Wann starten?</span>
-      </div>
-      <div class="rule-columns__col rule-columns__col--condition">
-        <span class="rule-columns__label">Wenn auch</span>
-      </div>
-      <div class="rule-columns__col rule-columns__col--action">
-        <span class="rule-columns__label">Dann ausführen</span>
-      </div>
-    </div>
-
     <!-- Empty state hint -->
     <div v-if="nodes.length === 0" class="flow-editor__empty">
       <div class="flow-editor__empty-content">
@@ -1476,23 +1097,9 @@ defineExpose({
       <template #node-sensor="{ data, id }">
         <div
           class="rule-node rule-node--sensor"
-          :class="{
-            'rule-node--active': isNodeActive(id),
-            'rule-node--unconfigured': !data.espId,
-            'rule-node--validation-error': hasNodeValidationError(id),
-            'rule-node--offline-capable': data.operator === 'hysteresis' || data.isHysteresis,
-          }"
+          :class="{ 'rule-node--active': isNodeActive(id), 'rule-node--unconfigured': !data.espId, 'rule-node--validation-error': hasNodeValidationError(id) }"
         >
           <Handle type="source" :position="Position.Right" class="handle-source" />
-          <!-- AUT-248: Microchip indicator for offline-capable hysteresis blocks -->
-          <span
-            v-if="data.operator === 'hysteresis' || data.isHysteresis"
-            class="rule-node__deploy-badge rule-node__deploy-badge--esp"
-            title="Diese Bedingung wird direkt auf dem ESP-Chip ausgewertet — funktioniert auch wenn der Server nicht erreichbar ist. Limit: 20 solcher Regeln pro ESP."
-          >
-            <Cpu class="rule-node__deploy-badge-icon" aria-hidden="true" />
-            ESP
-          </span>
           <div class="rule-node__header">
             <div class="rule-node__icon-wrap rule-node__icon-wrap--sensor">
               <component
@@ -1591,32 +1198,9 @@ defineExpose({
       <template #node-actuator="{ data, id }">
         <div
           class="rule-node rule-node--actuator"
-          :class="{
-            'rule-node--active': isNodeActive(id),
-            'rule-node--unconfigured': !data.espId,
-            'rule-node--validation-error': hasNodeValidationError(id),
-            'rule-node--offline-capable': isActuatorOnOfflineEsp(data.espId),
-            'rule-node--server-only': !!data.espId && !isActuatorOnOfflineEsp(data.espId),
-          }"
+          :class="{ 'rule-node--active': isNodeActive(id), 'rule-node--unconfigured': !data.espId, 'rule-node--validation-error': hasNodeValidationError(id) }"
         >
           <Handle type="target" :position="Position.Left" class="handle-target" />
-          <!-- AUT-248: ESP/Server deployment badge -->
-          <span
-            v-if="data.espId && isActuatorOnOfflineEsp(data.espId)"
-            class="rule-node__deploy-badge rule-node__deploy-badge--esp"
-            title="Läuft auf ESP-Hardware — auch ohne Server-Verbindung."
-          >
-            <Cpu class="rule-node__deploy-badge-icon" aria-hidden="true" />
-            ESP
-          </span>
-          <span
-            v-else-if="data.espId"
-            class="rule-node__deploy-badge rule-node__deploy-badge--server"
-            title="Benötigt Server — bei MQTT-Ausfall NICHT ausgeführt."
-          >
-            <Server class="rule-node__deploy-badge-icon" aria-hidden="true" />
-            Server
-          </span>
           <div class="rule-node__header">
             <div class="rule-node__icon-wrap rule-node__icon-wrap--actuator">
               <Power class="rule-node__icon" />
@@ -1647,18 +1231,10 @@ defineExpose({
       <!-- ======================== NOTIFICATION NODE ======================== -->
       <template #node-notification="{ data, id }">
         <div
-          class="rule-node rule-node--notification rule-node--server-only"
+          class="rule-node rule-node--notification"
           :class="{ 'rule-node--active': isNodeActive(id), 'rule-node--validation-error': hasNodeValidationError(id) }"
         >
           <Handle type="target" :position="Position.Left" class="handle-target" />
-          <!-- AUT-248: server-only marker -->
-          <span
-            class="rule-node__deploy-badge rule-node__deploy-badge--server"
-            title="Benötigt Server — bei MQTT-Ausfall NICHT ausgeführt."
-          >
-            <Server class="rule-node__deploy-badge-icon" aria-hidden="true" />
-            Server
-          </span>
           <div class="rule-node__header">
             <div class="rule-node__icon-wrap rule-node__icon-wrap--notification">
               <Bell class="rule-node__icon" />
@@ -1682,18 +1258,10 @@ defineExpose({
       <!-- ======================== DELAY NODE ======================== -->
       <template #node-delay="{ data, id }">
         <div
-          class="rule-node rule-node--delay rule-node--server-only"
+          class="rule-node rule-node--delay"
           :class="{ 'rule-node--active': isNodeActive(id), 'rule-node--validation-error': hasNodeValidationError(id) }"
         >
           <Handle type="target" :position="Position.Left" class="handle-target" />
-          <!-- AUT-248: server-only marker -->
-          <span
-            class="rule-node__deploy-badge rule-node__deploy-badge--server"
-            title="Benötigt Server — bei MQTT-Ausfall NICHT ausgeführt."
-          >
-            <Server class="rule-node__deploy-badge-icon" aria-hidden="true" />
-            Server
-          </span>
           <div class="rule-node__header">
             <div class="rule-node__icon-wrap rule-node__icon-wrap--delay">
               <Timer class="rule-node__icon" />
@@ -1710,18 +1278,10 @@ defineExpose({
 
       <template #node-plugin="{ data, id }">
         <div
-          class="rule-node rule-node--plugin rule-node--server-only"
+          class="rule-node rule-node--plugin"
           :class="{ 'rule-node--active': isNodeActive(id), 'rule-node--validation-error': hasNodeValidationError(id) }"
         >
           <Handle type="target" :position="Position.Left" class="handle-target" />
-          <!-- AUT-248: server-only marker -->
-          <span
-            class="rule-node__deploy-badge rule-node__deploy-badge--server"
-            title="Benötigt Server — bei MQTT-Ausfall NICHT ausgeführt."
-          >
-            <Server class="rule-node__deploy-badge-icon" aria-hidden="true" />
-            Server
-          </span>
           <div class="rule-node__header">
             <div class="rule-node__icon-wrap rule-node__icon-wrap--plugin">
               <Puzzle class="rule-node__icon" />
@@ -1762,18 +1322,10 @@ defineExpose({
       <!-- ======================== RUN DIAGNOSTIC NODE (Action) ======================== -->
       <template #node-run_diagnostic="{ data, id }">
         <div
-          class="rule-node rule-node--diagnostics rule-node--server-only"
+          class="rule-node rule-node--diagnostics"
           :class="{ 'rule-node--active': isNodeActive(id), 'rule-node--validation-error': hasNodeValidationError(id) }"
         >
           <Handle type="target" :position="Position.Left" class="handle-target" />
-          <!-- AUT-248: server-only marker -->
-          <span
-            class="rule-node__deploy-badge rule-node__deploy-badge--server"
-            title="Benötigt Server — bei MQTT-Ausfall NICHT ausgeführt."
-          >
-            <Server class="rule-node__deploy-badge-icon" aria-hidden="true" />
-            Server
-          </span>
           <div class="rule-node__header">
             <div class="rule-node__icon-wrap rule-node__icon-wrap--diagnostics">
               <Stethoscope class="rule-node__icon" />
@@ -1807,9 +1359,6 @@ defineExpose({
   min-height: 0;
   border: 2px solid transparent;
   transition: border-color var(--transition-base);
-  /* AUT-249: explicit base background so transparent VueFlow pane reveals
-     the three-column overlay above this layer. */
-  background: var(--color-bg-primary);
 }
 
 .flow-editor--dragover {
@@ -2361,8 +1910,7 @@ defineExpose({
 /* ======================== VUE FLOW THEME OVERRIDES ======================== */
 
 :deep(.vue-flow) {
-  /* AUT-249: transparent canvas so the three-column overlay is visible. */
-  background: transparent;
+  background: var(--color-bg-primary);
 }
 
 :deep(.vue-flow__pane) {
@@ -2497,365 +2045,5 @@ defineExpose({
 .flow-editor__undo-btn:disabled {
   opacity: 0.25;
   cursor: not-allowed;
-}
-
-/* ======================== AUT-248: DEPLOYMENT BANNER ======================== */
-
-.deployment-banner {
-  position: absolute;
-  top: 0.625rem;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: var(--z-dropdown);
-  display: flex;
-  align-items: center;
-  gap: 0.625rem;
-  padding: 0.5rem 0.875rem;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--glass-border);
-  background: rgba(13, 13, 22, 0.92);
-  backdrop-filter: blur(12px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-  font-size: var(--text-sm);
-  color: var(--color-text-primary);
-  max-width: calc(100% - 5rem);
-  pointer-events: auto;
-}
-
-.deployment-banner--server {
-  border-color: color-mix(in srgb, var(--color-status-alarm) 35%, transparent);
-  background: color-mix(in srgb, var(--color-status-alarm) 8%, rgba(13, 13, 22, 0.92));
-}
-
-.deployment-banner--esp {
-  border-color: color-mix(in srgb, var(--color-status-good) 35%, transparent);
-  background: color-mix(in srgb, var(--color-status-good) 8%, rgba(13, 13, 22, 0.92));
-}
-
-.deployment-banner--hybrid {
-  border-color: color-mix(in srgb, var(--color-status-warning) 35%, transparent);
-  background: color-mix(in srgb, var(--color-status-warning) 8%, rgba(13, 13, 22, 0.92));
-}
-
-.deployment-banner__icon-wrap {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.deployment-banner__icon {
-  width: 16px;
-  height: 16px;
-}
-
-.deployment-banner--server .deployment-banner__icon {
-  color: var(--color-status-alarm);
-}
-
-.deployment-banner--esp .deployment-banner__icon {
-  color: var(--color-status-good);
-}
-
-.deployment-banner--hybrid .deployment-banner__icon {
-  color: var(--color-status-warning);
-}
-
-.deployment-banner__text {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.375rem;
-  flex-wrap: wrap;
-  line-height: 1.4;
-}
-
-.deployment-banner__text strong {
-  font-weight: 700;
-  letter-spacing: 0.01em;
-}
-
-.deployment-banner__sub {
-  color: var(--color-text-secondary);
-  font-size: 0.8125rem;
-}
-
-.deployment-banner__quota {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.1875rem 0.5rem;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--glass-border);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.deployment-banner__quota-icon {
-  width: 11px;
-  height: 11px;
-  color: var(--color-status-good);
-}
-
-.deployment-banner__quota--exceeded {
-  border-color: color-mix(in srgb, var(--color-status-alarm) 45%, transparent);
-  background: color-mix(in srgb, var(--color-status-alarm) 10%, transparent);
-  color: var(--color-status-alarm);
-}
-
-.deployment-banner__quota--exceeded .deployment-banner__quota-icon {
-  color: var(--color-status-alarm);
-}
-
-/* ======================== AUT-248: NODE DEPLOYMENT BADGES ======================== */
-
-.rule-node__deploy-badge {
-  position: absolute;
-  top: -8px;
-  right: 8px;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 6px;
-  font-size: 0.5625rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  border-radius: var(--radius-xs);
-  border: 1px solid var(--glass-border);
-  background: var(--color-bg-tertiary);
-  z-index: 2;
-  white-space: nowrap;
-  pointer-events: auto;
-  cursor: help;
-}
-
-.rule-node__deploy-badge-icon {
-  width: 10px;
-  height: 10px;
-}
-
-.rule-node__deploy-badge--esp {
-  border-color: color-mix(in srgb, var(--color-status-good) 45%, transparent);
-  background: color-mix(in srgb, var(--color-status-good) 16%, var(--color-bg-tertiary));
-  color: var(--color-status-good);
-}
-
-.rule-node__deploy-badge--server {
-  border-color: color-mix(in srgb, var(--color-status-alarm) 45%, transparent);
-  background: color-mix(in srgb, var(--color-status-alarm) 16%, var(--color-bg-tertiary));
-  color: var(--color-status-alarm);
-}
-
-/* Hysteresis tint for offline-capable sensor nodes */
-.rule-node--offline-capable.rule-node--sensor {
-  background: color-mix(in srgb, var(--color-warning) 6%, var(--color-bg-secondary));
-}
-
-.rule-node--offline-capable.rule-node--actuator {
-  background: color-mix(in srgb, var(--color-status-good) 6%, var(--color-bg-secondary));
-}
-
-.rule-node--server-only:not(.rule-node--offline-capable) {
-  background: color-mix(in srgb, var(--color-status-alarm) 4%, var(--color-bg-secondary));
-}
-
-/* ======================== AUT-249: THREE-COLUMN LAYOUT ======================== */
-
-/* Visual three-column overlay (Wann / Wenn / Dann). Pure background guide —
-   the Vue Flow drag-and-drop mechanism is unaffected. */
-.rule-columns {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  pointer-events: none;
-}
-
-.rule-columns__col {
-  position: relative;
-  border-right: 1px dashed color-mix(in srgb, var(--color-text-muted) 18%, transparent);
-}
-
-.rule-columns__col:last-child {
-  border-right: none;
-}
-
-.rule-columns__col--trigger {
-  background: color-mix(in srgb, var(--color-iridescent-1) 3%, transparent);
-}
-
-.rule-columns__col--condition {
-  background: color-mix(in srgb, var(--color-text-muted) 4%, transparent);
-}
-
-.rule-columns__col--action {
-  background: color-mix(in srgb, var(--color-iridescent-4) 3%, transparent);
-}
-
-.rule-columns__label {
-  position: absolute;
-  top: 0.5rem;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 0.625rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--color-text-muted);
-  padding: 2px 8px;
-  border-radius: var(--radius-xs);
-  background: color-mix(in srgb, var(--color-bg-primary) 80%, transparent);
-  white-space: nowrap;
-}
-
-/* ======================== AUT-249: HEADER BAR ======================== */
-
-.rule-editor-header {
-  position: absolute;
-  top: 3.25rem;
-  left: 0.625rem;
-  right: 0.625rem;
-  z-index: var(--z-dropdown);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.375rem 0.625rem;
-  background: color-mix(in srgb, var(--color-bg-secondary) 88%, transparent);
-  backdrop-filter: blur(8px);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
-  pointer-events: auto;
-}
-
-.rule-editor-header__pills {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-
-.rule-editor-header__pill {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.25rem;
-  padding: 0.1875rem 0.5rem;
-  font-size: 0.6875rem;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--glass-border);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-  letter-spacing: 0.02em;
-  line-height: 1.4;
-}
-
-.rule-editor-header__pill-label {
-  color: var(--color-text-muted);
-  font-weight: 500;
-}
-
-.rule-editor-header__pill-value {
-  color: var(--color-text-primary);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.rule-editor-header__pill--button {
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.rule-editor-header__pill--button:hover {
-  border-color: color-mix(in srgb, var(--color-iridescent-2) 35%, transparent);
-  background: color-mix(in srgb, var(--color-iridescent-2) 6%, transparent);
-}
-
-.rule-editor-header__pill--button:focus-visible {
-  outline: 2px solid var(--color-iridescent-2);
-  outline-offset: 2px;
-}
-
-.rule-editor-header__active {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-shrink: 0;
-}
-
-.rule-editor-header__active-label {
-  font-size: 0.6875rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 2px 6px;
-  border-radius: var(--radius-xs);
-}
-
-.rule-editor-header__active-label--on {
-  color: var(--color-success);
-  background: color-mix(in srgb, var(--color-success) 12%, transparent);
-}
-
-.rule-editor-header__active-label--off {
-  color: var(--color-text-muted);
-  background: color-mix(in srgb, var(--color-text-muted) 10%, transparent);
-}
-
-/* ======================== AUT-249: NODE TYPE TINTS (refines AUT-248 hysteresis tint) ======================== */
-
-/* Trigger column — sensor (non-hysteresis): subtle blue tint */
-.rule-node--sensor:not(.rule-node--offline-capable) {
-  background: color-mix(in srgb, var(--color-iridescent-1) 4%, var(--color-bg-secondary));
-}
-
-/* Trigger column — time: subtle yellow tint */
-.rule-node--time {
-  background: color-mix(in srgb, var(--color-warning) 4%, var(--color-bg-secondary));
-}
-
-/* Trigger column — diagnostics-status: subtle cyan tint */
-.rule-node--diagnostics:not(.rule-node--server-only) {
-  background: color-mix(in srgb, var(--color-real) 4%, var(--color-bg-secondary));
-}
-
-/* Condition column — logic gate: subtle gray tint */
-.rule-node--logic {
-  background: color-mix(in srgb, var(--color-text-muted) 6%, var(--color-bg-secondary));
-}
-
-/* Action column — actuator (no offline/server override active): subtle green tint */
-.rule-node--actuator:not(.rule-node--offline-capable):not(.rule-node--server-only) {
-  background: color-mix(in srgb, var(--color-success) 4%, var(--color-bg-secondary));
-}
-
-/* Action column — notification: subtle red tint (overrides .rule-node--server-only) */
-.rule-node--notification {
-  background: color-mix(in srgb, var(--color-error) 4%, var(--color-bg-secondary));
-}
-
-/* Action column — delay: subtle gray tint */
-.rule-node--delay {
-  background: color-mix(in srgb, var(--color-text-muted) 4%, var(--color-bg-secondary));
-}
-
-/* Action column — plugin: subtle violet tint */
-.rule-node--plugin {
-  background: color-mix(in srgb, var(--color-iridescent-3) 4%, var(--color-bg-secondary));
-}
-
-/* Reduced motion fallback for header transitions. */
-@media (prefers-reduced-motion: reduce) {
-  .rule-editor-header__pill--button {
-    transition: none;
-  }
 }
 </style>

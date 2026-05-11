@@ -12,7 +12,7 @@ El Frontend (Vue 3) <-HTTP/WS-> El Servador (FastAPI) <-MQTT-> El Trabajante (ES
 Diese Informationen bleiben nach /compact erhalten:
 - AutomationOne = IoT-Framework mit 3 Schichten: El Trabajante (ESP32 C++), El Servador (FastAPI Python), El Frontend (Vue 3 TypeScript)
 - 9 Sensortypen (pH, EC, Temp, Humidity, Soil, Pressure, CO2, Light, Flow), 4 Aktortypen (Pump, Valve, PWM, Relay)
-- PostgreSQL (41 Tabellen), MQTT (Mosquitto), Grafana+Prometheus Monitoring
+- PostgreSQL (32 Tabellen), MQTT (Mosquitto), Grafana+Prometheus Monitoring
 - HardwareView: 3-Level-Zoom (L1 Uebersicht -> L2 Orbital/Device -> L3 Modals), Route-basiert
 - Sensor-Konfiguration NUR in HardwareView (SensorConfigPanel). Komponenten-Tab (/sensors) = Wissensdatenbank
 - Mock vs. Real ESP klar trennen. Zone auf Geraetebene, Subzone pro Sensor
@@ -28,7 +28,7 @@ Nach JEDER Code-Aenderung muss der Agent die passenden Checks ausfuehren:
 
 | Bereich | Befehl | Erfolgskriterium |
 |---------|--------|-----------------|
-| ESP32 Firmware | `cd "El Trabajante" && pio run -e esp32_dev` (ESP32 DevKit / WROOM-32; Seeed XIAO: `seeed_xiao_esp32c3`) | Exit-Code 0, keine Errors |
+| ESP32 Firmware | `cd "El Trabajante" && pio run -e seeed` | Exit-Code 0, keine Errors |
 | Server Backend | `cd "El Servador/god_kaiser_server" && pytest --tb=short -q` | Alle Tests gruen |
 | Server Lint | `cd "El Servador/god_kaiser_server" && ruff check .` | Keine Errors (Warnings OK) |
 | Frontend Build | `cd "El Frontend" && npm run build` | Exit-Code 0, keine TS-Errors |
@@ -88,8 +88,6 @@ Jede Sub-Agent-Invocation muss enthalten:
 
 **Kette (ein Satz):** Linear-Issue → Analyse (Docker/Loki/Prom/DB/Traces) → Findings als Linear-Issues + BELEG-MDs → bei Code-Folge: `TASK-PACKAGES.md` → **`verify-plan`** (inkl. **OUTPUT FÜR ORCHESTRATOR**) → **`VERIFY-PLAN-REPORT.md`** → **Plan-Anpassung** (`TASK-PACKAGES.md` mutieren) → **`SPECIALIST-PROMPTS.md`** rollenweise → Dev-Agenten auf Branch **`auto-debugger/work`**.
 
-**Zusatzpflichten `auto-debugger`:** Vor Paketen/Prompts **Pattern-Scan** (repo-verifizierte „closest implementation“); in delegierten Prompts **Pattern-Reuse**, **Alert-/Notification-Pfade**, **Verify-Befehl** und **Fehler-Register** (Mikrozirkular: ein Fehler → Minimalfix → gleicher Verify); bei gültiger Steuerdatei **keine** Standard-Chat-Rückfragen — Details Agent/Skill `auto-debugger`.
-
 **Slash-Command (optional):** `.claude/commands/auto-debugger.md` mit Argument `path` zur Steuerdatei.
 
 ---
@@ -143,7 +141,7 @@ Jede Sub-Agent-Invocation muss enthalten:
 
 | Agent | Trigger-Keywords | Rolle |
 |-------|------------------|-------|
-| `auto-debugger` | Incident-Artefakte, Korrelation, TASK-PACKAGES, verify-plan-Gate, Steuerdatei inbox | Lagebild → Pattern-Scan → Korrelation → Pakete/Prompts (Reuse/Alert/Verify/Fehler-Register) → Verify + VERIFY-PLAN-REPORT → **TASK-PACKAGES anpassen** → **SPECIALIST-PROMPTS** → Dev-Umsetzung |
+| `auto-debugger` | Incident-Artefakte, Korrelation, TASK-PACKAGES, verify-plan-Gate, Steuerdatei inbox | Lagebild → Korrelation → erste Pakete/Prompts → Verify + VERIFY-PLAN-REPORT → **TASK-PACKAGES anpassen** → **SPECIALIST-PROMPTS** → Dev-Umsetzung; Steuerdatei siehe oben |
 
 ---
 

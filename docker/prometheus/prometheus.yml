@@ -2,9 +2,6 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
-rule_files:
-  - 'rules/*.yml'
-
 scrape_configs:
   - job_name: 'el-servador'
     metrics_path: '/api/v1/health/metrics'
@@ -37,6 +34,13 @@ scrape_configs:
       - targets: ['cadvisor:8080']
         labels:
           service: 'cadvisor'
+          environment: 'development'
+
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          service: 'node'
           environment: 'development'
 
   - job_name: 'loki'

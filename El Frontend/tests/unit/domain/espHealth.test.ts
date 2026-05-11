@@ -96,36 +96,3 @@ describe('espHealthPresentation', () => {
     expect(p.tooltipLines.some(l => l.includes('Epoche 7'))).toBe(true)
   })
 })
-
-describe('AUT-133: counter metrics', () => {
-  it('maps counter fields into metrics ViewModel', () => {
-    const vm = normalizeEspHealthPayload({
-      esp_id: 'ESP_X',
-      critical_outcome_drop_count: 3,
-      publish_outbox_drop_count: 1,
-      persistence_drift_count: 2,
-      publish_queue_drop_count: 5,
-    })
-    expect(vm.metrics.criticalOutcomeDropCount).toBe(3)
-    expect(vm.metrics.publishOutboxDropCount).toBe(1)
-    expect(vm.metrics.persistenceDriftCount).toBe(2)
-    expect(vm.metrics.publishQueueDropCount).toBe(5)
-    expect(vm.rawTelemetry.critical_outcome_drop_count).toBeUndefined()
-    expect(vm.rawTelemetry.publish_outbox_drop_count).toBeUndefined()
-  })
-
-  it('shows counter indicators in tooltipLines when counters > 0', () => {
-    const vm = normalizeEspHealthPayload({
-      esp_id: 'ESP_X',
-      critical_outcome_drop_count: 2,
-    })
-    const p = espHealthPresentation(vm, true)
-    expect(p.tooltipLines.some(l => l.includes('Kritische Drops'))).toBe(true)
-  })
-
-  it('does not show counter indicators when all counters are 0', () => {
-    const vm = normalizeEspHealthPayload({ esp_id: 'ESP_X' })
-    const p = espHealthPresentation(vm, true)
-    expect(p.tooltipLines.some(l => l.includes('Metriken:'))).toBe(false)
-  })
-})

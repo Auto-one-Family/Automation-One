@@ -71,6 +71,7 @@ class JobCategory(str, Enum):
     MONITOR = "monitor"  # Timeout-Checks, Health
     CUSTOM = "custom"  # User-definierte Jobs
     SENSOR_SCHEDULE = "sensor_schedule"  # Scheduled sensor measurements (Phase 2H)
+    DAILY_ANALYSIS = "daily_analysis"  # AUT-194: 2x/day Claude stack analysis
 
 
 @dataclass

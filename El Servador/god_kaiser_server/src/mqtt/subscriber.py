@@ -11,6 +11,7 @@ Features:
 """
 
 import asyncio
+import inspect
 import json
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -97,7 +98,8 @@ class Subscriber:
 
         Args:
             topic_pattern: MQTT topic pattern (supports wildcards: +, #)
-            handler: Handler function(topic: str, payload: dict)
+            handler: Handler ``(topic, payload)`` or ``(topic, payload, *, retain)`` if the
+                handler declares a ``retain`` parameter (LWT).
 
         Example:
             subscriber.register_handler(
@@ -143,10 +145,6 @@ class Subscriber:
         """Resolve QoS deterministically from the registered topic pattern."""
         if pattern.endswith("/system/heartbeat") or pattern.endswith("/system/heartbeat_metrics"):
             return 0  # Heartbeat lanes: fire and forget
-        if pattern.endswith("/latched_offline"):
-            # AUT-117: Actuator latched-offline telemetry. Lossy on purpose —
-            # actuator state authority is ``actuator/{gpio}/status`` (QoS 1).
-            return 0
         if "config_response" in pattern or "config/ack" in pattern:
             return 2  # Config acknowledgement lanes: exactly once
         return 1  # Default: at least once
@@ -164,7 +162,7 @@ class Subscriber:
         """
         return self.client.subscribe(topic, qos)
 
-    def _route_message(self, topic: str, payload_str: str) -> None:
+    def _route_message(self, topic: str, payload_str: str, retain: bool = False) -> None:
         """
         Route incoming message to appropriate handler.
 
@@ -174,6 +172,7 @@ class Subscriber:
         Args:
             topic: MQTT topic
             payload_str: Message payload (JSON string)
+            retain: Paho RETAIN flag on delivery (True when broker replays a retained message)
         """
         try:
             if self._is_shutting_down:
@@ -189,15 +188,7 @@ class Subscriber:
             try:
                 payload = json.loads(payload_str)
             except json.JSONDecodeError as e:
-                # Synthetic correlation for log correlation when payload cannot be parsed (no handler run).
-                mqtt_parse_fail_id = f"parse-fail:{uuid4().hex}"
-                logger.error(
-                    "Invalid JSON payload topic=%s mqtt_parse_fail_id=%s: %s",
-                    topic,
-                    mqtt_parse_fail_id,
-                    e,
-                    extra={"failure_class": "mqtt_json_parse"},
-                )
+                logger.error(f"Invalid JSON payload on topic {topic}: {e}")
                 self.messages_failed += 1
                 return
 
@@ -227,6 +218,7 @@ class Subscriber:
                         payload,
                         correlation_id,
                         inbox_event_id,
+                        retain,
                     )
                 except RuntimeError as submit_err:
                     submit_msg = str(submit_err).lower()
@@ -245,11 +237,7 @@ class Subscriber:
                 logger.warning(f"No handler registered for topic: {topic}")
 
         except Exception as e:
-            logger.error(
-                f"Error routing message from {topic}: {e}",
-                exc_info=True,
-                extra={"failure_class": "mqtt_route"},
-            )
+            logger.error(f"Error routing message from {topic}: {e}", exc_info=True)
             self.messages_failed += 1
 
     def _append_critical_inbound_event(
@@ -324,8 +312,20 @@ class Subscriber:
         )
 
     @staticmethod
+    def _handler_accepts_retain(handler: Callable) -> bool:
+        """True if handler signature includes a ``retain`` parameter (LWT path)."""
+        try:
+            return "retain" in inspect.signature(handler).parameters
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
     async def _run_handler_with_cid(
-        handler: Callable, topic: str, payload: dict, correlation_id: str
+        handler: Callable,
+        topic: str,
+        payload: dict,
+        correlation_id: str,
+        retain: bool = False,
     ):
         """Run MQTT handler with correlation ID set in event loop context.
 
@@ -339,10 +339,13 @@ class Subscriber:
             topic: MQTT topic
             payload: Parsed payload dict
             correlation_id: Cross-layer correlation ID (esp_id:topic:seq:ts)
+            retain: MQTT retain flag from broker delivery (passed only to handlers that accept it)
         """
         token_cid = set_correlation_id(correlation_id)
         token_req = set_request_id(correlation_id)
         try:
+            if Subscriber._handler_accepts_retain(handler):
+                return await handler(topic, payload, retain=retain)
             return await handler(topic, payload)
         finally:
             clear_correlation_id(token_cid)
@@ -366,6 +369,7 @@ class Subscriber:
         payload: dict,
         correlation_id: str = "",
         inbox_event_id: Optional[str] = None,
+        retain: bool = False,
     ) -> None:
         """
         Execute handler in thread pool.
@@ -408,7 +412,7 @@ class Subscriber:
                 # CID is passed as parameter to the wrapper, NOT via ContextVar
                 # (ContextVars don't propagate across thread boundaries)
                 future = asyncio.run_coroutine_threadsafe(
-                    self._run_handler_with_cid(handler, topic, payload, correlation_id),
+                    self._run_handler_with_cid(handler, topic, payload, correlation_id, retain),
                     main_loop,
                 )
 
@@ -444,7 +448,10 @@ class Subscriber:
                 token_cid = set_correlation_id(correlation_id) if correlation_id else None
                 token_req = set_request_id(correlation_id) if correlation_id else None
                 try:
-                    result = handler(topic, payload)
+                    if self._handler_accepts_retain(handler):
+                        result = handler(topic, payload, retain=retain)
+                    else:
+                        result = handler(topic, payload)
                     if result is False:
                         logger.warning(
                             f"Handler returned False for topic {topic} - processing may have failed"
@@ -539,7 +546,7 @@ class Subscriber:
                 increment_reconciliation_session(replay_payload["_reconciliation"]["phase"])
                 if asyncio.iscoroutinefunction(handler):
                     result = await self._run_handler_with_cid(
-                        handler, topic, replay_payload, correlation_id
+                        handler, topic, replay_payload, correlation_id, retain=False
                     )
                 else:
                     token = set_request_id(correlation_id)

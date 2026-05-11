@@ -512,7 +512,8 @@ class MQTTClient:
         Set global message callback.
 
         Args:
-            callback: Callback function(topic: str, payload: dict)
+            callback: ``callback(topic: str, payload: str, retain: bool = False)``
+                — ``retain`` is the Paho RETAIN flag on delivery (MQTT 3.1.1).
         """
         self.on_message_callback = callback
         logger.debug("Global message callback registered")
@@ -697,9 +698,11 @@ class MQTTClient:
 
             increment_mqtt_received()
 
-            # Call global callback if registered
+            # Call global callback if registered (retain=True = broker replay of a
+            # retained publication, e.g. stale LWT after server subscribe — see AUT-341)
             if self.on_message_callback:
-                self.on_message_callback(topic, payload)
+                retain_flag = bool(getattr(msg, "retain", False))
+                self.on_message_callback(topic, payload, retain_flag)
             else:
                 logger.warning(f"No message callback registered for topic: {topic}")
 

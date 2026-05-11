@@ -12,17 +12,13 @@
  * - VueDraggable for subzone reassignment
  */
 
-import { computed, ref, onMounted } from 'vue'
+import { computed } from 'vue'
 import type { ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
 import { useLogicStore } from '@/shared/stores/logic.store'
-import { usePlantsStore } from '@/shared/stores/plants.store'
-import { ArrowLeft, Sprout } from 'lucide-vue-next'
+import { ArrowLeft } from 'lucide-vue-next'
 import SubzoneArea from './SubzoneArea.vue'
 import DeviceSummaryCard from './DeviceSummaryCard.vue'
-import SlideOver from '@/shared/design/primitives/SlideOver.vue'
-import PlantDetailPanel from '@/components/plants/PlantDetailPanel.vue'
-import type { Plant } from '@/types'
 
 interface Props {
   zoneId: string
@@ -42,49 +38,6 @@ const emit = defineEmits<{
 
 const espStore = useEspStore()
 const logicStore = useLogicStore()
-const plantsStore = usePlantsStore()
-
-// =============================================================================
-// AUT-252: Pflanzen-Panel (oeffnet bei SubzoneArea-Klick)
-// =============================================================================
-const isPlantPanelOpen = ref(false)
-const selectedPlant = ref<Plant | null>(null)
-const noPlantHint = ref<string | null>(null)
-
-onMounted(() => {
-  if (plantsStore.plants.length === 0) {
-    plantsStore.fetchPlants().catch(() => {})
-  }
-})
-
-function openSubzonePanel(subzoneId: string): void {
-  const plant = plantsStore.plants.find(
-    (p) => p.subzone_id === subzoneId && !p.deleted_at,
-  )
-  if (plant) {
-    selectedPlant.value = plant
-    noPlantHint.value = null
-    isPlantPanelOpen.value = true
-  } else {
-    // Kein Pflanzenprofil — Hint im Panel anzeigen
-    selectedPlant.value = null
-    noPlantHint.value = 'Dieser Subzone ist aktuell keine Pflanze zugeordnet. Pflanzen werden in der Wissensdatenbank (Komponenten) verwaltet.'
-    isPlantPanelOpen.value = true
-  }
-}
-
-function closePlantPanel(): void {
-  isPlantPanelOpen.value = false
-  selectedPlant.value = null
-  noPlantHint.value = null
-}
-
-const plantPanelTitle = computed<string>(() => {
-  if (selectedPlant.value) {
-    return selectedPlant.value.qr_code || selectedPlant.value.genotype || 'Pflanze'
-  }
-  return 'Pflanzen-Kontext'
-})
 
 /** Total sensor/actuator counts */
 const totalSensors = computed(() =>
@@ -191,7 +144,6 @@ function isMock(device: ESPDevice): boolean {
       :subzone-id="group.subzoneId!"
       :subzone-name="group.subzoneName"
       :devices="group.devices"
-      @click="openSubzonePanel(group.subzoneId!)"
     >
       <DeviceSummaryCard
         v-for="device in group.devices"
@@ -224,20 +176,6 @@ function isMock(device: ESPDevice): boolean {
       <p>Keine Geräte in dieser Zone.</p>
       <p class="text-sm">Ziehe Geräte hierher, um sie zuzuweisen.</p>
     </div>
-
-    <!-- AUT-252: Pflanzen-Detail-Panel (oeffnet bei SubzoneArea-Klick) -->
-    <SlideOver
-      :open="isPlantPanelOpen"
-      :title="plantPanelTitle"
-      width="lg"
-      @close="closePlantPanel"
-    >
-      <PlantDetailPanel v-if="selectedPlant" :plant="selectedPlant" />
-      <div v-else-if="noPlantHint" class="zone-detail-view__no-plant">
-        <Sprout class="zone-detail-view__no-plant-icon" aria-hidden="true" />
-        <p>{{ noPlantHint }}</p>
-      </div>
-    </SlideOver>
   </div>
 </template>
 
@@ -383,24 +321,6 @@ function isMock(device: ESPDevice): boolean {
   font-size: var(--text-sm);
   opacity: 0.7;
   margin-top: var(--space-2);
-}
-
-/* AUT-252: Pflanzen-Panel Empty-State */
-.zone-detail-view__no-plant {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-6) var(--space-4);
-  text-align: center;
-  color: var(--color-text-muted);
-}
-
-.zone-detail-view__no-plant-icon {
-  width: 32px;
-  height: 32px;
-  color: var(--color-accent-bright);
-  opacity: 0.6;
 }
 
 /* Mobile */

@@ -659,13 +659,7 @@ bool publishIntentOutcome(const char* flow,
                           const String& reason,
                           bool retryable) {
     loadOutboxStatsIfNeeded();
-    // AUT-304: Normalize outcome — guard against both nullptr AND empty string.
-    // An empty outcome string causes server-side "Missing required field: outcome" rejection.
-    const char* normalized_outcome = (outcome != nullptr && outcome[0] != '\0') ? outcome : "unknown";
-    if (outcome == nullptr || outcome[0] == '\0') {
-        LOG_E(IC_TAG, String("publishIntentOutcome: empty/null outcome — using 'unknown' fallback"
-                             " (flow=") + (flow != nullptr ? flow : "null") + ")");
-    }
+    const char* normalized_outcome = outcome != nullptr ? outcome : "failed";
 
     // Defensive guard: intent_id must never be empty in the published payload.
     // An empty intent_id (e.g. from NVS migration, corruption or missing field) causes

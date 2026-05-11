@@ -1,7 +1,7 @@
 #include "config_manager.h"
 #include "storage_manager.h"
-#include <cstdio>
 #include "../../utils/logger.h"
+#include "../../utils/mqtt_broker_sanitize.h"
 #include "../../utils/onewire_utils.h"  // For ROM-Code validation
 #include "../../drivers/gpio_manager.h"
 #include "../../error_handling/error_tracker.h"
@@ -30,7 +30,7 @@ ConfigManager::ConfigManager()
     zone_config_loaded_(false),
     system_config_loaded_(false),
     subzone_count_cache_(0),
-    subzone_count_initialized_(false) {
+    subzone_count_initialized_(true) {
 }
 
 // ============================================
@@ -108,8 +108,55 @@ bool ConfigManager::loadWiFiConfig(WiFiConfig& config) {
 
     wifi_config_loaded_ = true;
 
+    {
+      const String addr_before = config.server_address;
+      const uint16_t port_before = config.mqtt_port;
+      sanitizeMqttBrokerHostAndPort(config.server_address, &config.mqtt_port);
+      if (addr_before != config.server_address || port_before != config.mqtt_port) {
+        LOG_W(TAG, "ConfigManager: WOKWI MQTT-Adresse normalisiert: " + addr_before + ":" +
+                    String(port_before) + " -> " + config.server_address + ":" +
+                    String(config.mqtt_port));
+      }
+    }
+
     LOG_I(TAG, "ConfigManager: Wokwi WiFi config - SSID: " + config.ssid +
              ", MQTT: " + config.server_address + ":" + String(config.mqtt_port));
+
+    return true;
+  #endif
+
+  // ============================================
+  // FUNKTURM ONE-SHOT FLASH (esp32_funkturm): Build-time WiFi + MQTT, then NVS persist
+  // ============================================
+  #ifdef FUNKTURM_COMPILE_WIFI
+    LOG_I(TAG, "ConfigManager: FUNKTURM_COMPILE_WIFI — SSID/MQTT aus Build-Umgebung (Test/Flash-once)");
+
+    config.ssid = FUNKTURM_WIFI_SSID;
+    config.password = FUNKTURM_WIFI_PASSWORD;
+    config.server_address = FUNKTURM_MQTT_HOST;
+    config.mqtt_port = FUNKTURM_MQTT_PORT;
+    config.mqtt_username = "";
+    config.mqtt_password = "";
+    config.configured = true;
+
+    {
+      const String addr_before = config.server_address;
+      const uint16_t port_before = config.mqtt_port;
+      sanitizeMqttBrokerHostAndPort(config.server_address, &config.mqtt_port);
+      if (addr_before != config.server_address || port_before != config.mqtt_port) {
+        LOG_W(TAG, "ConfigManager: FUNKTURM MQTT-Adresse normalisiert: " + addr_before + ":" +
+                    String(port_before) + " -> " + config.server_address + ":" +
+                    String(config.mqtt_port));
+      }
+    }
+
+    wifi_config_loaded_ = true;
+
+    if (!saveWiFiConfig(config)) {
+      LOG_W(TAG, "FUNKTURM_COMPILE_WIFI: NVS persist (wifi_config) fehlgeschlagen");
+    } else {
+      LOG_I(TAG, "FUNKTURM_COMPILE_WIFI: wifi_config in NVS gespeichert — weitere Builds nutzen esp32_dev");
+    }
 
     return true;
   #endif
@@ -129,6 +176,17 @@ bool ConfigManager::loadWiFiConfig(WiFiConfig& config) {
   // Load server settings
   config.server_address = storageManager.getStringObj("server_address", "192.168.0.198");
   config.mqtt_port = storageManager.getUInt16("mqtt_port", 8883);
+
+  {
+    const String addr_before = config.server_address;
+    const uint16_t port_before = config.mqtt_port;
+    sanitizeMqttBrokerHostAndPort(config.server_address, &config.mqtt_port);
+    if (addr_before != config.server_address || port_before != config.mqtt_port) {
+      LOG_W(TAG, "ConfigManager: NVS server_address normalisiert (MQTT-Transport): " + addr_before +
+                  ":" + String(port_before) + " -> " + config.server_address + ":" +
+                  String(config.mqtt_port));
+    }
+  }
 
   // Load credentials
   config.mqtt_username = storageManager.getStringObj("mqtt_username", "");
@@ -1290,15 +1348,30 @@ bool ConfigManager::isDeviceApproved() const {
 }
 
 void ConfigManager::setDeviceApproved(bool approved, time_t timestamp) {
+  // ============================================
   // INC-2026-04-11-ea5484-mqtt-transport-keepalive (PKG-04)
+  // ============================================
+  // Heartbeat-ACKs (status=online/approved) landen im Sekundentakt hier. Ohne
+  // Dedup schreibt jeder ACK NVS, obwohl sich weder approved-Flag noch der
+  // Timestamp-Slot fachlich aendern. Resultat waren repetitive
+  // "Device approval saved"-Logs pro ACK plus unnoetiger Flash-Wear.
+  //
   // Idempotenz-Guard: lese aktuellen NVS-State und schreibe nur, wenn sich
   // entweder der bool-State aendert oder ein fachlich sinnvoller
-  // Timestamp-Wechsel vorliegt. Wiederholte Liveness-ACKs bei
+  // Timestamp-Wechsel vorliegt. Approval-Recovery (false -> true) schreibt.
+  // Revocation (true -> false) schreibt. Wiederholte Liveness-ACKs bei
   // unveraendertem State bleiben RAM-only.
+  //
+  // Akzeptanz: ACK-Contract (status/handover_epoch) bleibt unveraendert —
+  // der Aufrufer (main.cpp Heartbeat-ACK Branch) ruft diesen Setter weiter
+  // bei jedem ACK; der NVS-Write wird hier geguarded.
   bool current_approved = isDeviceApproved();
   time_t current_ts = getApprovalTimestamp();
 
   bool state_changed = (current_approved != approved);
+  // Timestamp-Update ist nur relevant wenn approved=true UND ein neuer,
+  // plausibler Timestamp vorliegt (timestamp > 0) UND sich vom gespeicherten
+  // unterscheidet. approved=false ignoriert Timestamp (cleared state).
   bool ts_changed = approved && timestamp > 0 && (time_t)current_ts != timestamp;
 
   if (!state_changed && !ts_changed) {
@@ -1308,6 +1381,7 @@ void ConfigManager::setDeviceApproved(bool approved, time_t timestamp) {
               ") - skipping NVS write");
     return;
   }
+
   if (!storageManager.beginTransaction()) {
     LOG_E(TAG, "ConfigManager: Cannot save approval status - transaction error");
     return;

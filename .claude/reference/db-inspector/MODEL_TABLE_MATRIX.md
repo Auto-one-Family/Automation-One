@@ -6,7 +6,7 @@
 | Modellklasse (Datei) | Tabelle | Wichtigste Constraints / Hinweise |
 |----------------------|---------|-----------------------------------|
 | `ESPDevice` (`esp.py`) | `esp_devices` | `device_id` unique; `zone_id` → `zones.zone_id` (SET NULL); Soft-Delete u. a. `deleted_at` (Modell `esp.py`) |
-| `SensorConfig` (`sensor.py`) | `sensor_configs` | FK `esp_id` → `esp_devices.id` CASCADE; FK `temp_sensor_config_id` → `sensor_configs.id` SET NULL; kein UNIQUE-Constraint (wurde in `fix_null_coalesce_unique` umgebaut); `sensor_kind` CHECK ('continuous','snapshot'); `device_scope` CHECK; `measurement_freshness_hours`, `calibration_interval_days` |
+| `SensorConfig` (`sensor.py`) | `sensor_configs` | UNIQUE über `esp_id`, `gpio`, `sensor_type`, `onewire_address`, `i2c_address` (Migration `950ad9ce87bb` u. a.) |
 | `SensorData` (`sensor.py`) | `sensor_data` | FK `esp_id` → `esp_devices.id` ON DELETE SET NULL; **UNIQUE** `uq_sensor_data_esp_gpio_type_timestamp` (`esp_id`, `gpio`, `sensor_type`, `timestamp`); `zone_id` / `subzone_id` Messzeitpunkt |
 | `ActuatorConfig` (`actuator.py`) | `actuator_configs` | FK → `esp_devices` CASCADE |
 | `ActuatorState` (`actuator.py`) | `actuator_states` | Kanonische `state`-Strings laut `ActuatorRepository`: `on`, `off`, `pwm`, `unknown`, `error`, `emergency_stop` |
@@ -32,15 +32,9 @@
 | `ZoneContext` (`zone_context.py`) | `zone_contexts` | |
 | `CommandIntent` / `CommandOutcome` (`command_contract.py`) | `command_intents`, `command_outcomes` | Intent-Dedup ON CONFLICT |
 | `LibraryMetadata` (`library.py`) | `library_metadata` | |
-| `CalibrationSession` (`calibration_session.py`) | `calibration_sessions` | FK `sensor_config_id` → `sensor_configs.id` ON DELETE SET NULL; `session_metadata` JSON (AUT-299) |
-| `ApiKey` (`api_key.py`) | `api_keys` | `key_hash` UNIQUE; `owner_type`/`owner_id`; `scopes` JSON; `revoked_at` nullable |
-| `EntityBackup` (`entity_backup.py`) | `entity_backups` | Soft-Delete Backup-Store; `restore_status`; `expires_at_user` / `expires_at_admin` / `purge_at` |
-| `EntityLifecycleCommand` (`entity_lifecycle.py`) | `entity_lifecycle_commands` | MQTT-Command-Queue mit Retry; `status`, `retry_count`, `next_retry_at` |
-| `Plant` (`plant.py`) | `plants` | FK `subzone_id` → `subzone_configs.id` SET NULL; `qr_code` UNIQUE; Soft-Delete `deleted_at`; `phase` |
-| `PlantCannabisExtension` (`plant.py`) | `plants_cannabis_extension` | FK `plant_id` → `plants.plant_id` RESTRICT; UNIQUE `plant_id`; Erntedaten, Laboranalyse |
-| `PlantLifecycleEvent` (`plant.py`) | `plant_lifecycle_events` | FK `plant_id` → `plants.plant_id` RESTRICT; FK `created_by_user` → `user_accounts.id` RESTRICT |
+| `CalibrationSession` (`calibration_session.py`) | `calibration_sessions` | HEAD-Rev `ea85866bc66e` (Stand Repo-Datei) |
 
-### Alembic HEAD (Repo-Datei, immer live verifizieren)
+### Alembic HEAD (Repo-Datei, nicht automatisch verifiziert)
 
-Aktueller HEAD (verifiziert 2026-05-08): `aut299_cal_session_metadata`  
-**Immer** lokal verifizieren: `docker exec automationone-server python -m alembic heads` und abgleichen mit `SELECT version_num FROM alembic_version`.
+Letzte bekannte Migration-Datei: `alembic/versions/ea85866bc66e_add_calibration_sessions_table.py`.  
+**Immer** lokal verifizieren: `cd El Servador/god_kaiser_server` und `poetry run alembic heads` (oder Projekt-venv), dann mit `SELECT version_num FROM alembic_version` abgleichen.

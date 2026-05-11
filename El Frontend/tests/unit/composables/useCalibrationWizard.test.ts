@@ -38,30 +38,12 @@ vi.mock('@/shared/stores/ui.store', () => ({
   useUiStore: () => uiStoreMock,
 }))
 
-<<<<<<< Updated upstream
 const sensorsApiMock = vi.hoisted(() => ({
   triggerMeasurement: vi.fn().mockResolvedValue({ request_id: 'req-1' }),
 }))
 
 vi.mock('@/api/sensors', () => ({
   sensorsApi: sensorsApiMock,
-=======
-const triggerMeasurementMock = vi.hoisted(() =>
-  vi.fn().mockResolvedValue({
-    success: true,
-    request_id: 'req-default',
-    esp_id: 'ESP_TEST_001',
-    gpio: 4,
-    sensor_type: 'moisture',
-    message: 'ok',
-  }),
-)
-
-vi.mock('@/api/sensors', () => ({
-  sensorsApi: {
-    triggerMeasurement: triggerMeasurementMock,
-  },
->>>>>>> Stashed changes
 }))
 
 import { useCalibrationWizard } from '@/composables/useCalibrationWizard'
@@ -73,22 +55,13 @@ describe('useCalibrationWizard', () => {
     localStorage.clear()
     wsHandlers.clear()
     Object.values(calibrationApiMock).forEach((fn) => fn.mockReset())
-    triggerMeasurementMock.mockReset()
-    triggerMeasurementMock.mockResolvedValue({
-      success: true,
-      request_id: 'req-default',
-      esp_id: 'ESP_TEST_001',
-      gpio: 4,
-      sensor_type: 'moisture',
-      message: 'ok',
-    })
     uiStoreMock.confirm.mockReset()
     uiStoreMock.confirm.mockResolvedValue(true)
     sensorsApiMock.triggerMeasurement.mockReset()
     sensorsApiMock.triggerMeasurement.mockResolvedValue({ request_id: 'req-1' })
   })
 
-  it('verarbeitet calibration_measurement_received und setzt lastRawValue bei passender Request-ID', () => {
+  it('verarbeitet calibration_measurement_received und setzt lastRawValue', () => {
     const wizard = useCalibrationWizard({
       skipSelect: true,
       espId: 'ESP_TEST_001',
@@ -97,7 +70,6 @@ describe('useCalibrationWizard', () => {
     })
 
     wizard.selectSensor('ESP_TEST_001', 4, 'moisture')
-    wizard.measurementRequestId.value = 'intent-1'
     const handler = wsHandlers.get('calibration_measurement_received')
     expect(handler).toBeDefined()
 
@@ -115,77 +87,18 @@ describe('useCalibrationWizard', () => {
     expect(wizard.measurementQuality.value).toBe('good')
   })
 
-  it('ignoriert calibration_measurement_received mit fremder intent_id (letzter Request zaehlt)', () => {
-    const wizard = useCalibrationWizard({
-      skipSelect: true,
-      espId: 'ESP_TEST_001',
-      gpio: 4,
-      sensorType: 'moisture',
-    })
-
-    wizard.selectSensor('ESP_TEST_001', 4, 'moisture')
-    wizard.measurementRequestId.value = 'req-neu'
-    const handler = wsHandlers.get('calibration_measurement_received')
-    expect(handler).toBeDefined()
-
-    handler?.({
-      data: {
-        esp_id: 'ESP_TEST_001',
-        gpio: 4,
-        raw_value: 999,
-        quality: 'good',
-        intent_id: 'req-alt',
-      },
-    })
-    expect(wizard.lastRawValue.value).toBeNull()
-
-    handler?.({
-      data: {
-        esp_id: 'ESP_TEST_001',
-        gpio: 4,
-        raw_value: 2222,
-        quality: 'good',
-        correlation_id: 'req-neu',
-      },
-    })
-    expect(wizard.lastRawValue.value).toBe(2222)
-  })
-
-  it('matcht correlation_id auf Top-Level-Message fuer calibration_measurement_received', () => {
-    const wizard = useCalibrationWizard({
-      skipSelect: true,
-      espId: 'ESP_TEST_001',
-      gpio: 4,
-      sensorType: 'moisture',
-    })
-
-    wizard.selectSensor('ESP_TEST_001', 4, 'moisture')
-    wizard.measurementRequestId.value = 'top-corr-1'
-    const handler = wsHandlers.get('calibration_measurement_received')
-    handler?.({
-      correlation_id: 'top-corr-1',
-      data: {
-        esp_id: 'ESP_TEST_001',
-        gpio: 4,
-        raw_value: 42,
-        quality: 'good',
-      },
-    })
-    expect(wizard.lastRawValue.value).toBe(42)
-  })
-
   it('nutzt Session-Flow fuer submitCalibration', async () => {
     calibrationApiMock.startSession.mockResolvedValue({
       id: 'session-1',
       status: 'pending',
-      method: 'moisture_2point',
+      method: 'linear_2point',
       sensor_type: 'moisture',
       calibration_points: { points: [] },
     })
     calibrationApiMock.addPoint.mockResolvedValue({
       id: 'session-1',
       status: 'collecting',
-      method: 'moisture_2point',
+      method: 'linear_2point',
       sensor_type: 'moisture',
       calibration_points: {
         points: [{ id: 'p-1', point_role: 'dry' }, { id: 'p-2', point_role: 'wet' }],
@@ -194,7 +107,7 @@ describe('useCalibrationWizard', () => {
     calibrationApiMock.finalizeSession.mockResolvedValue({
       id: 'session-1',
       status: 'finalizing',
-      method: 'moisture_2point',
+      method: 'linear_2point',
       sensor_type: 'moisture',
       calibration_result: { slope: 1, offset: 0 },
       failure_reason: null,
@@ -202,7 +115,7 @@ describe('useCalibrationWizard', () => {
     calibrationApiMock.applySession.mockResolvedValue({
       id: 'session-1',
       status: 'applied',
-      method: 'moisture_2point',
+      method: 'linear_2point',
       sensor_type: 'moisture',
       calibration_result: { slope: 1, offset: 0 },
       failure_reason: null,
@@ -210,7 +123,7 @@ describe('useCalibrationWizard', () => {
     calibrationApiMock.getSession.mockResolvedValue({
       id: 'session-1',
       status: 'applied',
-      method: 'moisture_2point',
+      method: 'linear_2point',
       sensor_type: 'moisture',
       calibration_result: { slope: 1, offset: 0 },
       failure_reason: null,
@@ -228,12 +141,6 @@ describe('useCalibrationWizard', () => {
     await wizard.submitCalibration()
 
     expect(calibrationApiMock.startSession).toHaveBeenCalledTimes(1)
-    expect(calibrationApiMock.startSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        method: 'moisture_2point',
-        sensor_type: 'moisture',
-      }),
-    )
     expect(calibrationApiMock.addPoint).toHaveBeenCalledTimes(2)
     expect(calibrationApiMock.finalizeSession).toHaveBeenCalledTimes(1)
     expect(calibrationApiMock.applySession).toHaveBeenCalledTimes(1)
@@ -245,7 +152,7 @@ describe('useCalibrationWizard', () => {
     calibrationApiMock.startSession.mockResolvedValue({
       id: 'session-2',
       status: 'pending',
-      method: 'moisture_2point',
+      method: 'linear_2point',
       sensor_type: 'moisture',
       calibration_points: { points: [] },
     })
@@ -253,14 +160,14 @@ describe('useCalibrationWizard', () => {
       .mockResolvedValueOnce({
         id: 'session-2',
         status: 'collecting',
-        method: 'moisture_2point',
+        method: 'linear_2point',
         sensor_type: 'moisture',
         calibration_points: { points: [{ id: 'dry-1', point_role: 'dry' }] },
       })
       .mockResolvedValueOnce({
         id: 'session-2',
         status: 'collecting',
-        method: 'moisture_2point',
+        method: 'linear_2point',
         sensor_type: 'moisture',
         calibration_points: { points: [{ id: 'dry-1', point_role: 'dry' }] },
       })
@@ -291,7 +198,7 @@ describe('useCalibrationWizard', () => {
     calibrationApiMock.startSession.mockResolvedValue({
       id: 'session-3',
       status: 'pending',
-      method: 'moisture_2point',
+      method: 'linear_2point',
       sensor_type: 'moisture',
       calibration_points: { points: [] },
     })
@@ -299,14 +206,14 @@ describe('useCalibrationWizard', () => {
       .mockResolvedValueOnce({
         id: 'session-3',
         status: 'collecting',
-        method: 'moisture_2point',
+        method: 'linear_2point',
         sensor_type: 'moisture',
         calibration_points: { points: [{ id: 'dry-1', point_role: 'dry' }] },
       })
       .mockResolvedValueOnce({
         id: 'session-3',
         status: 'collecting',
-        method: 'moisture_2point',
+        method: 'linear_2point',
         sensor_type: 'moisture',
         calibration_points: {
           points: [
@@ -318,7 +225,7 @@ describe('useCalibrationWizard', () => {
     calibrationApiMock.deletePoint.mockResolvedValue({
       id: 'session-3',
       status: 'collecting',
-      method: 'moisture_2point',
+      method: 'linear_2point',
       sensor_type: 'moisture',
       calibration_points: { points: [{ id: 'dry-1', point_role: 'dry' }] },
     })
@@ -345,14 +252,14 @@ describe('useCalibrationWizard', () => {
     calibrationApiMock.startSession.mockResolvedValue({
       id: 'session-4',
       status: 'pending',
-      method: 'moisture_2point',
+      method: 'linear_2point',
       sensor_type: 'moisture',
       calibration_points: { points: [] },
     })
     calibrationApiMock.addPoint.mockResolvedValue({
       id: 'session-4',
       status: 'collecting',
-      method: 'moisture_2point',
+      method: 'linear_2point',
       sensor_type: 'moisture',
       calibration_points: { points: [{ id: 'dry-1', point_role: 'dry' }] },
     })

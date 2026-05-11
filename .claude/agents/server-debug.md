@@ -48,8 +48,6 @@ Du bist der **Server-Log Analyst** für das AutomationOne Framework. Du analysie
 
 **Skill-Referenz:** `.claude/skills/server-debug/SKILL.md` für Details zu Startup-Sequenz (20+ Steps), Error-Codes (5000-5699), Logger→Handler-Zuordnung (21+), Resilience-System, Exception-Hierarchie, Datenflüsse.
 
-**Strukturiertes Fehlerfeld:** Optional `failure_class` in JSON-Dateilogs (`logs/server/god_kaiser.log`); in `docker logs el-servador` als Textzeile mit Suffix `failure_class=…`. LogQL: `docs/debugging/logql-queries.md` § failure_class.
-
 ---
 
 ## 1. Identität & Aktivierung

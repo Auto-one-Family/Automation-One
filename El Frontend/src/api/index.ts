@@ -2,7 +2,6 @@ import axios, { type AxiosInstance, type AxiosError, type InternalAxiosRequestCo
 import { useAuthStore } from '@/shared/stores/auth.store'
 import { toUiApiError } from '@/api/uiApiError'
 import { createLogger } from '@/utils/logger'
-import { recordLastServerRequestIdFromHeaders } from '@/utils/lastRestRequestId'
 
 const logger = createLogger('API')
 
@@ -77,7 +76,6 @@ function processQueue(error: unknown, token: string | null) {
 api.interceptors.response.use(
   (response) => {
     const serverRequestId = response.headers['x-request-id']
-    recordLastServerRequestIdFromHeaders(response.headers)
     logger.debug(`${response.config.method?.toUpperCase()} ${response.config.url} → ${response.status}`, {
       requestId: serverRequestId,
     })
@@ -140,9 +138,6 @@ api.interceptors.response.use(
     }
 
     const uiError = toUiApiError(error, error.message)
-    if (error.response?.headers) {
-      recordLastServerRequestIdFromHeaders(error.response.headers)
-    }
     const errorRequestId = error.response?.headers?.['x-request-id'] || error.config?.headers?.['X-Request-ID']
     const status = error.response?.status
     const method = error.config?.method?.toUpperCase()

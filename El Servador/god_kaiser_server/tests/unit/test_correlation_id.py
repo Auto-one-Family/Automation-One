@@ -8,7 +8,6 @@ Tests the cross-layer tracing infrastructure:
 """
 
 import asyncio
-import json
 import logging
 import re
 import time
@@ -17,12 +16,10 @@ import pytest
 
 from src.core.request_context import (
     clear_request_id,
-    clear_traceparent,
     generate_mqtt_correlation_id,
     generate_request_id,
     get_request_id,
     set_request_id,
-    set_traceparent,
 )
 
 
@@ -166,106 +163,3 @@ class TestCorrelationIdInLogs:
         log_filter.filter(record)
 
         assert record.request_id == "-"
-
-    def test_text_formatter_appends_traceparent_when_set(self):
-        """Docker/stdout text logs include traceparent suffix when ContextVar is set."""
-        from src.core.logging_config import RequestIdFilter, TextFormatter
-
-        tp = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
-        set_request_id("req-tp-text")
-        set_traceparent(tp)
-        try:
-            log_filter = RequestIdFilter()
-            formatter = TextFormatter(
-                fmt="%(asctime)s - %(name)s - %(levelname)s - [%(request_id)s] - %(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S",
-            )
-            record = logging.LogRecord(
-                name="test",
-                level=logging.INFO,
-                pathname="",
-                lineno=0,
-                msg="hello",
-                args=None,
-                exc_info=None,
-            )
-            log_filter.filter(record)
-            line = formatter.format(record)
-            assert line.endswith(f" traceparent={tp}")
-            assert "req-tp-text" in line
-        finally:
-            clear_traceparent()
-            clear_request_id()
-
-    def test_json_formatter_includes_traceparent_when_set(self):
-        """JSON logs include traceparent when ContextVar is set."""
-        from src.core.logging_config import JSONFormatter, RequestIdFilter
-
-        tp = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
-        set_request_id("req-for-tp-test")
-        set_traceparent(tp)
-        try:
-            log_filter = RequestIdFilter()
-            formatter = JSONFormatter()
-            record = logging.LogRecord(
-                name="test",
-                level=logging.INFO,
-                pathname="",
-                lineno=0,
-                msg="hello",
-                args=None,
-                exc_info=None,
-            )
-            log_filter.filter(record)
-            line = formatter.format(record)
-            data = json.loads(line)
-            assert data["traceparent"] == tp
-            assert data["request_id"] == "req-for-tp-test"
-        finally:
-            clear_traceparent()
-            clear_request_id()
-
-    def test_json_formatter_includes_failure_class_when_extra_set(self):
-        """JSON logs include failure_class when passed via logging extra=."""
-        from src.core.logging_config import JSONFormatter, RequestIdFilter
-
-        log_filter = RequestIdFilter()
-        formatter = JSONFormatter()
-        record = logging.LogRecord(
-            name="test",
-            level=logging.ERROR,
-            pathname="",
-            lineno=0,
-            msg="bad payload",
-            args=None,
-            exc_info=None,
-        )
-        record.failure_class = "mqtt_json_parse"
-        log_filter.filter(record)
-        line = formatter.format(record)
-        data = json.loads(line)
-        assert data["failure_class"] == "mqtt_json_parse"
-        assert data["message"] == "bad payload"
-
-    def test_text_formatter_appends_failure_class_when_set(self):
-        """Text/console logs append failure_class for operator visibility."""
-        from src.core.logging_config import RequestIdFilter, TextFormatter
-
-        log_filter = RequestIdFilter()
-        formatter = TextFormatter(
-            fmt="%(asctime)s - %(name)s - %(levelname)s - [%(request_id)s] - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-        record = logging.LogRecord(
-            name="test",
-            level=logging.ERROR,
-            pathname="",
-            lineno=0,
-            msg="route failed",
-            args=None,
-            exc_info=None,
-        )
-        record.failure_class = "mqtt_route"
-        log_filter.filter(record)
-        line = formatter.format(record)
-        assert "failure_class=mqtt_route" in line

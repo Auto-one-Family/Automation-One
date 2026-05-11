@@ -25,12 +25,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // Storage state file path
 const AUTH_STATE_PATH = path.join(__dirname, '../../.playwright/auth-state.json')
 
-// E2E test credentials (must match an existing user on the API — port 8000).
-// Override with E2E_TEST_USER / E2E_TEST_PASSWORD when your dev DB differs.
-// CI: .github/workflows/playwright-tests.yml sets E2E_TEST_PASSWORD=Admin123#.
+// E2E test credentials (should match test user in database)
+// Server conftest.py uses: admin/Admin123# or via setup endpoint
 const E2E_CREDENTIALS = {
   username: process.env.E2E_TEST_USER || 'admin',
-  password: process.env.E2E_TEST_PASSWORD || 'admin123',
+  password: process.env.E2E_TEST_PASSWORD || 'Admin123#',
 }
 
 // Token keys (must match auth.ts)

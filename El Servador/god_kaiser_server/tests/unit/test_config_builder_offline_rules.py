@@ -481,7 +481,7 @@ class TestBuildOfflineRulesAsync:
 
     @pytest.mark.asyncio
     async def test_cross_esp_rule_filtered_out(self):
-        """Cross-ESP rule is excluded; local rule is still included; no false skip_collector entry."""
+        """Cross-ESP rule is excluded; local rule is still included."""
         builder = self._builder()
         mock_logic_repo = AsyncMock()
 
@@ -499,73 +499,12 @@ class TestBuildOfflineRulesAsync:
         builder.logic_repo = mock_logic_repo
 
         esp = _make_esp(ESP_ID_A)
-        mock_db = AsyncMock()
-        skip_collector: list = []
-
-        result = await builder._build_offline_rules(mock_db, esp, skip_collector=skip_collector)
-
-        assert len(result) == 1
-        assert result[0]["actuator_gpio"] == 22
-        # Cross-ESP rule must NOT produce a false skip_collector entry
-        assert skip_collector == [], (
-            f"Pure cross-ESP rule must not appear in skip_collector, got: {skip_collector}"
-        )
-
-    # ------------------------------------------------------------------
-    # 11b. Pure cross-ESP rule → result empty, skip_collector empty
-    # ------------------------------------------------------------------
-
-    @pytest.mark.asyncio
-    async def test_cross_esp_rule_not_in_skip_collector(self):
-        """Pure cross-ESP rule (all actions on ESP_B) → result empty, skip_collector stays empty."""
-        builder = self._builder()
-        mock_logic_repo = AsyncMock()
-
-        cross_rule = _make_rule(
-            rule_name="pure_cross_esp",
-            trigger_conditions=_heating_condition(ESP_ID_A, gpio=4),
-            actions=[_actuator_action(ESP_ID_B, gpio=5)],
-        )
-        mock_logic_repo.get_enabled_rules = AsyncMock(return_value=[cross_rule])
-        builder.logic_repo = mock_logic_repo
-
-        esp = _make_esp(ESP_ID_A)
-        mock_db = AsyncMock()
-        skip_collector: list = []
-
-        result = await builder._build_offline_rules(mock_db, esp, skip_collector=skip_collector)
-
-        assert result == []
-        assert skip_collector == [], "Pure cross-ESP rule must not generate a GPIO_NOT_IN_FRAME warning"
-
-    # ------------------------------------------------------------------
-    # 11c. Mixed actions rule (one local + one cross-ESP) → passes pre-filter
-    # ------------------------------------------------------------------
-
-    @pytest.mark.asyncio
-    async def test_mixed_actions_rule_passes_through(self):
-        """Rule with one local action (ESP_A) AND one cross-ESP action (ESP_B) → passes pre-filter, included."""
-        builder = self._builder()
-        mock_logic_repo = AsyncMock()
-
-        mixed_rule = _make_rule(
-            rule_name="mixed_actions",
-            trigger_conditions=_heating_condition(ESP_ID_A, gpio=4),
-            actions=[
-                _actuator_action(ESP_ID_A, gpio=18),  # local
-                _actuator_action(ESP_ID_B, gpio=5),   # cross-ESP
-            ],
-        )
-        mock_logic_repo.get_enabled_rules = AsyncMock(return_value=[mixed_rule])
-        builder.logic_repo = mock_logic_repo
-
-        esp = _make_esp(ESP_ID_A)
-        mock_db = AsyncMock()
+        mock_db = MagicMock()
 
         result = await builder._build_offline_rules(mock_db, esp)
 
         assert len(result) == 1
-        assert result[0]["actuator_gpio"] == 18  # takes first local action
+        assert result[0]["actuator_gpio"] == 22
 
     # ------------------------------------------------------------------
     # 12. More than MAX_OFFLINE_RULES rules → truncated to MAX_OFFLINE_RULES

@@ -184,7 +184,7 @@ struct ActuatorConfig {
 
 #### ESP32 Dev Board (esp32_dev.h):
 - **I2C Pins**: SDA=21, SCL=22
-- **LED**: GPIO 5 (GPIO 2 ist Strapping-Pin, reserviert)
+- **LED**: GPIO 2
 - **Button**: GPIO 0
 - **MAX_SENSORS**: 20
 - **MAX_ACTUATORS**: 12

@@ -29,10 +29,11 @@
 // CONFIGURATION CONSTANTS
 // ============================================
 
-// NTP Servers — priority: local Docker NTP → PTB (German reference) → public fallback
-#define NTP_SERVER_PRIMARY    "192.168.0.39"        // Local Docker NTP (cturra/ntp, always reachable on LAN)
-#define NTP_SERVER_SECONDARY  "ptbtime1.ptb.de"   // PTB — official German time reference
-#define NTP_SERVER_TERTIARY   "pool.ntp.org"       // Public fallback
+// NTP Servers — runtime: default gateway first (typ. Router/Fritz NTP, subnetz-agnostisch).
+// Fallback-Kette wenn kein Gateway: Internet-NTP → PTB → pool.
+#define NTP_SERVER_PRIMARY    "pool.ntp.org"
+#define NTP_SERVER_SECONDARY  "ptbtime1.ptb.de"
+#define NTP_SERVER_TERTIARY   "time.google.com"
 
 // Timezone: UTC (Server handles timezone conversion)
 #define NTP_GMT_OFFSET_SEC    0
@@ -248,6 +249,7 @@ private:
     const char* ntp_server_primary_;
     const char* ntp_server_secondary_;
     const char* ntp_server_tertiary_;
+    char gateway_primary_buf_[16];
     
     // ============================================
     // INTERNAL METHODS
@@ -259,6 +261,9 @@ private:
      * @return true if sync successful
      */
     bool synchronizeNTP(unsigned long timeout_ms = NTP_SYNC_TIMEOUT_MS);
+
+    /** Prefer LAN default gateway as primary NTP (buffer-backed); else NTP_SERVER_PRIMARY. */
+    void refreshPrimaryNtpFromGateway();
     
     /**
      * @brief Validate timestamp is within expected range

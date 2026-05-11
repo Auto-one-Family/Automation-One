@@ -221,6 +221,7 @@ class TestEngineDegradedState:
         assert call_args[0][0] == "rule_degraded"
         payload = call_args[0][1]
         assert payload["degraded_reason"] == "target_esp_offline:ESP_AABB"
+        assert payload["reason"] == "target_esp_offline:ESP_AABB"
 
         # Second call: rule already degraded
         engine.websocket_manager.broadcast.reset_mock()

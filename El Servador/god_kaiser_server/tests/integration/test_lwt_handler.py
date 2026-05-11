@@ -41,6 +41,15 @@ class TestLWTInstantOffline:
         }
 
     @pytest.mark.asyncio
+    async def test_retained_lwt_skips_db_aut341(self, handler, valid_lwt_payload):
+        """AUT-341: retain=True means broker replayed a retained message — no DB writes."""
+        topic = "kaiser/god/esp/ESP_RETAIN/system/will"
+        with patch("src.mqtt.handlers.lwt_handler.resilient_session") as mock_session:
+            result = await handler.handle_lwt(topic, valid_lwt_payload, retain=True)
+            assert result is True
+            mock_session.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_lwt_marks_device_offline(self, handler, valid_lwt_payload):
         """LWT message marks device offline immediately."""
         topic = "kaiser/god/esp/ESP_ONLINE/system/will"

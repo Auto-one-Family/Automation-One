@@ -127,16 +127,16 @@ services:
       # Server
       SERVER_HOST: "0.0.0.0"
       SERVER_PORT: "8000"
-      SERVER_RELOAD: "true"
+      SERVER_RELOAD: ${SERVER_RELOAD:-true}
       # Security (CHANGE IN PRODUCTION!)
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
-      # Environment
-      ENVIRONMENT: development
-      LOG_LEVEL: INFO
+      # Environment (steuerbar via .env — Pi-Prod: production + SERVER_RELOAD=false)
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       # Explizit: entspricht WORKDIR /app + Volume ./logs/server:/app/logs (Default waere logs/god_kaiser.log → /app/logs/god_kaiser.log)
       LOG_FILE_PATH: /app/logs/god_kaiser.log
       # CORS (allow frontend)
-      CORS_ALLOWED_ORIGINS: '["http://localhost:5173","http://localhost:3000"]'
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-'["http://localhost:5173","http://localhost:3000"]'}
     ports:
       - "0.0.0.0:8000:8000"
     volumes:
@@ -175,8 +175,9 @@ services:
         max-size: "5m"
         max-file: "3"
     environment:
-      VITE_API_URL: http://localhost:8000
-      VITE_WS_URL: ws://localhost:8000
+      # Browser auf anderem Host (z. B. Funkturm-WLAN): in .env VITE_* auf http://<Pi-eth0-IP>:8000 setzen
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+      VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:8000}
       VITE_API_TARGET: http://el-servador:8000
       VITE_WS_TARGET: ws://el-servador:8000
       VITE_LOG_LEVEL: ${VITE_LOG_LEVEL:-debug}
@@ -347,6 +348,31 @@ services:
   # ============================================
   # cAdvisor (Container Metrics) - Profile: monitoring
   # ============================================
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: automationone-node-exporter
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro,rslave
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    expose:
+      - "9100"
+    networks:
+      - automationone-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.49.1
     container_name: automationone-cadvisor
@@ -409,12 +435,12 @@ services:
   # Mosquitto Exporter (Prometheus Metrics) - Profile: monitoring
   # ============================================
   mosquitto-exporter:
-    image: sapcc/mosquitto-exporter:0.8.0
+    # sapcc/mosquitto-exporter: nur linux/amd64 — Pi5 (arm64) braucht Multi-Arch-Image.
+    image: ghcr.io/d0ugal/mosquitto-exporter:latest
     container_name: automationone-mosquitto-exporter
     profiles: ["monitoring"]
-    command:
-      - --endpoint=tcp://mqtt-broker:1883
-      - --bind-address=0.0.0.0:9234
+    environment:
+      MOSQUITTO_BROKER_ENDPOINT: tcp://mqtt-broker:1883
     ports:
       - "9234:9234"
     depends_on:

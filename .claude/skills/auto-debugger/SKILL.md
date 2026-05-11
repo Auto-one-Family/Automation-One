@@ -6,11 +6,7 @@ description: |
   Verwenden bei: auto-debugger, Incident-Artefakte, Korrelation, TASK-PACKAGES,
   artefact_improvement, verify-plan-Gate vor Implementierung,
   VERIFY-PLAN-REPORT.md, Post-Verify TASK-PACKAGES mutieren, SPECIALIST-PROMPTS rollenweise, Dev-Handoff,
-<<<<<<< Updated upstream
   Linear-first, BELEG-MD, Findings-Kategorien, LINEAR-SYNC-MANIFEST, LINEAR-ISSUES.md, Resilienz-Check.
-=======
-  Pattern-Scan (closest implementation), Fehler-Register (Mikrozirkular), keine Standard-Chat-Rueckfragen mit Steuerdatei.
->>>>>>> Stashed changes
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash
 user-invocable: true
 argument-hint: "Linear-Issue-ID (z. B. AUT-209) oder legacy @inbox/STEUER-….md"
@@ -87,21 +83,14 @@ Inbox ist eingefroren — kein neues Schreibziel. Bestehende MDs für historisch
 | `incident_id` | bei `incident` oder `both` — Ziel `.claude/reports/current/incidents/<id>/` |
 | `run_id` | Ausgabe `.claude/reports/current/auto-debugger-runs/<run_id>/` |
 | `order` | bei `both`: `incident_first` (Default) oder `artefact_first` |
-<<<<<<< Updated upstream
 | `linear_local_only` | `true` — kein Linear-Pflichtspiegel (nur mit Begründung in `scope`) |
 | `linear_epic_issue_id` / `linear_parent_issue_id` | bestehendes Epic/Parent |
 | `linear_run_issue_id` | bestehendes Run-Issue statt neuem Parent |
 | `linear_target_labels` | kommagetrennte Label-Namen |
 | `linear_dedup_search_query` | Suchstring vor Issue-Erstellung |
-=======
-| `no_chat_questions` | optional: `true` — dokumentiert im Frontmatter die Erwartung „keine Standard-Rückfragen“ (Norm bei gültiger Steuerdatei ohne `allow_user_escalation`; siehe Agent §0) |
-| `konsolidierung_step` | optional: `single` — höchstens ein begrenzter Konsolidierungsschritt Alt+Neu pro Lauf; weitere Schritte als Folge-PKGs |
-| `allow_user_escalation` | optional: `true` — nur dann gezielte Rückfragen an den Menschen erlaubt, wenn die Steuerdatei es ausdrücklich freigibt |
->>>>>>> Stashed changes
 
 **Startpattern (Robin):** Linear-Issue-ID im Chat, z. B. `AUT-209 abarbeiten` — oder legacy `@inbox/STEUER-….md`.
 
-<<<<<<< Updated upstream
 **Ohne gültigen Eingang:** nur Klärungsfragen — **keine** vollständige Artefaktstruktur ausgeben.
 
 ---
@@ -167,11 +156,6 @@ Verweis auf Profil-Sektion: `.claude/agents/auto-debugger.md` — **8. Konsolidi
 `auto-debugger` ist **Analyst**, nicht Implementierer. Kein Code-Change direkt — Ausgabe geht als Linear-Issue an Spezialagenten.
 
 Vollständige Regel: `.claude/agents/auto-debugger.md` — **9. Rollen-Trennung**.
-=======
-**Ohne gueltige Steuerdatei:** nur **minimale** Klärung der normativen Pflichtfelder — **keine** vollstaendige Artefaktstruktur ausgeben.
-
-**Mit gueltiger Steuerdatei:** Pflichtsequenz **ohne** Standard-Chat-Rückfragen ausführen (Repo-Lektüre, konservative Annahme mit Risikozeile, oder BLOCKER) — vollständig in `.claude/agents/auto-debugger.md` §0.
->>>>>>> Stashed changes
 
 ---
 
@@ -193,12 +177,8 @@ Unter `.claude/reports/current/incidents/<incident_id>/`:
 - `TASK-PACKAGES.md`
 - `SPECIALIST-PROMPTS.md`
 - `VERIFY-PLAN-REPORT.md`
-<<<<<<< Updated upstream
 - `LINEAR-SYNC-MANIFEST.json` (Idempotenz / Linear-IDs; vom Orchestrator gepflegt)
 - `LINEAR-ISSUES.md` (optional; PKG → Linear-Identifier — **gleiche** IDs wie verify-plan/TASK-PACKAGES)
-=======
-- `FEHLER-REGISTER.md` — **Pflicht**, sobald **Code-PKGs** geplant sind (Mikroskopischer Fehlerworkflow; gleicher Dateiname unter `auto-debugger-runs/<run_id>/` bei Artefakt-Modus mit Implementierung)
->>>>>>> Stashed changes
 
 **Clustering-Reihenfolge** fuer Korrelation (nicht mischen ohne Evidence):
 
@@ -209,45 +189,6 @@ Unter `.claude/reports/current/incidents/<incident_id>/`:
 5. Titel / Dedup-Key **zuletzt**
 
 **Pflicht-Hinweis:** ISA-18.2 / `NotificationRouter` / DB-Notifications **vs.** WS `error_event` (ohne Router) — keine falsche Root-Cause-Zuordnung.
-
-**Operator-UX & Finalität (eine Zeile):** UI-Zustände und Meldungen müssen zu **tatsächlichen** API-/Store-/WS-Ergebnissen passieren — kein Schein-Erfolg; Cockpit-Signalhierarchie (Lagebild → Diagnose → Forensik) und bestehende Design-Tokens respektieren.
-
----
-
-## 3a. Pattern-Scan (Pflichtschritt im Ablauf)
-
-**Wann:** Nach erstem Lagebild bzw. nach IST-Erfassung der `target_docs` — **vor** Erstellung oder scharfer Schärfung von `TASK-PACKAGES.md` / `SPECIALIST-PROMPTS.md`.
-
-**Minimal-Checkliste (im Lagebild oder Kurzabschnitt dokumentieren):**
-
-1. **Backend (falls im Scope):** Pro betroffenem Layer ein **Analogfall** genannt (`Grep` nach ähnlichem Endpoint, Handler, Service, Topic); Pfade **repo-verifiziert**.  
-2. **Frontend (falls im Scope):** **Closest** Komponente/Composable/Store für denselben UI-Flow; **welcher** Alert-/Notification-/Drawer-Pfad gilt — **keine** parallele „zweite Welt“ ohne PKG-Hinweis auf Migration.  
-3. **Schnittstellen:** Keine stillen Änderungen an REST/MQTT/WS/DB ohne Abgleich mit `forbidden` und Verify-Gate.  
-4. **Konsolidierung:** Wenn `konsolidierung_step: single` — nur **ein** begrenzter Alt+Neu-Schritt in diesem Lauf; Rest als Folge-Pakete.
-
-Der Agent **auto-debugger** integriert diesen Schritt in die Pflichtsequenz (Incident §1.3 Schritt 2b, Artefakt §2.1 Schritt 2b).
-
----
-
-## 3b. Fehler-Register (fortlaufend im Lauf)
-
-**Zweck:** Jeder Fehler (Build, Lint, Test, Laufzeit, E2E) **einzeln** bearbeiten — nicht wegdrücken durch die nächste große Änderung.
-
-**Datei:** `FEHLER-REGISTER.md` im **gebundenen** Artefaktordner (`incidents/<id>/` oder `auto-debugger-runs/<run_id>/`).
-
-**Pro Eintrag (tabellarisch oder nummeriert):**
-
-| Feld | Inhalt |
-|------|--------|
-| ID | fortlaufend |
-| Evidenz | eine Zeile Output / Assertion / Stack |
-| Hypothese | eine Zeile Ursache vs. Symptom |
-| Fix | Minimalfix (thematische Einheit) |
-| Verify | Befehl + Ergebnis (grün/rot) nach Re-Run |
-
-**Regel:** Neuen Fehler erst angehen, wenn der vorherige mit **demselben** Verify-Befehl **grün** verifiziert wurde — oder explizit als BLOCKER mit Nachbedingung geschlossen.
-
-**Delegation:** Jeder Block in `SPECIALIST-PROMPTS.md` enthält den Pflichtabschnitt **Fehler-Register** (siehe Agent §0a Muster-Fragment).
 
 ---
 
@@ -286,10 +227,6 @@ Ohne abgeschlossenes Gate (1–2): maximal Analyse- und Doku-Updates gemäss `sc
 ```
 
 Der Spezialisten-Prompt für `server-dev` verweist dann explizit auf **PKG-01 (nach Verify-Stand)** und die aktualisierte Testzeile.
-
-### 5b. Muster-Fragment SPECIALIST-PROMPT (Pflichtblöcke)
-
-Vollständiges Gerüst mit **Git**, **Pattern-Reuse**, **Alert-Pfad**, **Verify**, **Fehler-Register** — identisch zum Block in `.claude/agents/auto-debugger.md` §0a („Muster-Fragment“); bei Prompt-Erzeugung **kopieren und** mit PKG-Pfaden sowie konkretem Verify-Befehl **füllen**.
 
 ---
 

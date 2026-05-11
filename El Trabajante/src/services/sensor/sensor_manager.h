@@ -15,17 +15,6 @@
 // - Server is Single Source of Truth (raw_mode=true, server re-processes)
 
 // ============================================
-// SERVER CONFIG SYNC (PKG-HW-01)
-// ============================================
-// Slot from server combined config — used to drop RAM/NVS sensors absent from payload.
-struct SensorSyncSlot {
-    uint8_t gpio = 255;
-    uint8_t i2c_address = 0;
-    String onewire_address;
-    String sensor_type;
-};
-
-// ============================================
 // SENSOR MANAGER CLASS
 // ============================================
 // Singleton class managing sensor operations
@@ -88,13 +77,6 @@ public:
     // Remove a sensor (address-based for multi-sensor GPIOs)
     bool removeSensor(uint8_t gpio, const String& onewire_address = "",
                       uint8_t i2c_address = 0);
-
-    /**
-     * After applying server sensor list: remove local sensors not listed.
-     * slot_count==0 removes all active sensors (server sent empty sensors array).
-     * Call only when all payload entries applied successfully (no partial orphan drops).
-     */
-    void syncSensorsAfterConfigPush(const SensorSyncSlot* slots, size_t slot_count);
     
     // Get sensor configuration
     SensorConfig getSensorConfig(uint8_t gpio) const;
@@ -183,9 +165,6 @@ private:
     SensorConfig sensors_[MAX_SENSORS];
     uint8_t sensor_count_;
     bool initialized_;
-    // AUT-303: Per-sensor busy flag — prevents queue overflow when UI triggers multiple
-    // back-to-back measure commands before the first measurement completes.
-    bool manual_measure_busy_[MAX_SENSORS] = {};
 
     // ============================================
     // SAFETY-P4: Value Cache

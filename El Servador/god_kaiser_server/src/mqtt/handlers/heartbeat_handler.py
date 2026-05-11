@@ -45,6 +45,7 @@ from ...core.metrics import (
 from ...core import constants
 from ...db.models.audit_log import AuditEventType, AuditSeverity
 from ...db.models.enums import DataSource
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from ...db.models.esp import ESPDevice
@@ -75,6 +76,10 @@ RECONNECT_THRESHOLD_SECONDS = 150
 STATE_PUSH_COOLDOWN_SECONDS = 120
 ADOPTION_GRACE_SECONDS = 2.0
 SESSION_STARTUP_REJECT_WINDOW_SECONDS = 1.0
+STATE_PUSH_RECONNECT_DELAY_SECONDS = 3.0
+# INC-EA5484: ESP needs time to finish QoS handshakes for 12 bootstrap subscriptions
+# before zone/assign arrives. Without delay, TCP send buffer fills (EAGAIN) and
+# MQTT client freezes until broker keepalive timeout (90s).
 
 # Config-Push: Cooldown between auto config pushes (prevent mismatch loop).
 # Keep this below one heartbeat period (60s) so a lost first push can recover
@@ -521,6 +526,13 @@ class HeartbeatHandler:
                     await session.commit()
                     logger.debug(f"Pending device {esp_id_str} heartbeat recorded")
 
+                    # AUT-339: Device is connected — clear retained LWT and append
+                    # heartbeat history (previously only the online path did this).
+                    self._clear_retained_lwt(esp_id_str)
+                    await self._log_heartbeat_entry(
+                        session, esp_device, esp_id_str, payload
+                    )
+
                     # Phase 2: ACK - ESP knows it's still pending
                     await self._send_heartbeat_ack(
                         esp_id=esp_id_str,
@@ -578,17 +590,7 @@ class HeartbeatHandler:
                 # offline LWT message. Publishing empty payload with retain=True
                 # clears it, preventing new subscribers from receiving stale
                 # offline status.
-                try:
-                    from ..client import MQTTClient
-
-                    lwt_topic = TopicBuilder.build_lwt_topic(esp_id_str)
-                    mqtt_client = MQTTClient.get_instance()
-                    mqtt_client.publish(lwt_topic, "", qos=1, retain=True)
-                    logger.debug(f"Cleared retained LWT message for {esp_id_str}")
-                except Exception as lwt_clear_error:
-                    logger.warning(
-                        f"Failed to clear retained LWT for {esp_id_str}: {lwt_clear_error}"
-                    )
+                self._clear_retained_lwt(esp_id_str)
 
                 # Step 6: Update metadata with latest heartbeat info
                 await self._update_esp_metadata(esp_device, payload, session, is_reconnect)
@@ -635,21 +637,9 @@ class HeartbeatHandler:
                 # does not rollback the already-committed device update.
                 # INV-1a/Fix3: Savepoint provides atomicity without risking
                 # the main heartbeat transaction on history-log errors.
-                device_source = self._detect_device_source(esp_device, payload)
-                try:
-                    nested = await session.begin_nested()
-                    heartbeat_repo = ESPHeartbeatRepository(session)
-                    await heartbeat_repo.log_heartbeat(
-                        esp_uuid=esp_device.id,
-                        device_id=esp_id_str,
-                        payload=payload,
-                        data_source=device_source,
-                    )
-                    await nested.commit()
-                except Exception as hb_log_error:
-                    logger.warning(
-                        f"Failed to log heartbeat history for {esp_id_str}: {hb_log_error}"
-                    )
+                device_source = await self._log_heartbeat_entry(
+                    session, esp_device, esp_id_str, payload
+                )
 
                 source_indicator = (
                     f"[{device_source.upper()}]"
@@ -1802,6 +1792,61 @@ class HeartbeatHandler:
             f"sensors={active_sensors}, actuators={active_actuators}, errors={error_count}"
         )
 
+    def _clear_retained_lwt(self, esp_id: str) -> None:
+        """
+        Publish empty retained message on the ESP LWT topic to clear stale offline.
+
+        Step 5b (online path) and pending_approval (AUT-339): a connected ESP must
+        not leave a retained LWT that makes subscribers think the device is offline.
+        """
+        try:
+            from ..client import MQTTClient
+
+            lwt_topic = TopicBuilder.build_lwt_topic(esp_id)
+            mqtt_client = MQTTClient.get_instance()
+            mqtt_client.publish(lwt_topic, "", qos=1, retain=True)
+            logger.debug("Cleared retained LWT message for %s", esp_id)
+        except Exception as lwt_clear_error:
+            logger.warning(
+                "Failed to clear retained LWT for %s: %s",
+                esp_id,
+                lwt_clear_error,
+            )
+
+    async def _log_heartbeat_entry(
+        self,
+        session: AsyncSession,
+        esp_device: ESPDevice,
+        esp_id_str: str,
+        payload: dict,
+    ) -> str:
+        """
+        Append one row to esp_heartbeat_logs in a nested transaction.
+
+        Shared by the online heartbeat path and pending_approval (AUT-339).
+
+        Returns:
+            Resolved data_source (for downstream debug formatting).
+        """
+        device_source = self._detect_device_source(esp_device, payload)
+        try:
+            nested = await session.begin_nested()
+            heartbeat_repo = ESPHeartbeatRepository(session)
+            await heartbeat_repo.log_heartbeat(
+                esp_uuid=esp_device.id,
+                device_id=esp_id_str,
+                payload=payload,
+                data_source=device_source,
+            )
+            await nested.commit()
+        except Exception as hb_log_error:
+            logger.warning(
+                "Failed to log heartbeat history for %s: %s",
+                esp_id_str,
+                hb_log_error,
+            )
+        return device_source
+
     async def _send_heartbeat_ack(
         self,
         esp_id: str,
@@ -2420,6 +2465,7 @@ class HeartbeatHandler:
         Uses its own DB session to avoid conflicts with the heartbeat session.
         """
         try:
+            await asyncio.sleep(STATE_PUSH_RECONNECT_DELAY_SECONDS)
             if not _command_bridge:
                 logger.warning("No command_bridge for state push to %s", device_id)
                 return

@@ -202,6 +202,14 @@ const displayQuality = computed((): QualityLevel => {
   return getWorstQuality(qualities)
 })
 
+/** Labels of sub-values that are not in good/excellent state (for tooltip attribution) */
+const affectedValueLabels = computed((): string[] => {
+  if (!props.isMultiValue) return []
+  return formattedValues.value
+    .filter(v => v.quality !== 'good' && v.quality !== 'excellent')
+    .map(v => v.label)
+})
+
 /**
  * Get worst quality from array (matches store logic)
  */
@@ -410,10 +418,16 @@ function handleDragEnd(event: DragEvent) {
           <span class="sensor-satellite__value-number">{{ val.value }}</span>
           <span class="sensor-satellite__value-unit">{{ val.unit }}</span>
         </div>
-        <!-- Value Label (only for multi-value) -->
-        <span v-if="valueCount > 1" class="sensor-satellite__value-label">
-          {{ val.label }}
-        </span>
+        <!-- Value Label + per-value quality dot (only for multi-value) -->
+        <div v-if="valueCount > 1" class="sensor-satellite__value-label-row">
+          <span class="sensor-satellite__value-label">{{ val.label }}</span>
+          <span
+            v-if="val.quality !== 'good' && val.quality !== 'excellent'"
+            class="sensor-satellite__value-quality-dot"
+            :class="`sensor-satellite__value-quality-dot--${val.quality}`"
+            :title="`${val.label}: ${getQualityLabel(val.quality)}`"
+          />
+        </div>
       </div>
     </div>
 
@@ -421,7 +435,11 @@ function handleDragEnd(event: DragEvent) {
     <div
       class="sensor-satellite__quality"
       :class="`sensor-satellite__quality--${displayQuality}`"
-      :title="`Qualität: ${qualityLabel}${isMultiValue ? ' (aggregiert)' : ''}`"
+      :title="isMultiValue && affectedValueLabels.length > 0
+        ? `Qualität: ${qualityLabel} (${affectedValueLabels.join(', ')})`
+        : isMultiValue
+          ? `Qualität: ${qualityLabel} (alle OK)`
+          : `Qualität: ${qualityLabel}`"
     >
       <span class="sensor-satellite__quality-dot" />
       <span class="sensor-satellite__quality-text">{{ qualityLabel }}</span>
@@ -714,6 +732,14 @@ function handleDragEnd(event: DragEvent) {
   font-size: 0.5rem;
 }
 
+.sensor-satellite__value-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1875rem;
+  max-width: 100%;
+}
+
 .sensor-satellite__value-label {
   font-size: 0.5rem;
   font-weight: 600;
@@ -725,6 +751,39 @@ function handleDragEnd(event: DragEvent) {
   max-width: 100%;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+
+/* Per-value quality dot: shown inside label row when sub-value is not good */
+.sensor-satellite__value-quality-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sensor-satellite__value-quality-dot--fair {
+  background-color: var(--color-status-warning);
+  box-shadow: 0 0 4px rgba(234, 179, 8, 0.5);
+}
+
+.sensor-satellite__value-quality-dot--poor {
+  background-color: var(--color-warning);
+  box-shadow: 0 0 4px rgba(249, 115, 22, 0.5);
+}
+
+.sensor-satellite__value-quality-dot--bad {
+  background-color: var(--color-status-alarm);
+  box-shadow: 0 0 5px rgba(239, 68, 68, 0.6);
+}
+
+.sensor-satellite__value-quality-dot--stale {
+  background-color: var(--color-status-offline);
+}
+
+.sensor-satellite__value-quality-dot--error {
+  background-color: var(--color-error);
+  box-shadow: 0 0 6px rgba(220, 38, 38, 0.7);
+  animation: led-blink 1.2s ease-in-out infinite;
 }
 
 /* =============================================================================

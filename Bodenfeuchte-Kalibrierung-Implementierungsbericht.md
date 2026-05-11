@@ -210,7 +210,7 @@ Properties:
 | vue-tsc --noEmit (TypeScript) | 0 Errors |
 | ESP32 Header-Syntax (g++) | Fehlende FreeRTOS/Arduino Headers (erwartbar in Sandbox) |
 
-**Hinweis:** `pio run -e esp32_dev` (bzw. `seeed_xiao_esp32c3` für Seeed XIAO) und `pytest` muessen auf dem lokalen System ausgefuehrt werden (Sandbox hat nicht alle Dependencies).
+**Hinweis:** `pio run -e seeed` und `pytest` muessen auf dem lokalen System ausgefuehrt werden (Sandbox hat nicht alle Dependencies).
 
 ---
 
@@ -226,7 +226,7 @@ Properties:
    - Neue Files haben keine Unit-Tests
    - CalibrationService, CalibrationResponseHandler, CalibrationSessionRepository brauchen Tests
 
-3. **`pio run -e esp32_dev`** (oder passendes Board-Env) auf lokalem System ausfuehren
+3. **pio run -e seeed** auf lokalem System ausfuehren
    - E-P2 validateAdcReading und E-P3/E-P4 Aenderungen muessen kompilieren
 
 ### P1 (Sollte zeitnah)

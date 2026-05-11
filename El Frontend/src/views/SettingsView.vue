@@ -39,18 +39,14 @@ async function handleLogoutAll() {
         <h3 class="font-semibold text-dark-100">User Account</h3>
       </div>
       <div class="card-body space-y-4">
-        <p v-if="!authStore.user" class="settings-section-empty">
-          Benutzerdaten werden geladen ... Falls dieser Hinweis bestehen bleibt, melde dich
-          erneut an.
-        </p>
-        <div v-else class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-2 gap-4">
           <div>
             <p class="text-sm text-dark-400">Username</p>
             <p class="text-dark-100">{{ authStore.user?.username }}</p>
           </div>
           <div>
             <p class="text-sm text-dark-400">Email</p>
-            <p class="text-dark-100">{{ authStore.user?.email || '—' }}</p>
+            <p class="text-dark-100">{{ authStore.user?.email }}</p>
           </div>
           <div>
             <p class="text-sm text-dark-400">Role</p>
@@ -99,23 +95,18 @@ async function handleLogoutAll() {
         <h3 class="font-semibold text-dark-100">Server Connection</h3>
       </div>
       <div class="card-body space-y-4">
-        <p v-if="!apiUrl" class="settings-section-empty">
-          Server-Verbindungsdaten nicht verfuegbar.
-        </p>
-        <template v-else>
-          <div>
-            <p class="text-sm text-dark-400">API URL</p>
-            <p class="text-dark-100 font-mono">{{ apiUrl }}/api/v1</p>
-          </div>
-          <div>
-            <p class="text-sm text-dark-400">WebSocket</p>
-            <p class="text-dark-100 font-mono">{{ apiUrl.replace('http', 'ws') }}/ws/realtime</p>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="status-online"></span>
-            <span class="text-dark-300">Connected to God-Kaiser Server</span>
-          </div>
-        </template>
+        <div>
+          <p class="text-sm text-dark-400">API URL</p>
+          <p class="text-dark-100 font-mono">{{ apiUrl }}/api/v1</p>
+        </div>
+        <div>
+          <p class="text-sm text-dark-400">WebSocket</p>
+          <p class="text-dark-100 font-mono">{{ apiUrl.replace('http', 'ws') }}/ws/realtime</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="status-online"></span>
+          <span class="text-dark-300">Connected to God-Kaiser Server</span>
+        </div>
       </div>
     </div>
 
@@ -136,15 +127,3 @@ async function handleLogoutAll() {
     </div>
   </div>
 </template>
-
-<style scoped>
-.settings-section-empty {
-  padding: var(--space-3) var(--space-4);
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  background: var(--color-bg-secondary);
-  border: 1px dashed var(--glass-border);
-  border-radius: var(--radius-md);
-  line-height: 1.5;
-}
-</style>

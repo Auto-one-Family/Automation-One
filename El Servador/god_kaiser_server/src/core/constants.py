@@ -206,8 +206,14 @@ INTERVAL_SENSOR_POLLING = 5000  # 5 seconds
 # =============================================================================
 
 QOS_SENSOR_DATA = 1  # At least once
-QOS_ACTUATOR_COMMAND = 2  # Exactly once
-QOS_SENSOR_COMMAND = 2  # Exactly once - same as actuator commands
+# AUT-331: Reduced from QoS 2 to QoS 1.
+# QoS 2 causes PUBREC + PUBCOMP messages in the ESP-IDF MQTT OUTBOX per command.
+# With rapid ON+OFF (<2s), two simultaneous QoS-2 handshakes + lifecycle publishes
+# exhaust the 4096-byte OUTBOX, triggering TCP write timeout → disconnect → crash.
+# QoS 1 (at-least-once) is sufficient: firmware deduplicates via intent_outcome
+# tracking and safety-epoch invalidation. Re-delivery on disconnect is acceptable.
+QOS_ACTUATOR_COMMAND = 1  # At least once (was: 2 — see AUT-331)
+QOS_SENSOR_COMMAND = 1  # At least once (was: 2 — same reason as AUT-331)
 QOS_HEARTBEAT = 0  # At most once
 QOS_HEARTBEAT_METRICS = 0  # At most once (same as core heartbeat)
 QOS_CONFIG = 2  # Exactly once

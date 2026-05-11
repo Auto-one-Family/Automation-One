@@ -23,6 +23,8 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Optional
 
+from sqlalchemy.orm.attributes import flag_modified
+
 from ...core.error_codes import (
     ConfigErrorCode,
     ValidationErrorCode,
@@ -86,7 +88,7 @@ class LWTHandler:
             ts_deque.popleft()
         return len(ts_deque)
 
-    async def handle_lwt(self, topic: str, payload: dict) -> bool:
+    async def handle_lwt(self, topic: str, payload: dict, retain: bool = False) -> bool:
         """
         Handle Last-Will-Testament message.
 
@@ -102,11 +104,27 @@ class LWTHandler:
         Args:
             topic: MQTT topic string
             payload: Parsed JSON payload dict
+            retain: Broker RETAIN flag on this delivery. When True, the message is a
+                retained replay (e.g. immediately after subscribe / server restart).
+                Those are ignored (AUT-341, MQTT 3.1.1) so stale LWTs do not mass-offline ESPs.
+                Tradeoff: a live LWT published with retain=True would also be skipped; firmware
+                should publish the will without retain for the normal path.
 
         Returns:
             True if processed successfully, False otherwise
         """
         try:
+            # Stale retained LWT replayed on subscribe — do not touch DB or status.
+            if retain:
+                parsed_topic = TopicBuilder.parse_lwt_topic(topic)
+                esp_for_log = parsed_topic["esp_id"] if parsed_topic else "unknown"
+                logger.info(
+                    "Ignoring stale retained LWT (retain=True): topic=%s, esp_id=%s",
+                    topic,
+                    esp_for_log,
+                )
+                return True
+
             payload = dict(payload)
             canonical = canonicalize_lwt(payload)
             payload = canonical.payload
@@ -322,6 +340,12 @@ class LWTHandler:
                         "is_flapping": is_flapping,
                     }
                     esp_device.device_metadata = device_metadata
+                    # AUT-340: SQLAlchemy's Unit-of-Work change tracking does
+                    # not detect in-place mutations of JSON/JSONB columns.
+                    # Without flag_modified() the assignment above is a no-op
+                    # for the same dict reference and last_disconnect is never
+                    # persisted (reproduced in INC-EA5484 forensics).
+                    flag_modified(esp_device, "device_metadata")
 
                     # Audit Logging: lwt_received
                     try:
@@ -492,16 +516,17 @@ def get_lwt_handler() -> LWTHandler:
     return _lwt_handler_instance
 
 
-async def handle_lwt(topic: str, payload: dict) -> bool:
+async def handle_lwt(topic: str, payload: dict, retain: bool = False) -> bool:
     """
     Handle LWT message (convenience function).
 
     Args:
         topic: MQTT topic string
         payload: Parsed JSON payload dict
+        retain: See :meth:`LWTHandler.handle_lwt`.
 
     Returns:
         True if message processed successfully
     """
     handler = get_lwt_handler()
-    return await handler.handle_lwt(topic, payload)
+    return await handler.handle_lwt(topic, payload, retain=retain)

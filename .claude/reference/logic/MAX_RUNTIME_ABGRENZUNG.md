@@ -1,6 +1,6 @@
 # Max Runtime — Rule vs. Device: Abgrenzung und Datenfluss
 
-> **Version:** 1.2 | **Datum:** 2026-05-06 (Update: AUT-164 Fix verifiziert)
+> **Version:** 1.1 | **Datum:** 2026-03-30
 > **Bezug:** T18-F6, T18-V5-ABSCHLUSSBERICHT §1.5, T18-V6-LOGIC-ENGINE-VOLLANALYSE F6
 
 ---
@@ -63,7 +63,7 @@ RuleConfigPanel (duration)
 - **DB:** `actuator_configs.safety_constraints` (JSON: `max_runtime`, `cooldown_period`)
 - **API:** `ActuatorConfigCreate/Update` → `max_runtime_seconds` → gemappt in `safety_constraints["max_runtime"]`
 
-### 2.2 Datenfluss (aktuell — AUT-164 implementiert)
+### 2.2 Datenfluss (aktuell)
 
 ```
 ActuatorConfigPanel (max_runtime_seconds)
@@ -71,26 +71,17 @@ ActuatorConfigPanel (max_runtime_seconds)
     → actuators.py: safety_constraints["max_runtime"] = max_runtime_seconds
     → DB: actuator_configs.safety_constraints
     → ConfigPayloadBuilder / config_mapping.py
-        DEFAULT_ACTUATOR_MAPPINGS: safety_constraints.max_runtime → max_runtime_ms
-        transform: seconds_to_ms (x * 1000, fallback 3600000)
-    → MQTT Config-Push: {"max_runtime_ms": <wert_in_ms>}
-    → ESP parseActuatorDefinition(): config.runtime_protection.max_runtime_ms = wert
-    → ActuatorManager.registerOrUpdateActuator():
-        soft_changed-Check erkennt Änderung
-        Soft-Update-Pfad: RAM + NVS + PumpActuator::syncRuntimeLimitsFromConfig()
 ```
 
-**Stand:** `DEFAULT_ACTUATOR_MAPPINGS` in `config_mapping.py` enthält seit AUT-164 ein Mapping:
-`safety_constraints.max_runtime` → `max_runtime_ms` via `seconds_to_ms`. Der Wert kommt vollständig beim ESP an.
+**Wichtig:** `DEFAULT_ACTUATOR_MAPPINGS` in `config_mapping.py` enthält **kein** Mapping für `max_runtime` oder `safety_constraints`. Die Device-`max_runtime_seconds` wird **nicht** an den ESP im Config-Payload gesendet.
 
 ### 2.3 ESP-Seite: runtime_protection
 
-- **ActuatorManager:** `config.runtime_protection.max_runtime_ms` — wird aus Config-Push gelesen (Z. 930–932 `parseActuatorDefinition`)
-- **PumpActuator:** `protection_.max_runtime_ms` — via `syncRuntimeLimitsFromConfig()` synchronisiert (pump_actuator.cpp Z. 238–241)
-- **soft_changed:** Vergleicht `prev.runtime_protection.max_runtime_ms` und `.timeout_enabled` (actuator_manager.cpp Z. 244–247)
-- **NVS:** `saveActuatorConfig()` wird nach Soft-Update aufgerufen (actuator_manager.cpp Z. 287–291)
+- **ActuatorManager:** `config.runtime_protection.max_runtime_ms` (Default: 3600000 ms = 1 h)
+- **PumpActuator:** `protection_.max_runtime_ms` (Default: 3600000 ms)
+- **parseActuatorDefinition():** Liest **kein** `max_runtime` aus der Config-JSON
 
-**Ergebnis:** Der ESP übernimmt `max_runtime_ms` aus dem Config-Push korrekt in RAM, NVS und Pump-Treiber. Kein unnötiger GPIO-Teardown (Soft-Update-Pfad).
+**Ergebnis:** Der ESP nutzt für `runtime_protection` / Timeout-Protection immer den **Hardcoded-Default** (1 h). Die im ActuatorConfigPanel gesetzte `max_runtime_seconds` hat **keinen Effekt** auf das ESP-Verhalten.
 
 ### 2.4 Server-Seite: safety_service
 
@@ -108,9 +99,9 @@ ActuatorConfigPanel (max_runtime_seconds)
 |---------|----------|
 | MQTT-Payload | `duration: 15` (von Rule) |
 | ESP | Auto-OFF nach 15 s (F1: command_duration_end_ms) |
-| Device max_runtime | Wirkt als Safety-Ceiling via `runtime_protection.max_runtime_ms` — greift nur wenn Rule duration=0 oder Aktor dauerhaft ON |
+| Device max_runtime | Hat keinen Einfluss (nicht im Payload, nicht in ESP-Config) |
 
-**→ Es gilt die Rule duration für den konkreten Command. Device max_runtime ist die Hardware-Sicherheitsgrenze (Ceiling), nicht der Command-Timer.**
+**→ Es gilt die Rule duration.**
 
 ### 3.2 Nur Rule duration=0 (dauerhaft)
 
@@ -118,15 +109,15 @@ ActuatorConfigPanel (max_runtime_seconds)
 |---------|----------|
 | MQTT-Payload | `duration: 0` |
 | ESP | Kein Auto-Off aus Rule; `command_duration_end_ms` bleibt 0 |
-| runtime_protection | Greift bei `timeout_enabled` und `activation_start_ms` — nutzt konfigurierten Wert aus Config-Push (Default 3600 s wenn nie gesetzt) |
+| runtime_protection | Greift bei `timeout_enabled` und `activation_start_ms` (Phase 2) — nutzt Default 3600 s |
 
-**→ ESP-Timeouts nutzen den via Config-Push übermittelten `max_runtime_ms`-Wert. Wenn kein Config-Push erfolgt ist, gilt der Struct-Default (1 h).**
+**→ ESP-Timeouts nutzen Default 1 h, Device max_runtime hat weiterhin keinen Effekt.**
 
 ### 3.3 Nur Device max_runtime gesetzt, Rule ohne duration
 
 - Rule sendet `duration: 0` (Default)
-- Device max_runtime kommt via Config-Push als `max_runtime_ms` zum ESP
-- **→ ESP nutzt den via Config-Push empfangenen Wert für `runtime_protection.max_runtime_ms`.**
+- Device max_runtime ist in DB, wird aber nicht an ESP übermittelt
+- **→ ESP nutzt Default 3600 s für runtime_protection.**
 
 ---
 
@@ -156,9 +147,9 @@ Das wäre eine **Verhaltensänderung** und müsste bewusst entschieden werden.
 |--------|---------------|---------------------|
 | **Zweck** | Pro-Aktion Laufzeit (Business-Logik) | Geräte-Sicherheitsgrenze (Hardware) |
 | **Konfiguration** | Pro Regel/Aktion | Pro Aktor (Device) |
-| **Transport** | MQTT Command-Payload | DB + Config-Payload (`max_runtime_ms`) |
-| **ESP-Verwendung** | F1: command_duration_end_ms → Auto-Off | runtime_protection (konfigurierbar via Config-Push) |
-| **Aktueller Effekt auf ESP** | ✅ Voll wirksam | ✅ Wirksam (AUT-164 implementiert) |
+| **Transport** | MQTT Command-Payload | DB + (aktuell nicht) Config-Payload |
+| **ESP-Verwendung** | F1: command_duration_end_ms → Auto-Off | runtime_protection (Default 1 h) |
+| **Aktueller Effekt auf ESP** | ✅ Voll wirksam | ❌ Nicht übermittelt |
 
 ---
 

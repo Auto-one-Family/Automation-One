@@ -3,9 +3,7 @@
 RuntimeReadinessPolicy defaultRuntimeReadinessPolicy() {
     RuntimeReadinessPolicy policy{};
     policy.profile = RuntimeReadinessProfile::SENSOR_REQUIRED;
-    // Sensor-only devices (e.g. EC/pH probes without actuators) are valid configurations.
-    // Requiring actuators would permanently block CONFIG_PENDING exit for such devices.
-    policy.require_actuator = false;
+    policy.require_actuator = true;
     // Offline rules are optional for pending-exit readiness.
     // When none are configured, disconnect handling already forces default safe states.
     policy.require_offline_rules = false;

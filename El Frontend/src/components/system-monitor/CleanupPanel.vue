@@ -722,7 +722,7 @@ onMounted(() => {
                   </button>
                 </div>
 
-                <div v-if="statistics" class="stats-grid grid-auto-sm">
+                <div v-if="statistics" class="stats-grid">
                   <div class="stat-card">
                     <span class="stat-label">Gesamt</span>
                     <span class="stat-value">{{ formatNumber(statistics.total_count) }}</span>
@@ -1448,6 +1448,8 @@ onMounted(() => {
    ============================================================================ */
 
 .stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: var(--space-sm);
 }
 

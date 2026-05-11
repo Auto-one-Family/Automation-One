@@ -14,7 +14,7 @@ Dynamic actuator configuration via MQTT allows God-Kaiser to add, modify, or rem
 - `src/services/config/storage_manager.cpp/.h` - NVS operations abstraction
 - `src/services/config/config_response.cpp` (lines 1-72) - Response publishing
 - `src/services/config/config_response.h` (lines 1-31) - Response builder interface
-- `src/utils/json_helpers.h` - JSON field extraction helpers (`extractInt`, `extractString`, `extractFloat`, `extractBool`)
+- `src/utils/json_helpers.h` (lines 9-82) - JSON field extraction helpers
 - `src/utils/topic_builder.cpp` (lines 124-138) - Topic generation
 - `src/models/actuator_types.h` (lines 1-138) - ActuatorConfig, ActuatorCommand, ActuatorStatus structures, ActuatorTypeTokens
 - `src/models/config_types.h` (lines 1-74) - ConfigResponsePayload, ConfigType, ConfigStatus

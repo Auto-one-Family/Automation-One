@@ -1,8 +1,9 @@
 # Pi-Deployment-Konfiguration — Grundeinstellungen & Anpassungsbericht
 
-**Stand:** 2026-03-11  
+**Stand:** 2026-05-11  
 **Ziel:** AutomationOne auf Raspberry Pi (Linux, aarch64, Docker) reproduzierbar deployen.  
-**Kontext:** Entwicklung unter Windows, Produktion auf Pi (z.B. Host `growy.local`).
+**Kontext:** Entwicklung unter Windows, Produktion auf Pi (z.B. Host `growy.local`).  
+**Doku-Pfad:** `docs/pi-deployment-config.md` (Block A–D: allgemeine Pi-Konfiguration; **Block E:** referenziert NVMe-Migration und Agent-Lauf auf Host **growy2**, Projektverzeichnis **`/home/robin/autoone`**).
 
 ---
 
@@ -15,7 +16,7 @@
 | 3 | **JWT & DB-Passwort** | `JWT_SECRET_KEY` und `POSTGRES_PASSWORD` neu generieren, nicht aus `.env.example` übernehmen |
 | 4 | **Docker-Architektur** | Images sind multi-arch (postgres, mosquitto, node, python, nginx) — lokaler Build auf Pi für `el-servador` und `el-frontend` nötig |
 | 5 | **host.docker.internal** | ESP32-Serial-Logger nutzt `host.docker.internal` — auf Linux Pi: `network_mode: host` oder Host-IP setzen |
-| 6 | **Alloy/Loki** | `com.docker.compose.project=auto-one` in `docker/alloy/config.alloy` — Compose-Projektname muss passen |
+| 6 | **Alloy/Loki** | In `docker/alloy/config.alloy` filtert die Discovery auf `com.docker.compose.project=auto-one`. Der effektive Compose-Name folgt dem **Projektordner** (z.B. Clone nach `autoone` → Label **`autoone`**). Entweder **`COMPOSE_PROJECT_NAME=auto-one`** in `.env` setzen **oder** den Alloy-Filter auf den tatsächlichen Namen anpassen — sonst **keine** Container-Logs in Loki. |
 | 7 | **shared-infra-net** | `docker network create shared-infra-net` vor dem ersten Start ausführen |
 | 8 | **Zeilenenden** | `.gitattributes` erzwingt LF für Shell-Skripte — bei CRLF unter Windows: `git config core.autocrlf input` |
 | 9 | **Makefile** | E2E/Wokwi-Ziele nutzen Windows-Pfade (`.venv/Scripts/pytest.exe`) — auf Pi: `python -m pytest` bzw. `poetry run pytest` |
@@ -198,7 +199,7 @@ docker compose --profile monitoring up -d
 | `docker/postgres/postgresql.conf` | PostgreSQL-Tuning | Optional |
 | `docker/mosquitto/mosquitto.conf` | MQTT-Listener, Auth | Optional: Auth für Produktion |
 | `docker/loki/loki-config.yml` | Loki-Speicher, Retention | Optional |
-| `docker/alloy/config.alloy` | Log-Pipeline, Docker-Filter | `com.docker.compose.project=auto-one` prüfen |
+| `docker/alloy/config.alloy` | Log-Pipeline, Docker-Filter | Label `com.docker.compose.project` muss zum **tatsächlichen** Compose-Projektnamen passen (siehe Top-10 Zeile 6, Block E.5, Abschnitt D.3) |
 | `docker/prometheus/prometheus.yml` | Scrape-Targets | Service-Namen passen (Docker-DNS) |
 | `docker/grafana/grafana.ini` | Grafana-Logging | Optional |
 | `docker/grafana/provisioning/*` | Dashboards, Datasources | Optional |
@@ -254,7 +255,7 @@ docker compose --profile monitoring up -d
 ### D.1 Checkliste „Erstes Starten auf dem Pi“
 
 1. [ ] Pi vorbereiten (Raspberry Pi OS 64-bit, Docker + Docker Compose installiert)
-2. [ ] Repo klonen: `git clone <url> && cd Auto-one` (oder Projektordner-Name)
+2. [ ] Repo klonen: `git clone <url> && cd <projektordner>` (z.B. `autoone` auf **growy2** unter `/home/robin/autoone`; frühere Beispielnamen wie `Auto-one` nur als Alias — **Compose-Label** = Ordnername, sofern nicht `COMPOSE_PROJECT_NAME` gesetzt)
 3. [ ] Branch prüfen: `git checkout main` (oder gewünschter Branch)
 4. [ ] `.env` anlegen: `cp .env.example .env`
 5. [ ] `.env` bearbeiten:
@@ -319,7 +320,7 @@ PGADMIN_DEFAULT_PASSWORD=<STARKES_PASSWORT>
 | Thema | Problem | Lösung |
 |-------|---------|--------|
 | **host.docker.internal** | Auf Linux (ohne Docker Desktop) oft nicht verfügbar | `network_mode: host` oder `extra_hosts: - "host.docker.internal:host-gateway"` (Docker 20.10+) oder Host-IP setzen |
-| **Compose-Projektname** | Alloy filtert `com.docker.compose.project=auto-one` | Ordner `auto-one` oder `COMPOSE_PROJECT_NAME=auto-one` setzen |
+| **Compose-Projektname** | Alloy filtert `com.docker.compose.project=auto-one` | Ordner **`auto-one`**, oder **`COMPOSE_PROJECT_NAME=auto-one`** in `.env`, **oder** Filter in `docker/alloy/config.alloy` auf den echten Namen (z.B. **`autoone`**) ändern |
 | **Grafana-URL** | `useGrafana.ts` nutzt `window.location.hostname:3000` | Wenn Frontend auf Port 5173: Grafana auf 3000 muss vom Client erreichbar sein |
 | **Frontend Production** | Nginx-Dockerfile nutzt keine Custom-Config | API/WS-Proxy fehlt — entweder Custom-Config ins Image oder Reverse-Proxy vor dem Stack |
 | **Zeilenenden** | CRLF in Shell-Skripten | `git config core.autocrlf input` vor Clone; `.gitattributes` erzwingt LF |
@@ -365,6 +366,59 @@ sleep 20
 echo "Check health: curl -s http://localhost:8000/api/v1/health/live"
 echo "Setup admin: curl -X POST http://localhost:8000/api/v1/auth/setup -H 'Content-Type: application/json' -d '{\"username\":\"admin\",\"password\":\"Admin123!\",\"email\":\"admin@example.com\"}'"
 ```
+
+---
+
+## Block E: Pi 5 SSD (NVMe) — Migrationsablauf und Betrieb (Referenz aus Agent-Lauf, 2026-05-11)
+
+Dieser Block fasst einen **durchgeführten** Migrationslauf auf einem **Raspberry Pi 5** mit NVMe-HAT zusammen (Host **`growy2`**, Stack-Pfad **`/home/robin/autoone`**, Compose **`docker-compose.yml`**). Dient als Ergänzung zu Block A–D; **keine** Passwörter oder Geheimnisse dokumentieren.
+
+### E.1 Ausgangslage und Ziel
+
+- **Ziel:** Root-Dateisystem und Docker-Daten auf **NVMe** (`/dev/nvme0n1`), AutomationOne unverändert über Compose betreiben.
+- **Vor Migration:** System von **SD** (`mmcblk0`); nach erfolgreichem Klon und Boot-Reihenfolge: **`/`** und **`/boot/firmware`** von **`nvme0n1p2`** bzw. **`nvme0n1p1`**.
+
+### E.2 NVMe-HAT und EEPROM (Verifikation / Boot-Reihenfolge)
+
+| Schritt | Kurzbeschreibung | Ergebnis im Referenzlauf |
+|---------|------------------|---------------------------|
+| NVMe sichtbar | `ls /dev/nvme*`, `lspci \| grep -i nvme`, `dmesg \| grep -i nvme` | `/dev/nvme0`, `/dev/nvme0n1` vorhanden (Biwin/KingSpec o.ä.) |
+| Bootloader-Update | `sudo rpi-eeprom-update -a` | Neueres Pieeprom-Paket eingespielt; **Reboot** erforderlich, bevor mit Datenmigration weitergemacht wird |
+| Boot-Reihenfolge **NVMe zuerst** | `BOOT_ORDER=0xf416` (Option A) | Nach manuellem Setzen und Reboot: `vcgencmd bootloader_config` zeigt `BOOT_ORDER=0xf416`. **Hinweis:** `sudo rpi-eeprom-config --apply` ruft intern `rpi-eeprom-update` auf; ohne passende Flags kann die **laufende** EEPROM-Textkonfiguration in das Update-File **zurückgemergt** werden. Verlässlich ist ein Image, das mit `rpi-eeprom-config --config <datei> --out <bin>` aus der Paket-`pieeprom-*.bin` gebaut wurde, und anschließendes **`flashrom -w`** auf den SPI (nur ausführen, wenn die offiziellen Raspberry-Pi-Anleitungen eingehalten werden). |
+
+### E.3 Datenmigration (SD → NVMe)
+
+| Schritt | Aktion | Hinweis |
+|---------|--------|---------|
+| Aufräumen | Optional: Build-Artefakte, große `node_modules`, alte Logs komprimieren | Reduziert Klonzeit und SD-Last vor `dd`/`rsync` |
+| Postgres | `docker exec … pg_dump` auf den Host nach `backups/` | Sicherheitskopie **vor** `docker compose down` |
+| Stack stoppen | `docker compose down` | Keine schreibenden Services während des Klons |
+| **rpi-clone** | Auf Raspberry Pi OS ist **`rpi-clone`** oft **nicht** als APT-Paket verfügbar; Installation aus dem **GitHub-Fork** (z.B. framps/rpi-clone) nach `/usr/local/sbin/rpi-clone` | Erster Klon auf leere NVMe: typisch **`sudo rpi-clone -f -U nvme0n1`** (unattended + Initialisierung der Partitionstabelle) |
+| Nach dem Klon | `rpi-clone` passt auf dem Ziel **`cmdline.txt`** / **`fstab`** auf die neue **PARTUUID** der NVMe-Root-Partition an (im Referenzlauf z.B. `b88ab202-02` für `root=`) | Mit `sudo blkid /dev/nvme0n1p2` und gemounteter NVMe-Boot-Partition gegenprüfen |
+
+### E.4 Wo liegen Daten nach NVMe-Boot (AutomationOne-relevant)
+
+| Bereich | Gerät / Pfad | Bewertung |
+|---------|--------------|------------|
+| Root `/` | `nvme0n1p2` | OS, `/home/robin`, Projekt **`/home/robin/autoone`**, **`logs/`**, **`backups/`** |
+| Boot-Firmware | `nvme0n1p1` an `/boot/firmware` | Kernel/Cmdline für aktuellen Boot |
+| **Docker** | `Docker Root Dir: /var/lib/docker` unter `/` | Images, Container-Layer, **named Volumes** (Postgres, Mosquitto, …) liegen auf derselben NVMe |
+| SD-Karte | `mmcblk0` kann physisch stecken bleiben | Im Referenzlauf **ohne** Mount für `/` — **keine** laufende I/O-Entlastung nötig, solange von NVMe gebootet wird |
+
+### E.5 Stack nach Reboot (Agent-Kontext)
+
+- **Docker-Dienst:** `docker.service` **enabled**; Container mit `restart: unless-stopped` starten nach einem Reboot wieder, **wenn** sie zuvor mit `docker compose up -d` angelegt waren und nicht durch `docker compose down` entfernt wurden.
+- **Kern-Stack ohne Monitoring-Profil:** Im Referenzlauf liefen **fünf** Services: **postgres**, **mqtt-broker**, **ntp** (`automationone_ntp`), **el-servador**, **el-frontend** — passend zu **`COMPOSE_PROFILES=`** (leer) in `.env`.
+- **Monitoring-Profil:** Siehe `.env.example` (`COMPOSE_PROFILES=monitoring`); siehe **Top-10 Zeile 6** und **Fallstrick Compose-Name** zu Alloy/Loki.
+- **NTP-Container:** Chrony kann beim Start **Warnungen** zu `/run/chrony` melden; Healthcheck kann kurz „starting“ zeigen, dann **healthy** — Logs prüfen, falls NTP kritisch ist.
+
+### E.6 Boot-Garantie (Empfehlung, noch nicht im Repo verankert)
+
+Für „Stack immer nach Strom an“, unabhängig von vorherigem `docker compose down`, empfiehlt sich eine **systemd**-Unit (After=`docker.service`), die im Projektverzeichnis **`docker compose up -d`** (ggf. mit `--profile monitoring`) ausführt. Block D.4 enthält nur **Vorschläge** (`docker-compose.pi.yml`, `pi-first-run.sh`); die Unit ist optional zu ergänzen.
+
+### E.7 Sicherheitshinweis (Migrations-Chat)
+
+Wenn bei der Einrichtung **Passwörter im Chat** genannt wurden: nach Abschluss **`passwd`** auf dem Pi und alle betroffenen **`.env`-Secrets** rotieren; keine Secrets in Git oder in diese Doku übernehmen.
 
 ---
 

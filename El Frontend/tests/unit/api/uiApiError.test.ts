@@ -61,31 +61,6 @@ describe('toUiApiError', () => {
     expect(ui.message).toContain('Network Error')
   })
 
-  it('mappt FastAPI dict-detail (z.B. COMPUTE_FAILED) auf lesbaren message-String', () => {
-    const error = {
-      message: 'Request failed with status code 422',
-      response: {
-        status: 422,
-        headers: { 'x-request-id': 'req-cal-1' },
-        data: {
-          detail: {
-            code: 'COMPUTE_FAILED',
-            message: 'Calibration computation failed: pH response 201.33 mV/pH deviates 240.3% from ideal 59.16 (limit ±15%). Electrode may be degraded.',
-          },
-        },
-      },
-    }
-
-    const ui = toUiApiError(error, 'Fallback')
-    expect(ui.message).toBe(
-      'Calibration computation failed: pH response 201.33 mV/pH deviates 240.3% from ideal 59.16 (limit ±15%). Electrode may be degraded.',
-    )
-    expect(ui.numeric_code).toBeNull()
-    expect(ui.request_id).toBe('req-cal-1')
-    expect(ui.status).toBe(422)
-    expect(ui.retryability).toBe('unknown')
-  })
-
   it('mappt 403 konsistent als Zugriff verweigert mit retryability=no', () => {
     const error = {
       message: 'Request failed with status code 403',

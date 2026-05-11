@@ -15,7 +15,6 @@ from ..core.metrics import (
     increment_logic_error,
     increment_logic_dispatch_skipped_config_pending,
     increment_logic_dispatch_skipped_offline,
-    increment_rule_skip_target_offline,
     increment_safety_trigger,
 )
 from ..schemas.notification import NotificationCreate
@@ -51,16 +50,9 @@ logger = get_logger(__name__)
 _OFFLINE_BACKOFF_SECONDS = (
     30  # Skip offline-ESP actuator rules for 30s after first failure (safety net)
 )
-_DEGRADED_NOTIFICATION_THRESHOLD_MINUTES = 10  # AUT-110: notify operator after 10 min degraded
 _CONFIG_PENDING_BACKOFF_SECONDS = (
     15  # Skip config-pending-ESP actuator rules for 15s (shorter: state transitions fast)
 )
-
-# AUT-125: During reconnect evaluation, ignore sensor readings whose quality
-# indicates a likely bootstrap artefact (e.g. analog moisture relaxation 0 %).
-# Real, sustained low-quality issues are still surfaced by the regular ingest
-# path and threshold notifications — this only suppresses spurious *triggers*.
-_RECONNECT_SKIP_QUALITIES = frozenset({"poor", "suspect", "error"})
 
 
 class LogicEngine:
@@ -539,35 +531,6 @@ class LogicEngine:
                             )
                             continue
 
-                        # AUT-125: Filter out low-quality readings that may be
-                        # reconnect bootstrap artefacts (e.g. soil-moisture 0 %
-                        # during ADC relaxation). The data row is kept in the
-                        # DB; we only refuse to *trigger* on it during the
-                        # reconnect-driven re-evaluation.
-                        filtered_sensor_values = {}
-                        for key, sv in sensor_values.items():
-                            quality = sv.get("quality")
-                            if quality in _RECONNECT_SKIP_QUALITIES:
-                                logger.debug(
-                                    "reconnect_eval_quality_guard: skipping %s "
-                                    "quality=%s during reconnect evaluation of "
-                                    "rule '%s'",
-                                    key,
-                                    quality,
-                                    rule.rule_name,
-                                )
-                                continue
-                            filtered_sensor_values[key] = sv
-
-                        if not filtered_sensor_values:
-                            logger.debug(
-                                "Reconnect evaluation: skip %s (all sensor values "
-                                "filtered by quality guard)",
-                                rule.rule_name,
-                            )
-                            continue
-
-                        sensor_values = filtered_sensor_values
                         first_val = next(iter(sensor_values.values()))
                         trigger_data = {
                             "type": "reconnect",
@@ -1297,7 +1260,6 @@ class LogicEngine:
                                 timezone.utc
                             ) + timedelta(seconds=_OFFLINE_BACKOFF_SECONDS)
                             increment_logic_dispatch_skipped_offline()
-                            increment_rule_skip_target_offline(str(rule_id), esp_id_pre)
                             logger.warning(
                                 f"Rule {rule_name}: ESP {esp_id_pre} is offline, "
                                 f"skipping actuator action (GPIO {gpio_pre})"
@@ -1515,7 +1477,6 @@ class LogicEngine:
                             seconds=_OFFLINE_BACKOFF_SECONDS
                         )
                         increment_logic_dispatch_skipped_offline()
-                        increment_rule_skip_target_offline(str(rule_id), esp_id)
                         logger.warning(
                             f"Rule {rule_name}: ESP {esp_id} is offline, "
                             f"skipping actuator action (GPIO {gpio})"
@@ -1970,7 +1931,6 @@ class LogicEngine:
                 "gpio": gpio,
                 "sensor_type": sensor_type,
                 "value": display_value,
-                "quality": getattr(reading, "quality", None),
                 "age_seconds": age_s,
                 "operating_mode": op_mode,
                 "measurement_freshness_hours": (
@@ -2036,13 +1996,7 @@ class LogicEngine:
         if not rule or not rule.is_critical:
             return
         if rule.degraded_since is not None:
-            # AUT-110: already degraded — check threshold for operator notification
-            minutes_degraded = (
-                datetime.now(timezone.utc) - rule.degraded_since
-            ).total_seconds() / 60
-            if minutes_degraded >= _DEGRADED_NOTIFICATION_THRESHOLD_MINUTES:
-                await self._emit_degraded_notification(rule, rule_name, reason, session)
-            return  # no double WS-emit
+            return  # already degraded — no double-emit
 
         now = datetime.now(timezone.utc)
         rule.degraded_since = now
@@ -2073,40 +2027,6 @@ class LogicEngine:
             rule_name,
             reason[:64],
         )
-
-    async def _emit_degraded_notification(self, rule, rule_name: str, reason: str, session) -> None:
-        """Route a persistent operator notification after the degraded threshold is exceeded.
-
-        Called by _enter_degraded_state when degraded_since >= _DEGRADED_NOTIFICATION_THRESHOLD_MINUTES.
-        Uses NotificationRouter (DB persist + email + WS notification_new). Exceptions are caught
-        so a routing failure never aborts the rule-evaluation loop.
-        """
-        minutes = (datetime.now(timezone.utc) - rule.degraded_since).total_seconds() / 60
-        notif = NotificationCreate(
-            source="logic_engine",
-            category="connectivity",
-            severity="critical",
-            title=f"Kritische Regel '{rule_name}' degradiert seit {minutes:.0f} min",
-            body=(
-                f"Ziel-ESP offline ({reason[:64]}). Aktion wird nicht ausgeführt. "
-                f"Bitte ESP-Status prüfen und ggf. manuell eingreifen."
-            ),
-            metadata={
-                "rule_id": str(rule.id),
-                "rule_name": rule_name,
-                "degraded_reason": reason[:64],
-                "minutes_degraded": round(minutes),
-            },
-        )
-        try:
-            router = NotificationRouter(session)
-            await router.route(notif)
-        except Exception as notif_err:
-            logger.warning(
-                "AUT-110: notification routing failed for rule '%s': %s",
-                rule_name,
-                notif_err,
-            )
 
     async def _exit_degraded_state(
         self,

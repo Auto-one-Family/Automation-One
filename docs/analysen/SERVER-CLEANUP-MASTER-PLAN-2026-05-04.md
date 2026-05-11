@@ -22,7 +22,7 @@
 
 **Zwei kritische Quer-Befunde:**
 
-1. **Phantom-Issues:** AUT-227 D2, AUT-226 C2 und AUT-229 F2 referenzieren `sensor_kind` + MultispeQ-Code, der **NICHT in der Codebase existiert** (weder master noch auto-debugger/work). Vermutlich aus geplanter MultispeQ-Pipeline (AUT-211/AUT-212), aber noch nicht implementiert/gemerged. **Robin muss klaeren.**
+1. **~~Phantom-Issues~~ KORREKTUR (2026-05-05):** AUT-227 D2, AUT-226 C2 und AUT-229 F2 sind **KEINE Phantome**. `sensor_kind` existiert vollstaendig: Migration (`add_multispeq_sensor_kind_virtual_status`), Model (`sensor.py:278`), DB-Constraint (`CHECK IN ('continuous','snapshot')`), Frontend-Types + 4 Widgets mit `isSnapshot`. MultispeQ-Typen sind in `sensor_type_registry.py:83-107` registriert. **Tatsaechliche Luecke:** `sensor_kind` fehlt in Pydantic-Schemas (`SensorConfigResponse/Create/Update`) und in `_model_to_response()` — die API gibt das Feld nie zurueck, daher ist Frontend-`isSnapshot` immer `false`. Siehe `.claude/reports/current/SENSOR_KIND_ANALYSIS.md`.
 
 2. **Verstecktes Security-P0:** API-Key-Validation in `deps.py:353-359` akzeptiert jeden String mit Prefix `esp_*`/`god_*` ohne DB-Lookup. `api_keys`-Tabelle existiert nicht. AUT-224 A5 und AUT-228 E4 sind das **gleiche Problem**, sollten als ein Security-Ticket konsolidiert werden.
 
@@ -34,20 +34,20 @@
 |---------|--------|------------|
 | **deps.py vs dependencies.py** | AUT-224 A5 = AUT-228 E4 | Konsolidieren als ein Issue. Beide loesen sich gleichzeitig. |
 | **Publisher()-Init vs client.publish()-Bypass** | AUT-224 A3 + AUT-225 B2 | Gleiche Dateien (actuators.py, sensors.py, debug.py, zone_service.py, subzone_service.py). Zusammen migrieren — eine Migration `Publisher() + .client.publish(hardcoded)` -> `injected publisher.publish_<topic>()`. |
-| **sensor_kind / MultispeQ Phantom** | AUT-226 C2 + AUT-227 D2 + AUT-229 F2 | Alle drei warten auf MultispeQ-Pipeline aus AUT-211/AUT-212. Ohne Klaerung blockiert. |
+| **~~sensor_kind / MultispeQ Phantom~~ KORRIGIERT** | AUT-226 C2 + AUT-227 D2 + AUT-229 F2 | Kein Phantom. DB+Frontend vollstaendig. Luecke: Pydantic-Schemas + `_model_to_response()` geben `sensor_kind` nicht zurueck. Fix: Schema-Felder + Mapper ergaenzen. |
 | **send_command Publisher-Path** | AUT-228 E1 + AUT-225 B2 | Wenn B2 Publisher-Returns aendert, beeinflusst es E1's `rejection_reason` Mapping. |
 
 ---
 
 ## 3. Verbindliche Reihenfolge (4 Phasen, 1 Klaerung)
 
-### Phase 0 — KLAERUNG (vor allem anderen)
+### Phase 0 — ~~KLAERUNG~~ GEKLAERT (2026-05-05)
 
-**0a) Phantom-Befunde mit Robin abklaeren:**
+**0a) ~~Phantom-Befunde mit Robin abklaeren~~ ERLEDIGT:**
 
-- AUT-227 D2: existiert eine andere Branch / lokales Worktree mit `sensor_kind`-Spalte + multispeq-Migration?
-- AUT-226 C2: sind MultispeQ-Typen (phi2, fv_fm, ...) als virtual-sensor-Stubs in `sensor_type_registry.py` geplant ODER laufen sie ausschliesslich ueber Ingress (AUT-211/AUT-212)?
-- AUT-229 F2: gleiche Frage wie D2 — Tests sind nur sinnvoll, wenn Code existiert.
+- ~~AUT-227 D2:~~ Migration `add_multispeq_sensor_kind_virtual_status` existiert auf `auto-debugger/work`. Model-Feld `sensor.py:278`. DB-Constraint aktiv. **Status: Done.** Neuer Fix-Bedarf: Schema-Exposition (SensorConfigResponse + _model_to_response).
+- ~~AUT-226 C2:~~ MultispeQ-Typen (phi2, fv_fm, npqt, lef, par_internal, ppfd, chlorophyll_spad, leaf_temp, anthocyanin_index) sind in `sensor_type_registry.py:83-107` (SENSOR_TYPE_MAPPING + VIRTUAL_SENSOR_TYPES) registriert. **Status: Done.** Offener Punkt: MultispeQ-SensorConfigs erhalten `sensor_kind='continuous'` statt `'snapshot'` (Import-Endpoint setzt Wert nicht).
+- ~~AUT-229 F2:~~ Frontend vollstaendig (SensorKind-Type, 4 Widgets mit isSnapshot). Tests fehlen (0 Coverage). **Status: Offen fuer Test-Coverage, nicht blockiert durch D2/C2.**
 
 **0b) Empfehlung neue Issues anlegen:**
 
@@ -99,12 +99,12 @@
 ### AUT-226
 
 - **C1 erweitern:** BME280 hat NICHT NUR Humidity-Lücke, sondern auch `bme280_temp` und `bme280_pressure` ohne Processor (Mapping geht ins Leere). Empfehlung: BME280TemperatureProcessor + BME280PressureProcessor als Subclasses von BMP280-Pendants (Bosch-Chip-Familie).
-- **C2 entfernen:** MultispeQ-Typen existieren NICHT in `sensor_type_registry.py`. MultispeQ laeuft ueber separaten Ingress-Endpoint (AUT-211/AUT-212), NICHT ueber Sensor-Library.
+- **~~C2 entfernen~~ KORREKTUR (2026-05-05):** MultispeQ-Typen EXISTIEREN in `sensor_type_registry.py:83-107` (SENSOR_TYPE_MAPPING + VIRTUAL_SENSOR_TYPES + _MULTISPEQ_VALUE_DEFS). Tatsaechliches Problem: MultispeQ-SensorConfigs erhalten `sensor_kind='continuous'` (DB-Default) statt `'snapshot'`, weil Import-Endpoint den Wert nicht setzt.
 - **C3 downgraden:** `vpd` ist by-design VIRTUAL (Berechnung in `vpd_calculator.py`). Kein Bug. Maximal Doku-Kommentar in `sensor_type_registry.py`.
 
 ### AUT-227
 
-- **D2 BLOCKIEREN:** `sensor_kind`-Migration existiert nicht. Klaeren mit Robin VOR Implementierung.
+- **~~D2 BLOCKIEREN~~ KORREKTUR (2026-05-05):** Migration `add_multispeq_sensor_kind_virtual_status` existiert vollstaendig (VARCHAR(20), CHECK-Constraint, Model-Feld). **D2 = Done.** Neues Sub-Issue: `SensorConfigResponse/Create/Update` + `_model_to_response()` um `sensor_kind`-Feld ergaenzen (API gibt Wert nicht zurueck → Frontend-`isSnapshot` immer false).
 - **D3 erweitern:** 9 zusaetzliche Enum-Spalten ohne CheckConstraint:
   - `sensor.py:94` interface_type
   - `sensor.py:184` operating_mode
@@ -127,7 +127,7 @@
 
 - **F1 Korrektur:** `notifications.py` IST getestet (5 Test-Files). `zones.py` ist gut abgedeckt. Beide aus der Liste streichen.
 - **F1 erweitert:** 14 weitere ungetestete Router (ai, audit, backups, component_export, dashboards, debug, device_context, errors, intent_outcomes, logs, schema_registry, sensor_type_defaults, users, zone) — eigenes Issue oder Phase-3-Erweiterung.
-- **F2 entkoppeln:** Nicht abhaengig von D2-Phantom. VIRTUAL_SENSOR_TYPES (`{"vpd"}`) + BME280/CO2/Light/Flow-Coverage existiert auf master und ist sofort testbar.
+- **F2 KORREKTUR (2026-05-05):** Frontend-Implementierung vollstaendig (SensorKind-Type `types/index.ts:231`, 4 Widgets mit `isSnapshot`). 0 Test-Coverage fuer `sensor_kind`. Tests schreiben NACH Schema-Fix (Fix 1+2), sonst false-green. VIRTUAL_SENSOR_TYPES + BME280/CO2/Light/Flow-Coverage ist davon unabhaengig und sofort testbar.
 - **F3 Service-Coverage erweitern:** 21 weitere ungetestete Services (ai_service, dashboard_service, kaiser_service, logic_service, ...).
 
 ### AUT-225
@@ -155,6 +155,7 @@
 | **DiscoveryHandler-Removal** | Politisch nur, wenn Robin Firmware-Kompatibilitaets-Garantie aufgibt. Technisch risikofrei. |
 | **BaseMQTTHandler-Removal** | Toter Code — risikofrei. Falls Migration gewuenscht: verify-plan-Gate fordern. |
 | **Frontend-Vertraeglichkeit (E1 + E3)** | Frontend erwartet `detail` aus HTTPException. Typisierte Exceptions liefern `to_dict()` mit `error_code`/`numeric_code`. Frontend-Side-by-side-Migration. |
+| **sensor_kind API-Gap (NEU 2026-05-05)** | Frontend-`isSnapshot` ist immer `false` weil `SensorConfigResponse` kein `sensor_kind`-Feld hat. MultispeQ-Widgets zeigen falsches UI (Linechart statt Scatter). Fix: Schema + `_model_to_response()` ergaenzen. Kleiner Fix, grosser UI-Impact. |
 
 ---
 

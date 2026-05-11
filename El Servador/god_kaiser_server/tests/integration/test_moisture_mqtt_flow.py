@@ -6,7 +6,7 @@ Tests the complete moisture sensor processing flow:
 - LibraryLoader processor discovery via alias
 - MoistureSensorProcessor processing with and without calibration
 - ProcessingResult attribute access (not dict-style)
-- Invert: bevorzugt params; sonst calibration-derived (Pi-Enhanced)
+- Correct parameter placement (invert in params, not calibration)
 
 Hardware Context:
 - Capacitive Soil Moisture Sensor v1.2 (or compatible)
@@ -27,7 +27,6 @@ from src.sensors.base_processor import ProcessingResult
 from src.sensors.library_loader import LibraryLoader
 from src.sensors.sensor_libraries.active.moisture import MoistureSensorProcessor
 from src.sensors.sensor_type_registry import normalize_sensor_type
-from src.services.calibration_payloads import resolve_calibration_for_processor
 
 pytestmark = [pytest.mark.sensor, pytest.mark.flow_a]
 
@@ -173,11 +172,14 @@ class TestMoistureProcessingCalibrated:
         assert result.metadata is not None
         assert result.metadata.get("calibrated") is True
 
-    def test_invert_params_or_calibration(
+    def test_invert_belongs_in_params_not_calibration(
         self, moisture_processor: MoistureSensorProcessor
     ):
         """
-        Invert: explizit params bevorzugt; ohne params wirkt calibration["invert"] (Session-derived).
+        Invert logic must be passed via params, NOT calibration.
+
+        Correct:   process(raw_value=2050, calibration=cal, params={"invert": True})
+        Incorrect: process(raw_value=2050, calibration={"invert": True, ...})
 
         Invert flips the result: inverted_value = 100 - normal_value
         """
@@ -186,49 +188,10 @@ class TestMoistureProcessingCalibrated:
         # Normal result (50%)
         result_normal = moisture_processor.process(raw_value=2050, calibration=calibration)
 
-        # Inverted via params
-        result_inverted_params = moisture_processor.process(
+        # Inverted via params (correct placement)
+        result_inverted = moisture_processor.process(
             raw_value=2050, calibration=calibration, params={"invert": True}
         )
 
-        assert result_inverted_params.value == pytest.approx(100.0 - result_normal.value, abs=0.1)
-
-        # Inverted via calibration only (wie nach finalize in derived)
-        cal_with_inv = {**calibration, "invert": True}
-        result_inverted_cal = moisture_processor.process(raw_value=2050, calibration=cal_with_inv)
-        assert result_inverted_cal.value == pytest.approx(100.0 - result_normal.value, abs=0.1)
-
-
-# ── Canonical calibration → Processor (Pi-Enhanced / Session derived) ────────
-
-
-class TestMoistureCanonicalCalibrationToProcessor:
-    """resolve_calibration_for_processor flattens derived for MoistureSensorProcessor."""
-
-    def test_derived_from_session_finalize_feeds_processor_not_defaults(
-        self, moisture_processor: MoistureSensorProcessor
-    ):
-        """
-        Simuliert kanonisches calibration_data nach Feuchte-Kalibrierung:
-        derived enthält dry_value/wet_value — Processor darf nicht auf Default 3200/1500 fallen.
-        """
-        canonical = {
-            "method": "moisture_2point",
-            "points": [],
-            "derived": {
-                "type": "moisture_2point",
-                "dry_value": 2800.0,
-                "wet_value": 1300.0,
-                "invert": False,
-            },
-            "metadata": {},
-        }
-        flat = resolve_calibration_for_processor(canonical)
-        assert flat is not None
-        assert flat.get("dry_value") == 2800.0
-        assert flat.get("wet_value") == 1300.0
-
-        result = moisture_processor.process(raw_value=2050.0, calibration=flat)
-        # (2050 - 2800) / (1300 - 2800) * 100 = 50%
-        assert result.value == pytest.approx(50.0, abs=0.1)
-        assert result.metadata.get("calibrated") is True
+        # Inverted should be 100 - normal
+        assert result_inverted.value == pytest.approx(100.0 - result_normal.value, abs=0.1)

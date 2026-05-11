@@ -1,10 +1,6 @@
 # AutomationOne Agenten
 
-<<<<<<< Updated upstream
 > **Version:** 5.2 | **Aktualisiert:** 2026-04-29
-=======
-> **Version:** 5.2 | **Aktualisiert:** 2026-04-09
->>>>>>> Stashed changes
 > **Format:** Offizielles Claude Code Plugin-Agent-Format
 > **Agenten gesamt:** 14 | **Struktur:** Flach (alle .md direkt im agents/)
 
@@ -41,12 +37,6 @@
 |-------|-------|-------|--------------|
 | **agent-manager** | `agent-manager.md` | yellow | Agent-Qualitaet, IST-SOLL, Konsistenz |
 | **test-log-analyst** | `test-log-analyst.md` | cyan | Test-Log-Analyse (pytest, Vitest, Playwright, Wokwi) |
-
-### Orchestrierung
-
-| Agent | Datei | Color | Beschreibung |
-|-------|-------|-------|--------------|
-| **auto-debugger** | `auto-debugger.md` | red | Incident-Workflow, Korrelation, TASK-Packages, /verify-plan-Gate; Steuerdatei `.claude/auftraege/auto-debugger/inbox/` |
 
 ### Dev-Agenten (Pattern-konforme Implementierung)
 
@@ -110,17 +100,7 @@ skills: ["skill-name"]  # Optional: Skill automatisch vorladen
 | **green** | Implementierung | esp32-dev, server-dev, mqtt-dev, frontend-dev |
 | **blue** | System Operations | system-control |
 | **yellow** | Validation & Utility | db-inspector, agent-manager |
-<<<<<<< Updated upstream
 | **red** | Orchestrierung | auto-debugger |
-=======
-| **red** | Orchestrierung / Incident | auto-debugger |
-
----
-
-## Orchestrierung (Git)
-
-Für vom **auto-debugger** orchestrierte oder delegierte **Code-Änderungen** gilt der Arbeitsbranch **`auto-debugger/work`** (von `master`); Steuerdatei-Pflicht und Bash-Grenzen siehe `.claude/agents/auto-debugger.md` (0a) und `AGENTS.md` (Abschnitt Claude Code).
->>>>>>> Stashed changes
 
 ---
 
@@ -181,11 +161,7 @@ Alle Agenten schreiben Reports nach: `.claude/reports/current/`
 .claude/agents/
 ├── Readme.md              # Dieser Index
 ├── agent-manager.md       # Agent-Manager (yellow)
-<<<<<<< Updated upstream
 ├── auto-debugger.md       # Auto-Debugger Orchestrator (red)
-=======
-├── auto-debugger.md       # Orchestrierung / Incident / Artefakt (red)
->>>>>>> Stashed changes
 ├── db-inspector.md        # DB Inspector (yellow)
 ├── esp32-debug.md         # ESP32 Debug (cyan)
 ├── esp32-dev.md           # ESP32 Dev (green)

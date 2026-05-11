@@ -38,8 +38,6 @@ import zoomPlugin from 'chartjs-plugin-zoom'
 import 'chartjs-adapter-date-fns'
 import { RotateCcw } from 'lucide-vue-next'
 import { sensorsApi } from '@/api/sensors'
-import { parseApiError } from '@/api/parseApiError'
-import type { AxiosError } from 'axios'
 import { websocketService } from '@/services/websocket'
 import type { ChartSensor, SensorReading, SensorDataResolution } from '@/types'
 import { createLogger } from '@/utils/logger'
@@ -47,16 +45,6 @@ import { SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
 import { getAutoResolution, TIME_RANGE_MINUTES } from '@/utils/autoResolution'
 
 const log = createLogger('MultiSensorChart')
-
-function isEspNotFoundError(err: unknown): boolean {
-  if (!err || typeof err !== 'object') return false
-  try {
-    const parsed = parseApiError(err as AxiosError)
-    return parsed.statusCode === 404 && parsed.numericCode === 5001
-  } catch {
-    return false
-  }
-}
 
 // Register Chart.js components
 ChartJS.register(
@@ -170,9 +158,6 @@ const emit = defineEmits<{
 
 /** Loading-State für initiales Laden */
 const isLoading = ref(false)
-
-/** True wenn alle konfigurierten Sensoren auf ein gelöschtes Gerät zeigen */
-const allDevicesDeleted = ref(false)
 
 /** Error-State mit Retry-Zähler */
 const error = ref<{ message: string; retryCount: number } | null>(null)
@@ -777,7 +762,6 @@ async function fetchData(retryAttempt = 0): Promise<void> {
   if (retryAttempt === 0) {
     isLoading.value = true
     error.value = null
-    allDevicesDeleted.value = false
   }
 
   const now = new Date()
@@ -794,7 +778,7 @@ async function fetchData(retryAttempt = 0): Promise<void> {
       // Skip sensors with invalid identifiers (prevents 422 from backend)
       if (!sensor.espId || sensor.gpio == null) {
         log.debug(`Skipping sensor ${sensor.id} — invalid espId or gpio`)
-        return { id: sensor.id, readings: [] as SensorReading[], error: null, deviceDeleted: false }
+        return { id: sensor.id, readings: [] as SensorReading[], error: null }
       }
       try {
         log.debug(`Querying API for sensor ${sensor.id}`, {
@@ -815,11 +799,11 @@ async function fetchData(retryAttempt = 0): Promise<void> {
           readingsCount: response.readings?.length ?? 0,
           response,
         })
-        return { id: sensor.id, readings: response.readings, error: null, deviceDeleted: false }
+        return { id: sensor.id, readings: response.readings, error: null }
       } catch (err) {
         // Einzelner Sensor-Fehler wird nicht als kritischer Fehler behandelt
         log.debug(`API ERROR for ${sensor.id}`, { error: err })
-        return { id: sensor.id, readings: [], error: err, deviceDeleted: isEspNotFoundError(err) }
+        return { id: sensor.id, readings: [], error: err }
       }
     })
 
@@ -827,18 +811,14 @@ async function fetchData(retryAttempt = 0): Promise<void> {
     const newData = new Map<string, SensorReading[]>()
     let successCount = 0
 
-    let deletedCount = 0
-    results.forEach(({ id, readings, deviceDeleted }) => {
+    results.forEach(({ id, readings }) => {
       const normalizedReadings = normalizeReadings(readings)
       newData.set(id, normalizedReadings)
       if (normalizedReadings.length > 0) {
         successCount++
         emit('dataLoaded', id, normalizedReadings.length)
       }
-      if (deviceDeleted) deletedCount++
     })
-    allDevicesDeleted.value =
-      deletedCount > 0 && deletedCount === results.length && successCount === 0
 
     sensorData.value = newData
     const latestTimestamp = getLatestTimestampMs(newData)
@@ -1110,19 +1090,6 @@ onUnmounted(() => {
       <span>Keine Sensoren ausgewählt</span>
       <span class="multi-sensor-chart__empty-hint">
         Ziehe einen Sensor hierher um Daten anzuzeigen
-      </span>
-    </div>
-
-    <!-- Device Deleted State -->
-    <div
-      v-else-if="allDevicesDeleted"
-      class="multi-sensor-chart__no-data"
-      :style="{ minHeight: `${stateMinHeightPx}px` }"
-    >
-      <span class="multi-sensor-chart__no-data-icon">&#128683;</span>
-      <span>Gerät wurde gelöscht</span>
-      <span class="multi-sensor-chart__no-data-hint">
-        Dieses Widget referenziert ein Gerät, das nicht mehr existiert.
       </span>
     </div>
 

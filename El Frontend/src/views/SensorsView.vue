@@ -24,7 +24,6 @@ import { useZoneStore } from '@/shared/stores/zone.store'
 import { usePlantsStore } from '@/shared/stores/plants.store'
 import InventoryTable from '@/components/inventory/InventoryTable.vue'
 import DeviceDetailPanel from '@/components/inventory/DeviceDetailPanel.vue'
-import { EmptyState } from '@/shared/design/patterns'
 import PlantDetailPanel from '@/components/plants/PlantDetailPanel.vue'
 import PlantCreateModal from '@/components/plants/PlantCreateModal.vue'
 import { PLANT_PHASES, type Plant } from '@/types'
@@ -38,7 +37,7 @@ import type {
   MultispeqImportResponse,
   NeedsReviewSnapshot,
 } from '@/api/multispeq'
-import DateDisplay from '@/components/base/DateDisplay.vue'
+import { formatDateTime } from '@/utils/formatters'
 
 const route = useRoute()
 const espStore = useEspStore()
@@ -572,22 +571,8 @@ function toggleZoneFilter(zone: string) {
       </span>
     </div>
 
-    <!-- Empty State (no components configured at all) -->
-    <EmptyState
-      v-if="store.allComponents.length === 0"
-      :icon="Package"
-      title="Noch keine Sensoren konfiguriert"
-      description="Sobald Sensoren oder Aktoren auf einem ESP32 eingerichtet sind, erscheinen sie hier in der Wissensdatenbank."
-      cta-text="Zur Hardware-Ansicht"
-      :cta-to="{ path: '/hardware' }"
-    >
-      <template #hint>
-        Konfiguration erfolgt unter <strong>Hardware</strong> - hier siehst du nur das Inventar.
-      </template>
-    </EmptyState>
-
     <!-- Table -->
-    <InventoryTable v-else @select="handleSelect" />
+    <InventoryTable @select="handleSelect" />
 
     <!-- Detail SlideOver -->
     <SlideOver
@@ -790,7 +775,7 @@ function toggleZoneFilter(zone: string) {
             </label>
           </div>
 
-          <div class="audits-form__row audits-form__row--two grid-auto-sm">
+          <div class="audits-form__row audits-form__row--two">
             <label class="audits-form__field">
               <span class="audits-form__label">Device Serial</span>
               <input
@@ -813,7 +798,7 @@ function toggleZoneFilter(zone: string) {
             </label>
           </div>
 
-          <div class="audits-form__row audits-form__row--two grid-auto-sm">
+          <div class="audits-form__row audits-form__row--two">
             <label class="audits-form__field">
               <span class="audits-form__label">Zone</span>
               <select v-model="uploadForm.zone_id" class="audits-form__input" required>
@@ -875,7 +860,7 @@ function toggleZoneFilter(zone: string) {
         <h2 class="audits-card__title">
           {{ uploadForm.dry_run || (lastResult && needsReviewSnapshots.length === 0 && lastResult.imported === 0) ? 'Vorschau-Ergebnis' : 'Import-Ergebnis' }}
         </h2>
-        <div class="audits-result grid-auto-sm">
+        <div class="audits-result">
           <div class="audits-result__stat">
             <span class="audits-result__value">{{ lastResult.imported }}</span>
             <span class="audits-result__label">Importiert</span>
@@ -920,7 +905,7 @@ function toggleZoneFilter(zone: string) {
             class="audits-needs-review__item"
           >
             <div class="audits-needs-review__meta">
-              <DateDisplay class="audits-needs-review__time" :date="snapshot.timestamp" format="absolute" />
+              <span class="audits-needs-review__time">{{ formatDateTime(snapshot.timestamp) }}</span>
               <span
                 v-if="snapshot.sensor_values.phi2 !== undefined"
                 class="audits-needs-review__metric"
@@ -1334,6 +1319,8 @@ function toggleZoneFilter(zone: string) {
 }
 
 .audits-form__row--two {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: var(--space-3);
 }
 
@@ -1446,6 +1433,8 @@ function toggleZoneFilter(zone: string) {
 
 /* Result */
 .audits-result {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: var(--space-2);
 }
 

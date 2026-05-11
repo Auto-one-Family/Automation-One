@@ -109,7 +109,7 @@
 
 ## 1.14 auto-debugger
 - **Datei:** `.claude/agents/auto-debugger.md`
-- **Rolle:** Orchestrierung Incident-Workflow und additive Markdown-Artefakt-Verbesserung. Lagebild, CORRELATION-MAP, TASK-PACKAGES, SPECIALIST-PROMPTS, VERIFY-PLAN-REPORT; Steuerdatei unter `.claude/auftraege/auto-debugger/inbox/`. **Nach Verify:** `TASK-PACKAGES.md` an Verify-Ergebnis anpassen, `SPECIALIST-PROMPTS.md` rollenweise abstimmen, dann Übergabe an Dev-Agenten (keine Produkt-Implementierung durch den Orchestrator in dieser Phase). **Zusatz:** Pattern-Scan vor Paketen; delegierte Prompts mit Pattern-Reuse, Alert-Pfaden, Verify und Fehler-Register; bei gültiger Steuerdatei keine Standard-Chat-Rückfragen.
+- **Rolle:** Orchestrierung Incident-Workflow und additive Markdown-Artefakt-Verbesserung. Lagebild, CORRELATION-MAP, TASK-PACKAGES, SPECIALIST-PROMPTS, VERIFY-PLAN-REPORT; Steuerdatei unter `.claude/auftraege/auto-debugger/inbox/`. **Nach Verify:** `TASK-PACKAGES.md` an Verify-Ergebnis anpassen, `SPECIALIST-PROMPTS.md` rollenweise abstimmen, dann Übergabe an Dev-Agenten (keine Produkt-Implementierung durch den Orchestrator in dieser Phase).
 - **Kette:** TASK-PACKAGES → verify-plan (OUTPUT FÜR ORCHESTRATOR) → VERIFY-PLAN-REPORT → Plan-Anpassung → SPECIALIST-PROMPTS → Dev-Agenten (`auto-debugger/work`).
 - **Git:** Arbeitsbranch fix **`auto-debugger/work`** (von `master`); alle delegierten Dev-/Schreibaufträge nur auf diesem Branch.
 - **Model:** inherit
@@ -142,7 +142,7 @@
 | Skill | Zweck | Genutzt von |
 |-------|-------|-------------|
 | agent-manager | IST-SOLL-Vergleich, Flow vs. Agent-Dateien, Korrekturen | agent-manager |
-| auto-debugger | Incident-Workflow, Artefakt-Verbesserung, Pattern-Scan, Fehler-Register, Steuerdatei inbox, verify-plan-Gate, Post-Verify TASK-PACKAGES + SPECIALIST-PROMPTS | auto-debugger |
+| auto-debugger | Incident-Workflow, Artefakt-Verbesserung, Steuerdatei inbox, verify-plan-Gate, Post-Verify TASK-PACKAGES + SPECIALIST-PROMPTS | auto-debugger |
 | collect-reports | Reports in CONSOLIDATED_REPORT.md zusammenführen | Robin (manuell) |
 | collect-system-status | IST-Stand aus Code (Docker, Backend, Frontend) | — |
 | db-inspector | DB-Wissen, Schema, Diagnose-Queries | db-inspector |

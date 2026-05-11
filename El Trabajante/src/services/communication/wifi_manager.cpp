@@ -104,7 +104,9 @@ bool WiFiManager::connectToNetwork() {
             wl_status_t status = WiFi.status();
             String error_message = getWiFiStatusMessage(status);
 
-            LOG_E(TAG, "=== [FAIL] WIFI CONNECTION FAILED ===");
+            LOG_E(TAG, "╔════════════════════════════════════════╗");
+            LOG_E(TAG, "║  ❌ WIFI CONNECTION FAILED            ║");
+            LOG_E(TAG, "╚════════════════════════════════════════╝");
             LOG_E(TAG, "SSID: " + current_config_.ssid);
             LOG_E(TAG, "Status Code: " + String(status));
             LOG_E(TAG, "Reason: " + error_message);

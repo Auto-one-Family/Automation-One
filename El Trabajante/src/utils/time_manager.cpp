@@ -17,6 +17,7 @@
 #include "time_manager.h"
 #include "logger.h"
 #include <WiFi.h>
+#include <cstdio>
 #include <sys/time.h>
 #include "esp_sntp.h"  // Direct ESP-IDF SNTP API for daemon control (esp_sntp_stop/init)
 
@@ -47,7 +48,8 @@ TimeManager::TimeManager()
     , last_no_timestamp_log_ms_(0)
     , ntp_server_primary_(NTP_SERVER_PRIMARY)
     , ntp_server_secondary_(NTP_SERVER_SECONDARY)
-    , ntp_server_tertiary_(NTP_SERVER_TERTIARY) {
+    , ntp_server_tertiary_(NTP_SERVER_TERTIARY)
+    , gateway_primary_buf_{} {
 }
 
 // ============================================
@@ -69,6 +71,7 @@ bool TimeManager::begin() {
         if (!sntp_daemon_running_ && WiFi.status() == WL_CONNECTED) {
             LOG_I(TAG, "TimeManager: Restarting SNTP daemon after reconnect");
             sync_completed_ = false;
+            refreshPrimaryNtpFromGateway();
             configTime(NTP_GMT_OFFSET_SEC, NTP_DAYLIGHT_OFFSET,
                        ntp_server_primary_,
                        ntp_server_secondary_,
@@ -81,7 +84,9 @@ bool TimeManager::begin() {
         return synchronized_;
     }
 
-    LOG_I(TAG, "=== TimeManager: NTP Initialization ===");
+    LOG_I(TAG, "╔════════════════════════════════════════╗");
+    LOG_I(TAG, "║  TimeManager: NTP Initialization       ║");
+    LOG_I(TAG, "╚════════════════════════════════════════╝");
 
     // Check WiFi connection
     if (WiFi.status() != WL_CONNECTED) {
@@ -90,6 +95,8 @@ bool TimeManager::begin() {
         initialized_ = true;  // Mark as initialized but not synchronized
         return false;
     }
+
+    refreshPrimaryNtpFromGateway();
 
     LOG_I(TAG, "TimeManager: Configuring NTP servers...");
     LOG_I(TAG, "  Primary:   " + String(ntp_server_primary_));
@@ -131,13 +138,17 @@ bool TimeManager::begin() {
     last_resync_check_ = millis();
 
     if (sync_completed_) {
-        LOG_I(TAG, "=== NTP Sync Successful ===");
+        LOG_I(TAG, "╔════════════════════════════════════════╗");
+        LOG_I(TAG, "║  NTP Sync Successful                   ║");
+        LOG_I(TAG, "╚════════════════════════════════════════╝");
         LOG_I(TAG, "  Unix Timestamp: " + String((unsigned long)last_sync_time_));
         LOG_I(TAG, "  Formatted:      " + getFormattedTime());
         return true;
     } else {
         // Do NOT stop the daemon — it continues probing in background.
-        LOG_W(TAG, "=== NTP Boot Wait elapsed ===");
+        LOG_W(TAG, "╔════════════════════════════════════════╗");
+        LOG_W(TAG, "║  NTP Boot Wait elapsed                 ║");
+        LOG_W(TAG, "╚════════════════════════════════════════╝");
         LOG_W(TAG, "  Continuing boot without blocking MQTT");
         LOG_W(TAG, "  SNTP daemon active — sync completes asynchronously");
         return false;
@@ -172,6 +183,7 @@ void TimeManager::loop() {
         if (WiFi.status() == WL_CONNECTED) {
             LOG_I(TAG, "TimeManager: Retrying NTP sync...");
             sync_completed_ = false;
+            refreshPrimaryNtpFromGateway();
             configTime(NTP_GMT_OFFSET_SEC, NTP_DAYLIGHT_OFFSET,
                        ntp_server_primary_,
                        ntp_server_secondary_,
@@ -318,6 +330,7 @@ bool TimeManager::forceResync() {
         sntp_daemon_running_ = false;
     }
 
+    refreshPrimaryNtpFromGateway();
     configTime(NTP_GMT_OFFSET_SEC, NTP_DAYLIGHT_OFFSET,
                ntp_server_primary_,
                ntp_server_secondary_,
@@ -339,6 +352,21 @@ bool TimeManager::forceResync() {
         return false;
     }
     return true;
+}
+
+void TimeManager::refreshPrimaryNtpFromGateway() {
+    if (WiFi.status() != WL_CONNECTED) {
+        return;
+    }
+    const IPAddress gw = WiFi.gatewayIP();
+    if (gw == IPAddress(0u)) {
+        ntp_server_primary_ = NTP_SERVER_PRIMARY;
+        return;
+    }
+    snprintf(gateway_primary_buf_, sizeof(gateway_primary_buf_), "%u.%u.%u.%u",
+             static_cast<unsigned>(gw[0]), static_cast<unsigned>(gw[1]),
+             static_cast<unsigned>(gw[2]), static_cast<unsigned>(gw[3]));
+    ntp_server_primary_ = gateway_primary_buf_;
 }
 
 void TimeManager::setNTPServers(const char* primary, 
@@ -377,6 +405,7 @@ void TimeManager::onSyncCompleted() {
 void TimeManager::onWiFiConnected() {
     if (!sntp_daemon_running_ && initialized_) {
         sync_completed_ = false;
+        refreshPrimaryNtpFromGateway();
         configTime(NTP_GMT_OFFSET_SEC, NTP_DAYLIGHT_OFFSET,
                    ntp_server_primary_, ntp_server_secondary_, ntp_server_tertiary_);
         sntp_daemon_running_ = true;

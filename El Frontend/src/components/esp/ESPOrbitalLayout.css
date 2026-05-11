@@ -737,9 +737,9 @@
 }
 
 .preset-btn--active {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: var(--color-text-inverse);
+  background: var(--color-primary, #3b82f6);
+  border-color: var(--color-primary, #3b82f6);
+  color: white;
 }
 
 .schedule-config__custom {

@@ -60,27 +60,6 @@ class TestMoistureSensorProcessor:
         # At wet point → 100%
         assert result.value == 100.0
 
-    def test_process_invert_from_calibration_when_params_omit(self, processor):
-        """invert in calibration-derived dict (Pi-Enhanced path) if params omit invert."""
-        calibration = {"dry_value": 3200, "wet_value": 1500, "invert": True}
-        result = processor.process(raw_value=2350, calibration=calibration)
-        result_normal = processor.process(raw_value=2350, calibration={"dry_value": 3200, "wet_value": 1500})
-        assert result.value == pytest.approx(100.0 - result_normal.value, abs=0.05)
-
-    def test_process_params_invert_overrides_calibration(self, processor):
-        """Explicit params invert wins over calibration invert."""
-        calibration = {"dry_value": 3200, "wet_value": 1500, "invert": True}
-        result = processor.process(
-            raw_value=2350,
-            calibration=calibration,
-            params={"invert": False},
-        )
-        result_no_inv = processor.process(
-            raw_value=2350,
-            calibration={"dry_value": 3200, "wet_value": 1500},
-        )
-        assert result.value == pytest.approx(result_no_inv.value, abs=0.05)
-
     def test_process_inverted_logic(self, processor):
         """Test processing with inverted logic (HIGH voltage = DRY)."""
         calibration = {"dry_value": 3200, "wet_value": 1500}

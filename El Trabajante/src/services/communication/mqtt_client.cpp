@@ -1,4 +1,5 @@
 #include "mqtt_client.h"
+#include "../../utils/mqtt_broker_sanitize.h"
 #include "../../models/error_codes.h"
 #include "../../services/config/config_manager.h"
 #include "../../services/sensor/sensor_manager.h"
@@ -286,13 +287,24 @@ bool MQTTClient::connect(const MQTTConfig& config) {
         return false;
     }
 
-    if (config.server.length() == 0) {
+    String broker_host = config.server;
+    uint16_t broker_port = config.port;
+    sanitizeMqttBrokerHostAndPort(broker_host, &broker_port);
+
+    if (broker_host.length() == 0) {
         LOG_E(TAG, "MQTT server address is empty");
         errorTracker.logCommunicationError(ERROR_MQTT_INIT_FAILED, "MQTT server address is empty");
         return false;
     }
 
+    if (broker_host != config.server || broker_port != config.port) {
+        LOG_W(TAG, "MQTT broker host aus Config normalisiert (Transport): \"" + config.server + "\":" +
+                   String(config.port) + " -> \"" + broker_host + "\":" + String(broker_port));
+    }
+
     current_config_ = config;
+    current_config_.server = broker_host;
+    current_config_.port = broker_port;
     anonymous_mode_ = (config.username.length() == 0);
 
     if (anonymous_mode_) {
@@ -308,10 +320,10 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     // MQTT_EVENT_CONNECTED fires asynchronously when connection is established.
     // ============================================
 
-    // Build broker URI: "mqtt://hostname:port"
+    // Build broker URI: "mqtt://hostname:port" (plain TCP; kein mqtts ohne TLS-Stack)
     char broker_uri[96];
     snprintf(broker_uri, sizeof(broker_uri), "mqtt://%s:%d",
-             config.server.c_str(), config.port);
+             broker_host.c_str(), broker_port);
 
     // Build Last-Will topic: kaiser/{k}/esp/{e}/system/will
     // Use heartbeat topic as base and replace /heartbeat with /will
@@ -1385,8 +1397,6 @@ void MQTTClient::publishHeartbeat(bool force) {
     payload += "\"wifi_rssi\":" + String(WiFi.RSSI()) + ",";
     payload += "\"sensor_count\":" + String(sensorManager.getActiveSensorCount()) + ",";
     payload += "\"actuator_count\":" + String(actuatorManager.getActiveActuatorCount()) + ",";
-    payload += "\"zone_name\":\"" + g_kaiser.zone_name + "\",";
-    payload += "\"subzone_count\":" + String(configManager.getSubzoneCount()) + ",";
     payload += "\"wifi_ip\":\"" + WiFi.localIP().toString() + "\",";
 
     // PKG-17: gpio_status removed from heartbeat (redundant with REST
@@ -1449,9 +1459,6 @@ void MQTTClient::publishHeartbeat(bool force) {
         payload += "\"publish_queue_hwm\":" + String(pq_stats.high_watermark) + ",";
         payload += "\"publish_queue_shed_count\":" + String(pq_stats.shed_count) + ",";
         payload += "\"publish_queue_drop_count\":" + String(pq_stats.drop_count) + ",";
-        // AUT-134 PKG-03: oversize-skip telemetry (heartbeat + queue boundary).
-        payload += "\"publish_queue_oversize_skip_count\":" +
-                   String(pq_stats.oversize_skip_count) + ",";
     }
 #endif
     payload += "\"sensor_command_queue_overflow_count\":" +
@@ -1465,27 +1472,6 @@ void MQTTClient::publishHeartbeat(bool force) {
     payload += configManager.getDiagnosticsJSON();
     payload += "}";
 
-    // AUT-134 PKG-03: Heartbeat oversize lane guard.
-    // The publish-queue boundary rejects payloads >= PUBLISH_PAYLOAD_MAX_LEN.
-    // If the (Core-0) heartbeat ever races into the queue path (xPortGetCoreID() == 1
-    // or in-MQTT-callback in publish()), an oversize payload would be dropped and —
-    // because heartbeats fire on a tight cadence (5 s during registration retry) —
-    // could pressure the lane. Drop here, before publish(), so the rejection is
-    // attributed to the heartbeat builder, surfaces a single LOG_W per occurrence,
-    // and never enters the queue. AUT-121 ENABLE_METRICS_SPLIT is preserved: the
-    // metrics topic is published independently below.
-#ifndef MQTT_USE_PUBSUBCLIENT
-    if (payload.length() >= PUBLISH_PAYLOAD_MAX_LEN) {
-        // Reuse the queue-boundary oversize counter so heartbeat regressions
-        // surface in the same telemetry knob (publish_queue_oversize_skip_count).
-        // Heartbeat is non-critical (QoS 0) — no intent_outcome.
-        // The next heartbeat tick will rebuild and re-publish a fresh payload.
-        noteHeartbeatOversizeSkip();
-        LOG_W(TAG, "[AUT-134] Heartbeat oversize skipped: len=" + String(payload.length()) +
-              " limit=" + String((uint32_t)PUBLISH_PAYLOAD_MAX_LEN) +
-              " topic=" + heartbeat_topic);
-    } else
-#endif
     if (!publish(heartbeat_topic, payload, 0)) {
         LOG_W(TAG, "Heartbeat publish failed (topic=" + heartbeat_topic + ")");
     }
@@ -1563,9 +1549,6 @@ void MQTTClient::publishHeartbeatMetrics() {
         payload += "\"publish_queue_hwm\":" + String(pq_stats.high_watermark) + ",";
         payload += "\"publish_queue_shed_count\":" + String(pq_stats.shed_count) + ",";
         payload += "\"publish_queue_drop_count\":" + String(pq_stats.drop_count) + ",";
-        // AUT-134 PKG-03: oversize-skip telemetry (heartbeat + queue boundary).
-        payload += "\"publish_queue_oversize_skip_count\":" +
-                   String(pq_stats.oversize_skip_count) + ",";
     }
 #endif
     payload += "\"sensor_command_queue_overflow_count\":" +
@@ -1576,20 +1559,6 @@ void MQTTClient::publishHeartbeatMetrics() {
                String(current.emergency_rejected_no_token_total);
     payload += "}";
 
-    // AUT-134 PKG-03: same oversize lane guard for the metrics topic. AUT-121
-    // intentionally split metrics off the core heartbeat to keep both topics
-    // small; if a future field push grows the metrics payload past the queue
-    // envelope, drop here rather than entering the publish lane.
-#ifndef MQTT_USE_PUBSUBCLIENT
-    if (payload.length() >= PUBLISH_PAYLOAD_MAX_LEN) {
-        noteHeartbeatOversizeSkip();
-        LOG_W(TAG, "[AUT-134] Heartbeat metrics oversize skipped: len=" +
-              String(payload.length()) + " limit=" +
-              String((uint32_t)PUBLISH_PAYLOAD_MAX_LEN) +
-              " topic=" + metrics_topic);
-        return;
-    }
-#endif
     publish(metrics_topic, payload, 0);
 }
 
@@ -1609,7 +1578,9 @@ void MQTTClient::confirmRegistration() {
     if (!registration_confirmed_) {
         registration_confirmed_ = true;
         registration_timeout_logged_ = false;
-        LOG_I(TAG, "=== REGISTRATION CONFIRMED BY SERVER ===");
+        LOG_I(TAG, "╔════════════════════════════════════════╗");
+        LOG_I(TAG, "║  REGISTRATION CONFIRMED BY SERVER     ║");
+        LOG_I(TAG, "╚════════════════════════════════════════╝");
         LOG_I(TAG, "Gate opened - publishes now allowed");
     }
 }
@@ -1652,7 +1623,9 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
     switch (event_id) {
 
         case MQTT_EVENT_CONNECTED: {
-            LOG_I(TAG, "=== MQTT_EVENT_CONNECTED ===");
+            LOG_I(TAG, "╔════════════════════════════════════════╗");
+            LOG_I(TAG, "║  MQTT_EVENT_CONNECTED                 ║");
+            LOG_I(TAG, "╚════════════════════════════════════════╝");
 
             // Update shared connection state (atomic — read by Safety-Task Core 1)
             g_mqtt_connected.store(true);
@@ -1732,7 +1705,9 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
         }
 
         case MQTT_EVENT_DISCONNECTED:
-            LOG_W(TAG, "=== MQTT_EVENT_DISCONNECTED ===");
+            LOG_W(TAG, "╔════════════════════════════════════════╗");
+            LOG_W(TAG, "║  MQTT_EVENT_DISCONNECTED              ║");
+            LOG_W(TAG, "╚════════════════════════════════════════╝");
 
             // INC-2026-04-11-ea5484-mqtt-transport-keepalive (PKG-01):
             // Telemetrie-Marker mit uptime + free heap + WiFi-RSSI, damit Disconnect-

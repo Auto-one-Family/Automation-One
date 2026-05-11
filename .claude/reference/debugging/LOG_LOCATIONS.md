@@ -1,15 +1,7 @@
 # Log-System - AutomationOne
 
-<<<<<<< Updated upstream
 > **Version:** 4.11 | **Aktualisiert:** 2026-04-20
 > **Änderungen 4.11 (2026-04-20):** PKG-02 / PKG-06 (INC-2026-04-20-offline-mode-observability-hardening): Neue `event_class`-Labels (`rule_arbitration`, `CONFIG_GUARD`) dokumentiert in Sektion 2.3a; Loki-Filter-Beispiele ergänzt.
-=======
-> **Version:** 4.14 | **Aktualisiert:** 2026-04-10
-> **Änderungen 4.14:** Docker-Dev **Ground Truth**: Zwei Handler (`setup_logging`) — **Datei** unter Bind-Mount `logs/server/god_kaiser.log` = JSON (bei `LOG_FORMAT=json`), **Docker-stdout** = lesbarer Text; `docker compose … -f docker-compose.dev.yml` = **uvicorn --reload** (WatchFiles-Zeilen nur in `docker logs`, nicht 1:1 zur Datei); Host-Datei und `docker logs` sind **nicht** byte-identisch; Windows: Bind-Mount/`tail` kann verzoegern — Live-Triage bevorzugt `docker logs` / Loki §12.
-> **Änderungen 4.13:** Server: optionales JSON-Feld `failure_class` (Pilot I08, Whitelist in `core/logging_config.py`); Docker-**stdout** = Text mit Suffix `failure_class=…`, **Datei** `logs/server/god_kaiser.log` = JSON mit `"failure_class"`; LogQL: `docs/debugging/logql-queries.md` § failure_class (Docker: `|=`, Datei/JSON: `| json`)
-> **Änderungen 4.12:** Grafana `system-health.json`: Prometheus-Panels MQTT-Verarbeitungsfehler (`god_kaiser_mqtt_errors_total`) und WS-Contract-Mismatch (`god_kaiser_ws_contract_mismatch_total`); Verifikation am Stack: `localhost:9090/api/v1/query` (siehe §12.4 / §12.5)
-> **Änderungen 4.11:** Alloy/Loki: optionales Structured Metadata `correlation_id` für `el-servador`, extrahiert aus der Logzeile (`\bcorrelation_id=` in `message`, `docker/alloy/config.alloy`); kein Loki-Label — siehe `docs/debugging/logql-queries.md`
->>>>>>> Stashed changes
 > **Änderungen 4.10:** Loki Windows: 127.0.0.1 + WebClient-Fallback (localhost-Timeout behoben)
 > **Änderungen 4.7:** Level-Normalisierung (uppercase) für loki, mqtt-broker, el-frontend in Alloy. Drop-Filter für Loki query-stats (metrics.go, engine.go, roundtrip.go). Volumen 57→24 MB/Tag
 > **Zweck:** Vollständige Dokumentation aller Log-Quellen, Speicherorte und Capture-Methoden
@@ -146,15 +138,8 @@ powershell -ExecutionPolicy Bypass -File scripts/debug/debug-status.ps1   # JSON
 # ============================================
 # SERVER LOGS
 # ============================================
-# Lokal (Poetry, ohne Docker): Projektrelativ unter god_kaiser_server/logs/
 tail -f "El Servador/god_kaiser_server/logs/god_kaiser.log"           # Live
 grep -i error "El Servador/god_kaiser_server/logs/god_kaiser.log"     # Errors suchen
-
-# Docker-Stack (el-servador): Live-Triage = docker logs (Text); JSON-Datei = Host-Bind-Mount (nicht byte-identisch)
-docker logs -f automationone-server                                   # = Container-Name
-docker compose logs -f el-servador                                    # = Service-Name
-# Strukturiert / grep auf JSON: Host-Datei (Container: /app/logs/god_kaiser.log)
-tail -f "logs/server/god_kaiser.log"
 
 # ============================================
 # TESTS (poetry run oder .venv direkt)
@@ -197,9 +182,7 @@ gh run download <run-id>                                                       #
 
 | Quelle | Pfad / Ausgabe | Format | Native File-Option |
 |--------|----------------|--------|-------------------|
-| Server (Poetry lokal) | `El Servador/god_kaiser_server/logs/god_kaiser.log` | JSON | ✅ Automatisch |
-| Server (Docker Host) | `logs/server/god_kaiser.log` (= Container `/app/logs/god_kaiser.log`) | JSON | ✅ Bind-Mount |
-| Server (Docker Live) | `docker logs` / Loki `compose_service=el-servador` | Text (stdout) | ❌ (nur Stream/Loki) |
+| Server | `El Servador/god_kaiser_server/logs/god_kaiser.log` | JSON | ✅ Automatisch |
 | pytest | stdout + `junit-*.xml` | Text/XML | ✅ `--junitxml` |
 | Coverage | `htmlcov/index.html` | HTML | ✅ `--cov-report` |
 | Wokwi | `--serial-log-file <path>` | Text | ✅ Native CLI Option |
@@ -218,8 +201,8 @@ gh run download <run-id>                                                       #
 
 | Quelle | Pfad / Ausgabe | Live | Historisch | Native File-Option |
 |--------|----------------|------|------------|-------------------|
-| **Server** | `logs/god_kaiser.log` (relativ zu CWD; Docker-Host: `logs/server/`) | ✅ | ✅ (Rotation) | ✅ Automatisch |
-| **Server Console** | stdout (**Docker:** lesbarer Text, nicht dasselbe Format wie JSON-Datei) | ✅ | ❌ | ❌ Umleitung nötig |
+| **Server** | `logs/god_kaiser.log` | ✅ | ✅ (Rotation) | ✅ Automatisch |
+| **Server Console** | stdout | ✅ | ❌ | ❌ Umleitung nötig |
 | **pytest** | stdout + XML | ✅ | ✅ (Artifacts) | ✅ `--junitxml` |
 | **Coverage** | `htmlcov/` | ❌ | ✅ | ✅ `--cov-report` |
 | **Wokwi** | `--serial-log-file` | ✅ | ✅ | ✅ **Native CLI Option** |
@@ -257,19 +240,6 @@ gh run download <run-id>                                                       #
 | `file_max_bytes` | 10MB | `LOG_FILE_MAX_BYTES` |
 | `file_backup_count` | 10 | `LOG_FILE_BACKUP_COUNT` |
 
-### 2.1.1 Docker-Stack: Zwei Sinks — Datei vs. Docker-stdout (Ground Truth)
-
-**Implementierung:** `El Servador/god_kaiser_server/src/core/logging_config.py` — `setup_logging()` konfiguriert **zwei** Handler:
-
-1. **RotatingFileHandler** auf `settings.logging.file_path` — bei `LOG_FORMAT=json` (Default) mit **JSONFormatter** (strukturierte Zeilen inkl. `request_id`, optional `failure_class` in JSON). Ist `LOG_FORMAT` nicht `json`, nutzt auch die Datei den **TextFormatter** (selten in Produktion).
-2. **StreamHandler(sys.stdout)** — immer **TextFormatter** (lesbare Zeilen fuer Operator und **docker logs**).
-
-**Folge:** Host-Datei `logs/server/god_kaiser.log` (Bind-Mount `./logs/server` → `/app/logs`) und Ausgabe von **`docker logs automationone-server`** / **`docker compose logs -f el-servador`** sind **nicht** byte-identisch (JSON vs. Text, evtl. andere Reihenfolge/Zeitstempel-Darstellung). Korrelation ueber **`request_id`** ist in **allen** Quellen moeglich; fuer strukturierte Auswertung ist die **JSON-Datei** bevorzugt.
-
-**Reload-Dev:** `docker compose -f docker-compose.yml -f docker-compose.dev.yml up …` setzt **uvicorn --reload** (siehe `docker-compose.dev.yml`). Bei Code-Aenderungen: neuer Python-Prozess, erneutes `setup_logging()` (Handler werden ersetzt). **WatchFiles-** und **Reload-Meldungen** erscheinen in **docker logs**, gehoeren aber nicht zwingend zur gleichen Zeile wie die naechste Rotation in der JSON-Datei — Zeitfenster abgleichen.
-
-**Windows:** Schreiben auf den Bind-Mount und `tail`/Editor-Ansicht koennen **verzoegert** wirken; fuer **Live-Triage** weiterhin **`docker logs`** oder Loki (§12) nutzen, nicht nur die Host-Datei.
-
 ### 2.2 Log-Pfad und Rotation
 
 **Lokaler Pfad (Poetry):**
@@ -303,12 +273,10 @@ logs/server/              # Host-Verzeichnis (Docker Bind-Mount)
   "function": "handle_sensor_data",
   "line": 123,
   "request_id": "abc123",
-  "failure_class": "sensor_payload_validation",
   "exception": "..." 
 }
 ```
 
-<<<<<<< Updated upstream
 ### 2.3a Strukturierte `event_class`-Labels (Welle 1 Observability, 2026-04-20)
 
 Ab PKG-02 / PKG-06 (`INC-2026-04-20-offline-mode-observability-hardening`) verwenden
@@ -327,9 +295,6 @@ können damit "erwartete" Betriebszustände von echten Fehlern trennen.
 ```
 
 Weitere `event_class`-Werte folgen in Welle 2+ (z. B. `queue_pressure`).
-=======
-**failure_class:** Nur bei gesetztem `extra=` am Logger (Pilot: kleines String-Set, z. B. `mqtt_json_parse`, `mqtt_route`, `sensor_payload_validation`). **Docker-Console:** gleiches Feld als Text-Suffix `failure_class=…` am Zeilenende (kein JSON in stdout).
->>>>>>> Stashed changes
 
 ### 2.4 Zugriffs-Commands
 
@@ -925,7 +890,7 @@ mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 30 | ts '[%Y-%m-%d %H:%M:%S
 
 | Ebene | Erreichbar | Live | In Loki (wenn `make monitor-up`) | KI-optimal (Labels/Struktur) | Hinweis |
 |-------|-------------|------|-----------------------------------|-------------------------------|---------|
-| **Server** (el-servador) | Ja | Ja (tail / docker logs / Loki) | Ja, `compose_service=el-servador` + level, logger; optional Structured Metadata `request_id`, `correlation_id` (wenn Zeile `correlation_id=` enthält); bei Fehlerpilot optional `failure_class=` in der Zeile bzw. `"failure_class"` in JSON-Datei | Ja (Regex-Parser, level/logger/request_id; optional correlation_id aus Message; `failure_class` siehe `docs/debugging/logql-queries.md`) | Zusätzlich Datei: `logs/server/god_kaiser.log` |
+| **Server** (el-servador) | Ja | Ja (tail / docker logs / Loki) | Ja, `compose_service=el-servador` + level, logger | Ja (Regex-Parser, level/logger) | Zusätzlich Datei: `logs/server/god_kaiser.log` |
 | **Frontend** (el-frontend) | Ja | Ja (docker logs / Loki) | Ja, `compose_service=el-frontend` + level, component | Ja (JSON-Parser) | Nur stdout, kein Bind-Mount |
 | **MQTT-Broker** | Ja | Ja (docker logs / Loki) | Ja, `compose_service=mqtt-broker` + level | Ja (Regex + Level-Normalisierung uppercase) | Broker-Events; **MQTT-Payload** (kaiser/#) nicht in Loki, nur live z. B. `mosquitto_sub` / session.sh |
 | **PostgreSQL** | Ja | Ja (docker logs / Loki) | Ja, `compose_service=postgres` + level, query_duration_ms | Ja (Level-Extraktion, Slow-Query Metadata) | `logging_collector=off` → stderr → Docker → Alloy → Loki |
@@ -1000,9 +965,8 @@ curl -s "http://localhost:3100/loki/api/v1/label/compose_service/values"
 ### 12.4 Grafana
 
 **URL:** http://localhost:3000 (admin / GRAFANA_ADMIN_PASSWORD aus .env)
-**Dashboard:** AutomationOne - Operations (`/d/automationone-system-health`, UID `automationone-system-health`; Provisioning: `docker/grafana/provisioning/dashboards/system-health.json`)
+**Dashboard:** AutomationOne - System Health (`/d/automationone-system-health`)
 **Datasources:** Prometheus (default), Loki
-**Hinweis (MQTT / WS-Observability):** Im Dashboard u. a. nach „MQTT Message Rate“ — Zeitreihen für `sum by (direction) (rate(god_kaiser_mqtt_errors_total[5m]))` und `rate(god_kaiser_ws_contract_mismatch_total[5m])` (Metriknamen in `El Servador/.../core/metrics.py`).
 
 ### 12.5 Prometheus-Metriken
 
@@ -1012,14 +976,6 @@ curl -s http://localhost:8000/api/v1/health/metrics
 
 # Prometheus Targets
 curl -s http://localhost:9090/api/v1/targets
-
-# Beispiel: God-Kaiser-Counter (laufender Prometheus, job el-servador)
-curl -sG "http://localhost:9090/api/v1/query" --data-urlencode "query=god_kaiser_mqtt_errors_total"
-curl -sG "http://localhost:9090/api/v1/query" --data-urlencode "query=god_kaiser_ws_contract_mismatch_total"
-
-# Beispiel: gleiche PromQL wie Grafana-Panels (5m Rate)
-curl -sG "http://localhost:9090/api/v1/query" --data-urlencode "query=sum by (direction) (rate(god_kaiser_mqtt_errors_total[5m]))"
-curl -sG "http://localhost:9090/api/v1/query" --data-urlencode "query=rate(god_kaiser_ws_contract_mismatch_total[5m])"
 ```
 
 **Scrape-Config:** `docker/prometheus/prometheus.yml`
@@ -1028,13 +984,9 @@ curl -sG "http://localhost:9090/api/v1/query" --data-urlencode "query=rate(god_k
 
 ---
 
-**Letzte Aktualisierung:** 2026-04-10
-**Version:** 4.14
+**Letzte Aktualisierung:** 2026-03-06
+**Version:** 4.10
 **Changelog:**
-- 4.14: §2.1.1 Ground Truth Docker: zwei Handler (JSON-Datei vs. stdout-Text), Reload-Overlay, `docker logs` vs. Host-Datei; Quick-Reference + Tabellen Docker-Zeilen
-- 4.13: `failure_class` (I08): JSON-Datei vs. Docker-Text dokumentiert; §2.3 Beispiel; §12.0 Server-Zeile; LogQL in `docs/debugging/logql-queries.md`
-- 4.12: Grafana Provisioning `system-health.json`: Panels MQTT-Fehlerrate + WS-Contract-Mismatch; §12.4/12.5 um Prometheus-Verify-Beispiele ergänzt
-- 4.11: Alloy `docker/alloy/config.alloy`: optionales Structured Metadata `correlation_id` (Zusatzregex auf `message`, Wortgrenze); LogQL-Beispiel in `docs/debugging/logql-queries.md` § Structured Metadata
 - 4.10: Loki Windows localhost-Timeout behoben — `loki-query.ps1` und `debug-status.ps1` nutzen `127.0.0.1:3100` und WebClient-Fallback; Loki-Erreichbarkeit vom Host damit stabil
 - 4.9: Loki Windows-Support — `scripts/loki-query.ps1` (PowerShell), Makefile nutzt automatisch PS auf Windows; CLI-Tabelle in §12.2
 - 4.8: docker-compose.dev.yml: logs/server Mount für el-servador, tsconfig/tailwind/postcss für el-frontend

@@ -53,6 +53,7 @@ extern bool         g_boot_force_offline_autonomy;
 
 // ─── External functions from main.cpp ──────────────────────────────────
 extern void handleWatchdogTimeout();
+extern void processDeferredPostReconnectActuatorStatusSync();
 
 // ============================================
 // STATIC HELPER: Provisioning Mode Handler
@@ -68,6 +69,7 @@ static void handleProvisioningState() {
         mqttClient.loop();
 #ifndef MQTT_USE_PUBSUBCLIENT
         mqttClient.processPublishQueue();
+        processDeferredPostReconnectActuatorStatusSync();
 #endif
 
         if (mqttClient.isConnected() && mqttClient.isRegistrationConfirmed()) {
@@ -83,7 +85,9 @@ static void handleProvisioningState() {
 
     // Config received via HTTP → reload + reboot
     if (provisionManager.isConfigReceived()) {
-        LOG_I(COMM_TAG, "=== [OK] KONFIGURATION EMPFANGEN! ===");
+        LOG_I(COMM_TAG, "╔════════════════════════════════════════╗");
+        LOG_I(COMM_TAG, "║  ✅ KONFIGURATION EMPFANGEN!          ║");
+        LOG_I(COMM_TAG, "╚════════════════════════════════════════╝");
         configManager.loadWiFiConfig(g_wifi_config);
         LOG_I(COMM_TAG, "WiFi SSID: " + g_wifi_config.ssid);
         LOG_I(COMM_TAG, "Rebooting to apply configuration...");
@@ -157,7 +161,10 @@ static void handleMqttPersistentFailure() {
                     mqtt_failure_start = 0;
                     return;
                 }
-                LOG_C(COMM_TAG, "=== MQTT PERSISTENT FAILURE (5 min) | Config-Portal oeffnen... ===");
+                LOG_C(COMM_TAG, "╔════════════════════════════════════════╗");
+                LOG_C(COMM_TAG, "║  MQTT PERSISTENT FAILURE (5 min)       ║");
+                LOG_C(COMM_TAG, "║  Config-Portal oeffnen...              ║");
+                LOG_C(COMM_TAG, "╚════════════════════════════════════════╝");
                 g_system_config.current_state = STATE_SAFE_MODE_PROVISIONING;
                 g_system_config.safe_mode_reason =
                     "MQTT persistent failure (5 min Circuit Breaker OPEN)";
@@ -354,6 +361,7 @@ void communicationTaskFunction(void* param) {
             // made in PENDING_APPROVAL, so the inline timeout in publish() would never fire.
             mqttClient.checkRegistrationTimeout();
             mqttClient.processPublishQueue();
+            processDeferredPostReconnectActuatorStatusSync();
 #endif
             vTaskDelay(pdMS_TO_TICKS(100));  // Slower tick — no sensor/actuator work
             continue;
@@ -367,6 +375,7 @@ void communicationTaskFunction(void* param) {
         // publish() call has been made yet (e.g. no sensor data during first 10 s).
         mqttClient.checkRegistrationTimeout();
         mqttClient.processPublishQueue();  // Drain Core 1 → Core 0 publish queue
+        processDeferredPostReconnectActuatorStatusSync();
 #endif
 
         handleBootCounterReset();

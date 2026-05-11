@@ -295,7 +295,7 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    LAYOUT UTILITIES — Standardized auto-fill grid patterns
    Mapping: minmax(150px-220px)=sm, minmax(240px-300px)=md, minmax(320px-400px)=lg
-   Audit: 3xl (1600px) and 4xl (1920px) breakpoints are defined in tailwind.config.js and actively used in 0 .vue files.
+   AUT-25: 3xl (1600px) and 4xl (1920px) breakpoints used in MonitorView.vue (.monitor-card-grid scoped overrides).
    ═══════════════════════════════════════════════════════════════════════════ */
 .grid-auto-sm { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
 .grid-auto-md { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }

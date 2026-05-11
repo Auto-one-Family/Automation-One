@@ -1,7 +1,7 @@
 # Docker-Infrastruktur Referenz - AutomationOne
 
-**Version:** 2.4
-**Datum:** 2026-04-10
+**Version:** 2.2
+**Datum:** 2026-03-10
 **Zweck:** Vollstaendige Referenz fuer Docker-Stack Architektur und Befehle
 
 ---
@@ -59,8 +59,6 @@
 | shared-infra-net | bridge | External: muss VOR `docker compose up` existieren |
 
 **Voraussetzung:** `docker network create shared-infra-net` (einmalig, wird nicht automatisch erstellt).
-
-**Windows (optional):** `powershell -ExecutionPolicy Bypass -File scripts/windows/ensure-dev-prerequisites.ps1` im Projektroot legt das Netzwerk an und erstellt `.env` aus `.env.example` nur wenn noch keine `.env` existiert (siehe `AGENTS.md`).
 
 **Service-Discovery:** Alle Services erreichen sich via Container-Name (z.B. `postgres:5432`).
 
@@ -365,25 +363,6 @@ services:
 **Zugang:** http://localhost:5050
 **Start:** `make devtools-up`
 
-### 5.6 Monitoring-Profil: Triage Klasse B (Observability) vs. Klasse A (Produkt)
-
-**Zweck:** Meldungen aus **Grafana**, **Alloy** oder **cAdvisor** duerfen **nicht** als ESP-/MQTT-**Root-Cause** gewertet werden, wenn der Kontext Collector-, Provisioning- oder Host-Lifecycle ist. Ausfuehrliche Einordnung und Tabellen: `docs/analysen/IST-docker-log-triage-observability-signal-vs-noise-2026-04-09.md` (Abschnitte 3–4), Incident `INC-2026-04-09-dockerlog-obs-triage` (`INCIDENT-LAGEBILD.md` Abschnitt 2, `CORRELATION-MAP.md` Kette B).
-
-| Quelle | Typische Situation | Klasse | Hinweis |
-|--------|-------------------|--------|---------|
-| Grafana | Warnungen zu optionalem Provisioning unter `/etc/grafana/provisioning/` (z. B. erwarteter `plugins/`-Pfad; im Repo vorhanden: `alerting/`, `dashboards/`, `datasources/` — **kein** Ordner `plugins/`) | **B** | Ops/Betriebslaerm; siehe IST §3 und §4.1 |
-| Alloy | „No such container“ / Tailer auf **alter** Container-ID nach Recreate, `prune` oder entfernten Containern | **B** | Deploy-Lifecycle; ggf. Alloy neu starten — siehe IST §3 |
-| cAdvisor | DMI- / `machine-id`-Hinweise (insbesondere Windows-Host) | **B** | Haeufig erwartbar; Compose bindet `/etc/machine-id` wo moeglich — siehe IST §3–4 |
-
-**Runbook bei Stack-Updates (Monitoring-Profil `monitoring`):**
-
-1. Status: `docker compose ps` oder `docker compose --profile monitoring ps` (bzw. `make monitor-status`).
-2. Logs gezielt: `docker compose logs -f --tail=100 alloy` / `grafana` (kein flaches „ERROR“-Screening als Firmware-Beweis).
-3. Bei wiederkehrenden Alloy-Tailer-Fehlern auf nicht mehr existente Container-IDs: `docker compose restart alloy` (Service `alloy`, Container `automationone-alloy`) **oder** sauber `docker compose --profile monitoring down` und danach `docker compose --profile monitoring up -d`.
-4. **Nicht** als Firmware-Fix oder MQTT-Vertragsaenderung verkaufen — echte Produktspur ist **Klasse A** (z. B. MQTT `…/system/error`, Handler `error_handler`, feste Codes wie **3016**).
-
-**Optionaler Repo-Folgeschritt (nur evidenzbasiert):** Leerer Ordner `docker/grafana/provisioning/plugins/` mit `.gitkeep` — nur wenn dieselbe Grafana-Logzeile wiederholt stoert **und** nach Skill `verify-plan` sowie Branch `auto-debugger/work`; Default bleibt **Doku-first** (IST §4.1). Keine Compose-Aenderung aus reiner Spekulation.
-
 ---
 
 ## 6. Backup & Recovery
@@ -528,7 +507,6 @@ docker volume rm automationone-postgres-data
 | 2.0 | 2026-03-02 | Alloy Healthcheck korrigiert: `bash TCP check` statt `wget /-/ready` (kein wget im Alloy-Image) |
 | 2.1 | 2026-03-02 | Alloy Pipeline v4.7: Level-Normalisierung (uppercase) für loki/mqtt-broker/el-frontend, 3 Drop-Filter für query-stats Noise, SM-Beschreibung ergänzt |
 | 2.2 | 2026-03-10 | Fix-T: postgresql-client-16 (PGDG) im Dockerfile, Backup Bind-Mount `./backups:/app/backups` |
-| 2.4 | 2026-04-10 | Section 5.6: Triage Klasse B vs. A (Observability vs. Produkt), Runbook Alloy/Grafana, Verweis IST-Docker-Log-Triage / Incident dockerlog-obs-triage |
 
 ---
 

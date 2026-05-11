@@ -10,12 +10,8 @@ static const char* PQ_TAG = "SYNC";
 QueueHandle_t g_publish_queue = NULL;
 
 // AUT-55: Backpressure telemetry counters (atomic — written from Core 1, read from Core 0)
-// AUT-134 PKG-03: g_pq_oversize_skip_count tracks payloads rejected by the enqueue
-// guard (size >= PUBLISH_PAYLOAD_MAX_LEN). Kept separate from g_pq_drop_count so
-// heartbeat-oversize regressions are observable without conflating with queue-full.
-static std::atomic<uint32_t> g_pq_shed_count{0};           // Non-critical proactively shed
-static std::atomic<uint32_t> g_pq_drop_count{0};           // Dropped because queue completely full
-static std::atomic<uint32_t> g_pq_oversize_skip_count{0};  // Rejected by oversize guard at enqueue
+static std::atomic<uint32_t> g_pq_shed_count{0};   // Non-critical proactively shed
+static std::atomic<uint32_t> g_pq_drop_count{0};   // Dropped because queue completely full
 static std::atomic<uint8_t>  g_pq_high_watermark{0};
 static std::atomic<bool>     g_pq_paused_for_announce_ack{false};
 static std::atomic<uint32_t> g_pq_resume_guard_deadline_ms{0};
@@ -80,22 +76,14 @@ void initPublishQueue() {
 // ============================================
 // AUT-55: getPublishQueuePressureStats
 // ============================================
-// AUT-134 PKG-03: increment shared oversize-skip counter from outside this
-// translation unit (e.g. heartbeat builder on Core 0 that rejects before
-// reaching queuePublish()). Centralises the telemetry knob.
-void noteHeartbeatOversizeSkip() {
-    g_pq_oversize_skip_count.fetch_add(1);
-}
-
 PublishQueuePressureStats getPublishQueuePressureStats() {
     PublishQueuePressureStats stats = {};
     if (g_publish_queue != NULL) {
         stats.fill_level = static_cast<uint8_t>(uxQueueMessagesWaiting(g_publish_queue));
     }
-    stats.high_watermark      = g_pq_high_watermark.load();
-    stats.shed_count          = g_pq_shed_count.load();
-    stats.drop_count          = g_pq_drop_count.load();
-    stats.oversize_skip_count = g_pq_oversize_skip_count.load();
+    stats.high_watermark = g_pq_high_watermark.load();
+    stats.shed_count     = g_pq_shed_count.load();
+    stats.drop_count     = g_pq_drop_count.load();
     return stats;
 }
 
@@ -165,19 +153,13 @@ bool queuePublish(const char* topic,
     size_t topic_len = strlen(topic);
     size_t payload_len = strlen(payload);
     if (topic_len >= PUBLISH_TOPIC_MAX_LEN || payload_len >= PUBLISH_PAYLOAD_MAX_LEN) {
-        // AUT-134 PKG-03: count oversize-skip distinctly from queue-full (drop_count).
-        // The oversize lane never re-enqueues, never retries, and never triggers a
-        // queue-full storm — it is a single LOG_W per occurrence plus a counter.
-        g_pq_oversize_skip_count.fetch_add(1);
-        LOG_W(PQ_TAG, "[SYNC] Publish rejected (oversize) topic_len=" + String((uint32_t)topic_len) +
-              " payload_len=" + String((uint32_t)payload_len) +
-              " limit=" + String((uint32_t)PUBLISH_PAYLOAD_MAX_LEN));
-        // Only build intent_outcome for the critical lane — extracting metadata from
-        // an oversize payload otherwise wastes heap on a path we are about to drop.
+        LOG_E(PQ_TAG, "[SYNC] Publish rejected (oversize) topic_len=" + String((uint32_t)topic_len) +
+              " payload_len=" + String((uint32_t)payload_len));
+        IntentMetadata oversize_meta = extractIntentMetadataFromPayload(payload, "pub");
+        if (metadata != nullptr) {
+            oversize_meta = *metadata;
+        }
         if (critical) {
-            IntentMetadata oversize_meta = (metadata != nullptr)
-                ? *metadata
-                : extractIntentMetadataFromPayload(payload, "pub");
             publishIntentOutcome("publish",
                                  oversize_meta,
                                  "failed",

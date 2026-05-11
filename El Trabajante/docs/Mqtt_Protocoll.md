@@ -212,8 +212,7 @@ Der Server akzeptiert folgende Feld-Alternativen für Backward-Compatibility:
 ```json
 {
   "command": "measure",                  // Currently only "measure" supported
-  "request_id": "req_12345",             // Optional: Request ID for tracking response
-  "timeout_ms": 5000                    // Optional: 1–60000, Default 5000 (Messdauer-Guard)
+  "request_id": "req_12345"              // Optional: Request ID for tracking response
 }
 ```
 
@@ -225,10 +224,9 @@ Der Server akzeptiert folgende Feld-Alternativen für Backward-Compatibility:
 **ESP32-Verhalten:**
 1. Empfängt Command
 2. Parst GPIO aus Topic
-3. Führt `sensorManager.triggerManualMeasurement(gpio, timeout_ms)` aus (Timeout aus Payload oder Default)
-4. Messblock serialisiert mit `g_sensor_mutex` gegen `performAllMeasurements` (bounded wait; bei Timeout `reason_code` = `MUTEX_TIMEOUT` in der Response)
-5. Sendet Response (wenn `request_id` vorhanden), inkl. `measurement_ok`, `publish_ok`, `timeout`, `reason_code`, `quality`, `sensor_type`, `raw`
-6. Publiziert Messwert via reguläres `/data` Topic (wenn Messung und Publish erfolgreich)
+3. Führt `sensorManager.triggerManualMeasurement(gpio)` aus
+4. Sendet Response (wenn `request_id` vorhanden)
+5. Publiziert Messwert via reguläres `/data` Topic
 
 ---
 
@@ -242,26 +240,16 @@ Der Server akzeptiert folgende Feld-Alternativen für Backward-Compatibility:
 **Module:** `main.cpp::handleSensorCommand()`
 **TopicBuilder:** `TopicBuilder::buildSensorResponseTopic(gpio)`
 
-**Payload-Schema (Minimal; voll siehe `main.cpp` wenn `request_id` im Command gesetzt):**
+**Payload-Schema:**
 ```json
 {
   "request_id": "req_12345",             // Echo of original request_id
   "gpio": 4,                             // GPIO pin
   "command": "measure",                  // Executed command
   "success": true,                       // true if measurement succeeded
-  "measurement_ok": true,
-  "publish_ok": true,
-  "timeout": false,
-  "reason_code": "NONE",
-  "quality": "good",
-  "sensor_type": "moisture",
-  "raw": 2150,
-  "ts": 1735818000,
-  "seq": 42
+  "ts": 1735818000                       // Timestamp (Unix seconds)
 }
 ```
-
-Zusätzlich optional: `intent_id`, `correlation_id`, `ttl_ms`. `reason_code` z. B. `MUTEX_TIMEOUT`, wenn `g_sensor_mutex` nicht rechtzeitig erworben wurde. **God-Kaiser** (`CalibrationResponseHandler`): Kalibrier-Livepfad per WebSocket nutzt **keinen** Ersatz aus dem letzten `sensor_data`-Datensatz, wenn `raw`/`raw_value` fehlt (siehe `.claude/reference/api/MQTT_TOPICS.md` §1.4).
 
 ---
 
@@ -310,7 +298,7 @@ Zusätzlich optional: `intent_id`, `correlation_id`, `ttl_ms`. `reason_code` z. 
 
 **QoS:** 0 **Retain:** false
 
-**Aktivierung:** Compile-Flag `ENABLE_METRICS_SPLIT` (kanonisch in `src/config/feature_flags.h` definiert; seit AUT-285 in `esp32_dev` nicht mehr gesetzt — standardmäßig inaktiv). Ohne Flag bleiben die Zähler/Queue-Stats im Core-`system/heartbeat`-JSON (siehe `#ifndef ENABLE_METRICS_SPLIT` in `publishHeartbeat()`).
+**Aktivierung:** Compile-Flag `ENABLE_METRICS_SPLIT` (z. B. in `esp32_dev`). Ohne Flag bleiben die Zähler/Queue-Stats im Core-`system/heartbeat`-JSON (siehe `#ifndef ENABLE_METRICS_SPLIT` in `publishHeartbeat()`).
 
 **Modul:** `services/communication/mqtt_client.cpp` → `publishHeartbeatMetrics()` (wird am Ende von `publishHeartbeat()` aufgerufen). **TopicBuilder:** `TopicBuilder::buildSystemHeartbeatMetricsTopic()`.
 
@@ -2101,7 +2089,7 @@ mosquitto_pub -h localhost \
 **Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/zone/assign`
 
 **QoS:** 1 (at least once)
-**Handler:** `src/main.cpp:handleZoneAssignOnCore1()` (AUT-285 M3: via `g_config_update_queue` auf Core-1 dispatcht; WP1 Zone-Removal + WP5 Validation)
+**Handler:** `src/main.cpp:1243-1399` (Zone Assignment Handler mit WP1 Zone-Removal + WP5 Validation)
 **TopicBuilder:** `topic_builder.cpp:buildZoneAssignTopic()` und `buildZoneAckTopic()` (Zeile 229, 237)
 
 **Kaiser-ID Bedeutung:**

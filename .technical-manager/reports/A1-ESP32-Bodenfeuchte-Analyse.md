@@ -571,7 +571,7 @@ static const uint8_t SENSOR_CMD_QUEUE_SIZE = 10;
 static const uint8_t SENSOR_CMD_QUEUE_SIZE = 20;
 ```
 **Test:** Stress-Test mit 15 parallelen `measure`-Commands → alle sollen queued werden
-**Verifikation:** `pio run -e esp32_dev` erfolgreich (Ziel-Board-Env laut `platformio.ini`)
+**Verifikation:** `pio run -e seeed` erfolgreich
 
 ---
 

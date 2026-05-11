@@ -122,7 +122,7 @@ Phase 5 (Gate: alles gruen):
 | Fr | Firmware-Verifikation | S-P4 (Abschluss) | F-P1 Tests |
 
 **Gate Woche 1:**
-- `pio run -e esp32_dev` gruen (WROOM; Seeed XIAO: `seeed_xiao_esp32c3`)
+- `pio run -e seeed` gruen
 - `pytest --tb=short -q` gruen (Server)
 - ESP32 Command-Queue 20, Retry aktiv, Timeout-Guard aktiv
 
@@ -157,7 +157,7 @@ Phase 5 (Gate: alles gruen):
 
 | Bereich | Befehl | Wann |
 |---------|--------|------|
-| ESP32 Firmware | `cd "El Trabajante" && pio run -e esp32_dev` (bzw. `seeed_xiao_esp32c3`) | Nach E-P1..P3, E-P8 |
+| ESP32 Firmware | `cd "El Trabajante" && pio run -e seeed` | Nach E-P1..P3, E-P8 |
 | Server Backend | `cd "El Servador/god_kaiser_server" && pytest --tb=short -q` | Nach jedem S-Paket |
 | Server Lint | `cd "El Servador/god_kaiser_server" && ruff check .` | Nach jedem S-Paket |
 | Frontend Build | `cd "El Frontend" && npm run build` | Nach jedem F-Paket |

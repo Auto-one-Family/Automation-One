@@ -1,13 +1,7 @@
 #include "config_response.h"
 
-#include <atomic>
-#include <cstdio>
-
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "CFGRESP";
-
-static std::atomic<uint32_t> s_cfgresp_mqtt_ok{0};
-static std::atomic<uint32_t> s_cfgresp_mqtt_fail{0};
 
 bool ConfigResponseBuilder::publishSuccess(ConfigType type,
                                            uint8_t count,
@@ -56,21 +50,11 @@ bool ConfigResponseBuilder::publish(const ConfigResponsePayload& payload) {
     if (type_str == nullptr) type_str = "unknown";
     if (status_str == nullptr) status_str = "unknown";
 
-    const uint32_t ok_n = s_cfgresp_mqtt_ok.fetch_add(1) + 1;
-    const uint32_t fail_n = s_cfgresp_mqtt_fail.load();
     char log_buf[128];
-    snprintf(log_buf, sizeof(log_buf),
-             "[CFGRESP] mqtt_ok=%lu fail=%lu [%s] st=%s cnt=%u",
-             static_cast<unsigned long>(ok_n), static_cast<unsigned long>(fail_n), type_str, status_str,
-             static_cast<unsigned>(payload.count));
+    snprintf(log_buf, sizeof(log_buf), "ConfigResponse published [%s] status=%s", type_str, status_str);
     LOG_I(TAG, log_buf);
   } else {
-    const uint32_t fail_n = s_cfgresp_mqtt_fail.fetch_add(1) + 1;
-    const uint32_t ok_n = s_cfgresp_mqtt_ok.load();
-    char log_buf[120];
-    snprintf(log_buf, sizeof(log_buf), "[CFGRESP] publish FAIL #%lu ok=%lu topic=config_response",
-             static_cast<unsigned long>(fail_n), static_cast<unsigned long>(ok_n));
-    LOG_E(TAG, log_buf);
+    LOG_E(TAG, "ConfigResponse publish failed for topic: " + topic);
   }
 
   return published;
@@ -145,21 +129,13 @@ bool ConfigResponseBuilder::publishWithFailures(
     if (type_str == nullptr) type_str = "unknown";
     if (status_str == nullptr) status_str = "unknown";
 
-    const uint32_t ok_n = s_cfgresp_mqtt_ok.fetch_add(1) + 1;
-    const uint32_t fail_n = s_cfgresp_mqtt_fail.load();
     char log_buf[160];
     snprintf(log_buf, sizeof(log_buf),
-             "[CFGRESP] mqtt_ok=%lu fail=%lu [%s] st=%s ok_cnt=%u fail_cnt=%u",
-             static_cast<unsigned long>(ok_n), static_cast<unsigned long>(fail_n), type_str, status_str,
-             static_cast<unsigned>(success_count), static_cast<unsigned>(fail_count));
+             "ConfigResponse published [%s] status=%s success=%u failed=%u",
+             type_str, status_str, success_count, fail_count);
     LOG_I(TAG, log_buf);
   } else {
-    const uint32_t fail_n = s_cfgresp_mqtt_fail.fetch_add(1) + 1;
-    const uint32_t ok_n = s_cfgresp_mqtt_ok.load();
-    char log_buf[120];
-    snprintf(log_buf, sizeof(log_buf), "[CFGRESP] publish FAIL #%lu ok=%lu aggr type=sensor",
-             static_cast<unsigned long>(fail_n), static_cast<unsigned long>(ok_n));
-    LOG_E(TAG, log_buf);
+    LOG_E(TAG, "ConfigResponse publish failed for topic: " + topic);
   }
 
   return published;

@@ -3,9 +3,7 @@
 from src.services.calibration_payloads import (
     build_canonical_calibration_result,
     canonicalize_calibration_data,
-    resolve_calibration_for_processor,
 )
-from src.sensors.sensor_libraries.active.moisture import MoistureSensorProcessor
 
 
 def test_canonicalize_calibration_data_accepts_none_for_legacy_nulls():
@@ -47,47 +45,3 @@ def test_build_canonical_calibration_result_produces_strict_write_shape():
     assert set(payload.keys()) == {"method", "points", "derived", "metadata"}
     assert payload["metadata"]["schema_version"] == 1
     assert payload["metadata"]["source"] == "unit-test"
-
-
-def test_resolve_calibration_for_processor_unwraps_derived():
-    canonical = {
-        "method": "moisture_2point",
-        "points": [],
-        "derived": {"type": "moisture_2point", "dry_value": 3100.0, "wet_value": 1600.0},
-        "metadata": {"schema_version": 1},
-    }
-    flat = resolve_calibration_for_processor(canonical)
-    assert flat == {"type": "moisture_2point", "dry_value": 3100.0, "wet_value": 1600.0}
-
-
-def test_resolve_calibration_for_processor_returns_none_for_empty_canonical_derived():
-    canonical = {
-        "method": "moisture_2point",
-        "points": [],
-        "derived": {},
-        "metadata": {},
-    }
-    assert resolve_calibration_for_processor(canonical) is None
-
-
-def test_resolve_calibration_for_processor_passes_through_flat_legacy():
-    legacy = {"dry_value": 3000.0, "wet_value": 1400.0}
-    assert resolve_calibration_for_processor(legacy) == legacy
-
-
-def test_moisture_processor_uses_canonical_calibration_via_resolver():
-    """Regression: Pi-Enhanced must see dry/wet inside ``derived`` after session apply."""
-    canonical = build_canonical_calibration_result(
-        method="moisture_2point",
-        points=[{"raw": 3100.0, "reference": 0.0}, {"raw": 1600.0, "reference": 100.0}],
-        derived={
-            "type": "moisture_2point",
-            "dry_value": 3100.0,
-            "wet_value": 1600.0,
-        },
-        source="test",
-    )
-    proc_cal = resolve_calibration_for_processor(canonical)
-    result = MoistureSensorProcessor().process(raw_value=3100.0, calibration=proc_cal)
-    assert result.metadata.get("calibrated") is True
-    assert result.value == 0.0

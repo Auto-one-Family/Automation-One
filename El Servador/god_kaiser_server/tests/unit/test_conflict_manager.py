@@ -32,16 +32,10 @@ async def test_conflict_manager_broadcasts_structured_arbitration_event():
     assert second_conflict is not None
     assert second_conflict.trace_id
 
-    # Two WS broadcasts per conflict: conflict.arbitration (legacy) + rule_conflict_resolved (AUT-114).
-    assert websocket_manager.broadcast.await_count >= 2
-    first_call_args = websocket_manager.broadcast.await_args_list[0].args
-    ws_event_type, ws_payload = first_call_args
+    websocket_manager.broadcast.assert_awaited()
+    ws_event_type, ws_payload = websocket_manager.broadcast.await_args.args
     assert ws_event_type == "conflict.arbitration"
     assert ws_payload["trace_id"] == second_conflict.trace_id
     assert ws_payload["arbitration_mode"] == "first_wins"
     assert ws_payload["winner_rule_id"] == "rule-winner"
     assert ws_payload["loser_rule_id"] == "rule-loser"
-    # AUT-114: structured telemetry event emitted last
-    last_call_args = websocket_manager.broadcast.await_args_list[-1].args
-    assert last_call_args[0] == "rule_conflict_resolved"
-    assert last_call_args[1]["winning_rule_id"] == "rule-winner"

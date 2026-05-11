@@ -24,6 +24,36 @@ from ..core.resilience import (
     ServiceUnavailableError,
 )
 
+# AUT-342: asyncpg connection-failure exceptions do NOT inherit from
+# SQLAlchemy's OperationalError/InterfaceError in every code path
+# (e.g. CannotConnectNowError raised during pool acquire). Catch them
+# explicitly so the database circuit breaker is triggered uniformly.
+try:
+    from asyncpg.exceptions import (
+        CannotConnectNowError,
+        ConnectionDoesNotExistError,
+        ConnectionFailureError,
+    )
+
+    _ASYNC_PG_CONNECTION_ERRORS: tuple[type[BaseException], ...] = (
+        CannotConnectNowError,
+        ConnectionDoesNotExistError,
+        ConnectionFailureError,
+    )
+except ImportError:
+    # asyncpg may be absent in test environments using SQLite.
+    _ASYNC_PG_CONNECTION_ERRORS = ()
+
+# Combined tuple consumed by every except-block that should treat asyncpg
+# connection failures as resilient-session failures (circuit-breaker trip
+# + retry path). Kept module-level so future except-blocks reuse the same
+# canonical list and stay in sync.
+_DB_CONNECTION_ERRORS: tuple[type[BaseException], ...] = (
+    OperationalError,
+    InterfaceError,
+    *_ASYNC_PG_CONNECTION_ERRORS,
+)
+
 logger = get_logger(__name__)
 
 # Database circuit breaker instance
@@ -196,7 +226,7 @@ async def init_db(max_retries: int = 5, retry_delay: float = 2.0) -> None:
 
             logger.info("Database initialization complete")
             return
-        except (OperationalError, InterfaceError, OSError) as e:
+        except (*_DB_CONNECTION_ERRORS, OSError) as e:
             if attempt < max_retries:
                 wait = retry_delay * (2 ** (attempt - 1))
                 logger.warning(
@@ -290,8 +320,11 @@ async def resilient_session() -> AsyncGenerator[AsyncSession, None]:
             result = await session.execute(query)
 
     Raises:
-        ServiceUnavailableError: If circuit breaker is OPEN
-        OperationalError: If database operation fails
+        ServiceUnavailableError: If circuit breaker is OPEN before session acquire.
+        Exception: Connection failures matching `_DB_CONNECTION_ERRORS` (SQLAlchemy
+            OperationalError/InterfaceError plus asyncpg connection errors per AUT-342)
+            are re-raised after circuit-breaker failure recording; other exceptions
+            roll back without counting toward the breaker.
     """
     global _db_circuit_breaker
 
@@ -318,11 +351,23 @@ async def resilient_session() -> AsyncGenerator[AsyncSession, None]:
             # Record success on normal exit
             if _db_circuit_breaker:
                 _db_circuit_breaker.record_success()
-        except (OperationalError, InterfaceError) as e:
-            # Database connection errors - record failure
+        except _DB_CONNECTION_ERRORS as e:
+            # AUT-342: Database connection errors - record failure.
+            # asyncpg.CannotConnectNowError / ConnectionDoesNotExistError /
+            # ConnectionFailureError are NOT auto-wrapped to
+            # OperationalError in every path (raised during pool acquire),
+            # so they must be listed explicitly to trip the circuit breaker.
             if _db_circuit_breaker:
                 _db_circuit_breaker.record_failure()
-            await session.rollback()
+            try:
+                await session.rollback()
+            except Exception as rollback_err:
+                # Connection is already broken - rollback may itself raise.
+                # Never mask the original failure with a rollback exception.
+                logger.debug(
+                    "[resilience] Rollback after connection error failed: %s",
+                    rollback_err,
+                )
             logger.error(f"[resilience] Database operation failed: {e}")
             raise
         except Exception:
