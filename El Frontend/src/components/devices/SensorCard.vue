@@ -287,7 +287,7 @@ let measureTriggerTime = 0
 let preMeasureTriggerValue: number | null = null
 let preMeasureLastRead: string | null = null
 let measureTimeoutId: ReturnType<typeof setTimeout> | null = null
-const { success: toastSuccess, error: toastError } = useToast()
+const { success: toastSuccess, error: toastError, warning: toastWarning } = useToast()
 
 function clearMeasureTimeout(): void {
   if (measureTimeoutId !== null) {
@@ -353,9 +353,17 @@ async function triggerMeasure(): Promise<void> {
         measureState.value = 'idle'
       }, 2000)
     }, 20_000)
-  } catch {
+  } catch (err: unknown) {
     clearMeasureTimeout()
     isMeasuring.value = false
+    // HTTP 409: MeasurementBusyError — sensor cooldown active
+    const axiosErr = err as { response?: { status?: number; data?: { retry_after_seconds?: number } } }
+    if (axiosErr?.response?.status === 409) {
+      const retryAfter = axiosErr.response.data?.retry_after_seconds ?? 10
+      toastWarning(`Sensor misst gerade — bitte ${retryAfter}s warten`)
+      measureState.value = 'idle'
+      return
+    }
     measureState.value = 'error'
     measureTriggerTime = 0
     preMeasureTriggerValue = null
