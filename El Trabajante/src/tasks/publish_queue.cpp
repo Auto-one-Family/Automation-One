@@ -126,17 +126,17 @@ static void updateHighWatermark(uint8_t current_fill) {
 }
 
 // ============================================
-// queuePublish
+// tryQueuePublish
 // ============================================
-bool queuePublish(const char* topic,
-                  const char* payload,
-                  uint8_t qos,
-                  bool retain,
-                  bool critical,
-                  const IntentMetadata* metadata) {
+PublishQueueEnqueueResult tryQueuePublish(const char* topic,
+                                          const char* payload,
+                                          uint8_t qos,
+                                          bool retain,
+                                          bool critical,
+                                          const IntentMetadata* metadata) {
     if (g_publish_queue == NULL) {
         LOG_W(PQ_TAG, "Publish queue not initialised, dropping: " + String(topic != nullptr ? topic : "<null-topic>"));
-        return false;
+        return PublishQueueEnqueueResult::Failed;
     }
 
     // PKG-16 (INC-2026-04-11-ea5484): Null-safety defensive. Under OOM the
@@ -147,7 +147,7 @@ bool queuePublish(const char* topic,
         g_pq_drop_count.fetch_add(1);
         LOG_W(PQ_TAG, "[SYNC] Publish rejected (null topic/payload) — likely upstream OOM");
         errorTracker.logApplicationError(ERROR_TASK_QUEUE_FULL, "Publish null topic/payload (OOM)");
-        return false;
+        return PublishQueueEnqueueResult::Failed;
     }
 
     size_t topic_len = strlen(topic);
@@ -167,7 +167,7 @@ bool queuePublish(const char* topic,
                                  "Critical publish payload exceeds queue envelope",
                                  true);
         }
-        return false;
+        return PublishQueueEnqueueResult::Failed;
     }
 
     // AUT-55: Check queue fill level for backpressure shedding
@@ -178,7 +178,7 @@ bool queuePublish(const char* topic,
         g_pq_shed_count.fetch_add(1);
         LOG_D(PQ_TAG, "[SYNC] Backpressure shed (fill=" + String(fill) +
               "/" + String(PUBLISH_QUEUE_SIZE) + "): " + String(topic));
-        return false;
+        return PublishQueueEnqueueResult::ShedBackpressure;
     }
 
     PublishRequest req;
@@ -200,7 +200,7 @@ bool queuePublish(const char* topic,
     TickType_t wait_ticks = critical ? pdMS_TO_TICKS(20) : 0;
     if (xQueueSend(g_publish_queue, &req, wait_ticks) != pdTRUE) {
         if (critical && reserveSlotForCriticalPublish(&req)) {
-            return true;
+            return PublishQueueEnqueueResult::Enqueued;
         }
 
         g_pq_drop_count.fetch_add(1);
@@ -220,10 +220,10 @@ bool queuePublish(const char* topic,
                       "[SYNC] intent_outcome queue-full drop — skipping recursive failure outcome");
             }
         }
-        return false;
+        return PublishQueueEnqueueResult::Failed;
     }
 
     // Update HWM after successful enqueue (fill is now +1)
     updateHighWatermark(fill + 1);
-    return true;
+    return PublishQueueEnqueueResult::Enqueued;
 }

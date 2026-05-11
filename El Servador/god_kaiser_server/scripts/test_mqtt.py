@@ -6,7 +6,6 @@ Helps diagnose connection issues.
 """
 
 import sys
-import os
 import time
 from pathlib import Path
 
@@ -135,7 +134,7 @@ def check_env_file():
         for var in mqtt_vars:
             if var in content:
                 # Show value but mask password
-                line = [l for l in content.split('\n') if l.startswith(var)]
+                line = [ln for ln in content.split('\n') if ln.startswith(var)]
                 if line:
                     value = line[0].split('=', 1)[1] if '=' in line[0] else ''
                     if 'PASSWORD' in var and value:

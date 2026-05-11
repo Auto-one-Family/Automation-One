@@ -50,6 +50,11 @@ struct ActuatorConfig {
   uint8_t default_pwm = 0;         // Desired PWM fallback (0-255)
   bool default_state = false;      // Failsafe state if config lost
 
+  // AUT-66: Per-actuator fail-safe policy on MQTT disconnect.
+  // When has_fail_safe_override=false, policy is derived from critical flag.
+  bool fail_safe_on_disconnect = true;   // default: safe-off
+  bool has_fail_safe_override  = false;  // false = no server override, derive from critical
+
   // Live state tracking (kept in RAM only, not persisted in Phase 5)
   bool current_state = false;      // Digital ON/OFF
   uint8_t current_pwm = 0;         // PWM duty

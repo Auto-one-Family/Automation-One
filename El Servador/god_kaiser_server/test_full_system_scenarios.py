@@ -543,7 +543,7 @@ class TestGreenhouseAutomation:
         # Logic
         m = moisture["data"]["raw_value"]
         t = temp["data"]["raw_value"]
-        h = humidity["data"]["raw_value"]
+        _h = humidity["data"]["raw_value"]
         
         # Bewässerung
         if m < 2000:

@@ -101,7 +101,7 @@ class Publisher:
             # Stable contract key for command_intents + firmware IntentMetadata (intent_contract.cpp).
             payload["intent_id"] = correlation_id
 
-        qos = constants.QOS_ACTUATOR_COMMAND  # QoS 2 (Exactly once)
+        qos = constants.QOS_ACTUATOR_COMMAND  # QoS 1 (At least once) — AUT-331
 
         logger.info(
             f"Publishing actuator command to {esp_id} GPIO {gpio}: {command} (value={value})"
@@ -183,7 +183,7 @@ class Publisher:
             "timestamp": int(time.time()),
         }
 
-        qos = constants.QOS_CONFIG  # QoS 2 (Exactly once)
+        qos = constants.QOS_CONFIG  # QoS 1 (At least once) — AUT-331
 
         logger.info(f"Publishing sensor config to {esp_id} GPIO {gpio}")
         return self._publish_with_retry(topic, payload, qos, retry)
@@ -213,7 +213,7 @@ class Publisher:
             "timestamp": int(time.time()),
         }
 
-        qos = constants.QOS_CONFIG  # QoS 2 (Exactly once)
+        qos = constants.QOS_CONFIG  # QoS 1 (At least once) — AUT-331
 
         logger.info(f"Publishing actuator config to {esp_id} GPIO {gpio}")
         return self._publish_with_retry(topic, payload, qos, retry)
@@ -254,7 +254,7 @@ class Publisher:
             "timestamp": int(time.time()),
         }
 
-        qos = constants.QOS_CONFIG  # QoS 2 (Exactly once)
+        qos = constants.QOS_CONFIG  # QoS 1 (At least once) — AUT-331
 
         # Extract counts for logging
         sensor_count = len(config.get("sensors", []))
@@ -320,7 +320,7 @@ class Publisher:
             "timestamp": int(time.time()),
         }
 
-        qos = constants.QOS_CONFIG  # QoS 2 (Exactly once)
+        qos = constants.QOS_CONFIG  # QoS 1 (At least once) — AUT-331
 
         logger.info(f"Publishing system command to {esp_id}: {normalized_command}")
         return self._publish_with_retry(topic, payload, qos, retry)

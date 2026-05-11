@@ -296,7 +296,7 @@ static void publishActuatorAdmissionRejectedResponse(const String& topic,
   }
   mqttClient.safePublish(String(TopicBuilder::buildActuatorResponseTopic(static_cast<uint8_t>(gpio))),
                          response_payload,
-                         1);
+                         0);
 }
 
 static bool hasRevocationDeleteHint(const String& raw_value) {
@@ -599,11 +599,12 @@ static void publishConfigPendingTransitionEvent(const char* event_type,
 #ifndef MQTT_USE_PUBSUBCLIENT
     // [INC-EA5484] AUT-56: Route lifecycle through publish queue for retry resilience.
     const char* lifecycle_topic = TopicBuilder::buildIntentOutcomeLifecycleTopic();
-    if (!queuePublish(lifecycle_topic, payload.c_str(), 1, false, true, nullptr)) {
+    // AUT-344: lifecycle is observability-only; must not consume critical publish-queue slots.
+    if (!queuePublish(lifecycle_topic, payload.c_str(), 0, false, false, nullptr)) {
       LOG_W(TAG, "[INC-EA5484] Lifecycle transition enqueue failed: " + String(event_type));
     }
 #else
-    mqttClient.publish(TopicBuilder::buildIntentOutcomeLifecycleTopic(), payload, 1);
+    mqttClient.publish(TopicBuilder::buildIntentOutcomeLifecycleTopic(), payload, 0);
 #endif
   }
 }
@@ -659,13 +660,20 @@ void subscribeToAllTopics() {
   // Queue in priority order to avoid post-connect subscribe bursts on weak TCP windows.
   // Critical control-plane topics come first.
   mqttClient.queueSubscribe(TopicBuilder::buildSystemHeartbeatAckTopic(), 1, true);
-  mqttClient.queueSubscribe(TopicBuilder::buildConfigTopic(), 2, true);
-  mqttClient.queueSubscribe(TopicBuilder::buildSystemCommandTopic(), 2, true);
-  mqttClient.queueSubscribe(TopicBuilder::buildBroadcastEmergencyTopic(), 2, true);
+  // AUT-331 Fix#4: QoS 1 (was: 2). Server reduced QOS_CONFIG 2→1 (constants.py).
+  // QoS 2 subscribe + retained QoS-2 config messages from before Fix#4 would still
+  // generate PUBREC+PUBCOMP OUTBOX slots. QoS 1 subscribe caps delivery at QoS 1
+  // regardless of retained message QoS, eliminating residual OUTBOX pressure.
+  mqttClient.queueSubscribe(TopicBuilder::buildConfigTopic(), 1, true);
+  mqttClient.queueSubscribe(TopicBuilder::buildSystemCommandTopic(), 1, true);
+  mqttClient.queueSubscribe(TopicBuilder::buildBroadcastEmergencyTopic(), 2, true);  // kept: server publishes broadcast/emergency at QoS 2
 
   String actuator_wildcard = String(TopicBuilder::buildActuatorCommandTopic(0));
   actuator_wildcard.replace("/0/command", "/+/command");
-  mqttClient.queueSubscribe(actuator_wildcard, 2, true);
+  // AUT-331: QoS 1 (was: 2). Server also reduced to QoS 1 (constants.py QOS_ACTUATOR_COMMAND).
+  // QoS 2 delivery binds two OUTBOX slots per command (PUBREC + PUBCOMP); under rapid
+  // ON+OFF (<2s) this exhausts the 4096-byte OUTBOX alongside lifecycle publishes.
+  mqttClient.queueSubscribe(actuator_wildcard, 1, true);
 
   mqttClient.queueSubscribe(TopicBuilder::buildActuatorEmergencyTopic(), 1, true);
   mqttClient.queueSubscribe(TopicBuilder::buildZoneAssignTopic(), 1, true);
@@ -675,7 +683,7 @@ void subscribeToAllTopics() {
 
   String sensor_wildcard = String(TopicBuilder::buildSensorCommandTopic(0));
   sensor_wildcard.replace("/0/command", "/+/command");
-  mqttClient.queueSubscribe(sensor_wildcard, 2, false);
+  mqttClient.queueSubscribe(sensor_wildcard, 1, false);  // AUT-331: QoS 1 (was: 2)
 
   mqttClient.queueSubscribe(TopicBuilder::buildServerStatusTopic(), 1, false);  // SAFETY-P5: Server LWT (QoS 1)
 
@@ -1605,6 +1613,25 @@ void routeIncomingMessage(const char* t, const char* p) {
             serializeJson(response_doc, response);
             mqttClient.publish(system_command_topic + "/response", response);
             LOG_I(TAG, "Safe mode deactivated via command");
+        }
+        // ─── Force Safe State ─────────────────────────────────────────────────────
+        // AUT-66: Manual-Recovery — forces all actuators to safe state regardless of
+        // offline rules or fail_safe_on_disconnect policy.
+        else if (command == "force_safe_state") {
+            LOG_W(TAG, "=== FORCE_SAFE_STATE COMMAND RECEIVED ===");
+            if (actuatorManager.isInitialized()) {
+                actuatorManager.setAllActuatorsToSafeState();
+            }
+            DynamicJsonDocument response_doc(256);
+            response_doc["command"] = "force_safe_state";
+            response_doc["success"] = true;
+            response_doc["esp_id"]  = g_system_config.esp_id;
+            response_doc["ts"]      = (unsigned long)timeManager.getUnixTimestamp();
+            response_doc["seq"]     = mqttClient.getNextSeq();
+            String response;
+            serializeJson(response_doc, response);
+            mqttClient.publish(system_command_topic + "/response", response);
+            LOG_W(TAG, "force_safe_state: all actuators set to safe state");
         }
         // ─── Set Log Level ───────────────────────────────────────────────────
         else if (command == "set_log_level") {
@@ -4347,7 +4374,7 @@ SensorCommandExecutionResult handleSensorCommand(const String& topic, const Stri
         }
       }
 #endif
-      mqttClient.safePublish(response_topic, response_payload, 1, 2);
+      mqttClient.safePublish(response_topic, response_payload, 0, 2);
 
       LOG_D(TAG, "Sensor command response sent: " + response_payload);
     }

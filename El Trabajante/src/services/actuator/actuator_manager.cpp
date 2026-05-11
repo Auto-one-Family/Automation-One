@@ -618,15 +618,25 @@ void ActuatorManager::setUncoveredActuatorsToSafeState() {
                              "Actuator held ON — offline rule coverage active");
       }
     } else {
-      controlActuatorBinary(gpio, actuators_[i].config.default_state);
-      if (is_on) {
-        forced++;
-        LOG_W(TAG, "[SAFETY] GPIO " + String(gpio) +
-                   " safety_forced_off (no P4 rule" +
-                   String(actuators_[i].config.critical ? ", CRITICAL" : "") + ")");
-        publishActuatorAlert(gpio, "safety_forced_off",
-                             String("No offline rule — forced to default_state") +
-                             (actuators_[i].config.critical ? " (critical)" : ""));
+      // AUT-66: Respect per-actuator fail_safe_on_disconnect policy.
+      if (actuators_[i].config.fail_safe_on_disconnect) {
+        controlActuatorBinary(gpio, actuators_[i].config.default_state);
+        if (is_on) {
+          forced++;
+          LOG_W(TAG, "[SAFETY] GPIO " + String(gpio) +
+                     " safety_forced_off (fail_safe=true, no P4 rule" +
+                     String(actuators_[i].config.critical ? ", CRITICAL" : "") + ")");
+          publishActuatorAlert(gpio, "safety_forced_off",
+                               String("fail_safe=true, no offline rule"));
+          publishLatchedOffline(gpio, "safety_forced_off", is_on);
+        }
+      } else {
+        // fail_safe=false: keep last state
+        if (is_on) {
+          LOG_I(TAG, "[SAFETY] GPIO " + String(gpio) +
+                     " fail_safe=false, keeping last state at disconnect");
+          publishLatchedOffline(gpio, "offline_rule_hold", is_on);
+        }
       }
     }
   }
@@ -655,8 +665,8 @@ void ActuatorManager::processActuatorLoops() {
       actuators_[i].command_duration_end_ms = 0;
       actuators_[i].last_command_source = "firmware:auto_duration";
       controlActuatorBinary(actuators_[i].config.gpio, false);
+      // controlActuatorBinary already calls publishActuatorStatus on state change — no second call.
       actuators_[i].config = actuators_[i].driver->getConfig();
-      publishActuatorStatus(actuators_[i].config.gpio);
       continue;  // Skip further processing this iteration
     }
 
@@ -919,6 +929,18 @@ bool ActuatorManager::parseActuatorDefinition(const JsonObjectConst& obj,
     config.default_state = bool_value;
   }
 
+  // AUT-66: Server-configurable fail-safe policy on MQTT disconnect.
+  if (obj.containsKey("fail_safe_on_disconnect")) {
+    if (JsonHelpers::extractBool(obj, "fail_safe_on_disconnect", bool_value, true)) {
+      config.fail_safe_on_disconnect = bool_value;
+      config.has_fail_safe_override  = true;
+    }
+  } else {
+    // No server override: critical actuators → fail-safe; non-critical → hold
+    config.fail_safe_on_disconnect = config.critical;
+    config.has_fail_safe_override  = false;
+  }
+
   int default_pwm_value = 0;
   if (JsonHelpers::extractInt(obj, "default_pwm", default_pwm_value)) {
     default_pwm_value = constrain(default_pwm_value, 0, 255);
@@ -1037,9 +1059,11 @@ void ActuatorManager::publishActuatorStatus(uint8_t gpio) {
   actuator->config = actuator->driver->getConfig();
   String payload = buildStatusPayload(status, actuator->config);
   const char* topic = TopicBuilder::buildActuatorStatusTopic(gpio);
-  // Status is high-frequency telemetry. Keep QoS1, but avoid safePublish retry bursts
-  // under broker/outbox backpressure (AUT-55 pressure scenario).
-  mqttClient.publish(String(topic), payload, 1);
+  // AUT-326: QoS 0 — actuator status is supplementary telemetry, not a safety signal.
+  // AUT-54: Command execution is acknowledged on actuator/response + system/intent_outcome
+  // at QoS 0 (best-effort); critical failures still use NVS-backed intent_outcome replay.
+  // QoS 0 keeps status + outcome traffic out of the IDF QoS-1 OUTBOX (PUBACK expiry path).
+  mqttClient.publish(String(topic), payload, 0);
 }
 
 void ActuatorManager::publishAllActuatorStatus() {
@@ -1091,7 +1115,9 @@ void ActuatorManager::publishActuatorResponse(const ActuatorCommand& command,
                                               const String& message) {
   const char* topic = TopicBuilder::buildActuatorResponseTopic(command.gpio);
   String payload = buildResponsePayload(command, success, message);
-  mqttClient.safePublish(String(topic), payload, 1);
+  // AUT-54: QoS 0 — response is telemetry; QoS-1 OUTBOX + OUTBOX-expiry caused transport
+  // disconnects under slow PUBACK (field: ~11s after last command, AAAAA.md).
+  mqttClient.safePublish(String(topic), payload, 0);
 }
 
 void ActuatorManager::publishActuatorAlert(uint8_t gpio,
@@ -1114,5 +1140,6 @@ void ActuatorManager::publishActuatorAlert(uint8_t gpio,
   payload += "\"alert_type\":\"" + alert_type + "\",";
   payload += "\"message\":\"" + message + "\"";
   payload += "}";
-  mqttClient.safePublish(String(topic), payload, 1);
+  // AUT-54: QoS 0 — same OUTBOX/backpressure rationale as actuator/response.
+  mqttClient.safePublish(String(topic), payload, 0);
 }

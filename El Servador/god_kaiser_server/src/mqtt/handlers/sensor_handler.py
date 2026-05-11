@@ -280,6 +280,18 @@ class SensorDataHandler:
                     raw_value = float(payload.get("raw", payload.get("raw_value")))
                     # raw_mode defaults to True (ESP32 always works in raw mode)
                     raw_mode = payload.get("raw_mode", True)
+
+                    # AUT-327: EC ADC reads 0 on disconnected probe or power fault → drop before persist.
+                    # A raw ADC of 0 on an ESP32 12-bit ADC (range 0–4095) is physically implausible
+                    # for a connected EC probe and indicates a hardware fault, not a valid measurement.
+                    if sensor_type == "ec" and raw_mode and raw_value == 0.0:
+                        logger.warning(
+                            "[AUT-327] EC raw=0 dropped (disconnected probe?): esp_id=%s gpio=%s",
+                            payload.get("esp_id"),
+                            payload.get("gpio"),
+                        )
+                        return False
+
                     value = payload.get("value", 0.0)
                     quality = payload.get("quality", "unknown")
                     # PKG-HW-01: Ingest without matching sensor_configs row — not "good" path;
@@ -1009,7 +1021,7 @@ class SensorDataHandler:
     # auto-discovery so that very old readings are still excluded.
     _ATC_MAX_AGE = timedelta(minutes=5)
     _ATC_FRESH_AGE = timedelta(seconds=5)
-    _ATC_STALE_AGE = timedelta(seconds=60)
+    _ATC_STALE_AGE = timedelta(seconds=90)
 
     async def _try_get_atc_temperature(
         self,

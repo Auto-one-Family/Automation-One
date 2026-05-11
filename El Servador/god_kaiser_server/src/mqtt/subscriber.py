@@ -120,7 +120,7 @@ class Subscriber:
         - Actuator status: QoS 1 (at least once)
         - Heartbeat: QoS 0 (at most once - fire and forget)
         - Discovery: QoS 1 (at least once)
-        - Config Response: QoS 2 (exactly once)
+        - Config Response: QoS 2 (exactly once, ESP→Server direction)
 
         Returns:
             True if all subscriptions successful

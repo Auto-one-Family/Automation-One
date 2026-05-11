@@ -21,6 +21,8 @@ static const char* IC_TAG = "INTENT";
 static std::atomic<uint32_t> s_intent_fallback_counter{0};
 static std::atomic<uint32_t> s_corr_fallback_counter{0};
 static std::atomic<uint32_t> s_safety_epoch{0};
+// AUT-347: chain-stage lifecycle publish could not be enqueued (COMM backpressure / full queue).
+static std::atomic<uint32_t> s_chain_stage_enqueue_fail_count{0};
 static constexpr uint8_t INTENT_FINAL_STORE_CAPACITY = 32;
 // Queue-pressure can generate >30 terminal outcomes in short bursts.
 // Keep enough NVS replay slots so critical terminals are not evicted immediately.
@@ -117,8 +119,24 @@ static const char* mapLegacyStatus(const char* normalized_outcome) {
 
 static String buildFallbackId(const char* prefix, std::atomic<uint32_t>& counter_ref) {
     uint32_t idx = counter_ref.fetch_add(1) + 1;
-    String p = prefix != nullptr ? String(prefix) : String("fw");
-    return p + "_" + String(millis()) + "_" + String(idx);
+    // [FIX1-VERIFY] snprintf on a stack buffer — zero heap allocs before String(buf).
+    // Previous 4-concat chain (String(prefix) + "_" + String(millis()) + ...) could
+    // allocate-fail under OUTBOX pressure, leaving buffer=nullptr → LoadProhibited crash.
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%s_%lu_%u",
+             prefix != nullptr ? prefix : "fw",
+             (unsigned long)millis(), (unsigned int)idx);
+    buf[sizeof(buf) - 1] = '\0';
+    uint32_t heap = ESP.getFreeHeap();
+    char log_msg[96];
+    snprintf(log_msg, sizeof(log_msg),
+             "[FIX1-VERIFY] buildFallbackId: id=%s heap=%u", buf, heap);
+    if (heap < 30000) {
+        LOG_W(IC_TAG, log_msg);
+    } else {
+        LOG_D(IC_TAG, log_msg);
+    }
+    return String(buf);
 }
 
 static SemaphoreHandle_t getOutboxMutex() {
@@ -426,7 +444,7 @@ void processIntentOutcomeOutbox() {
             continue;
         }
 
-        if (mqttClient.safePublish(topic, replay_payload, 1, 1)) {
+        if (mqttClient.safePublish(topic, replay_payload, 0, 1)) {
             recordIntentChainStage(entry.metadata,
                                    "outcome_publish_ok",
                                    entry.flow,
@@ -611,6 +629,10 @@ bool isRecoveryIntentAllowed(const char* topic, const char* payload) {
     return cmd == "clear_emergency";
 }
 
+uint32_t getIntentChainStageEnqueueFailCount() {
+    return s_chain_stage_enqueue_fail_count.load();
+}
+
 void recordIntentChainStage(const IntentMetadata& metadata,
                             const char* stage,
                             const char* flow,
@@ -641,13 +663,38 @@ void recordIntentChainStage(const IntentMetadata& metadata,
     String payload;
     if (serializeJson(event_doc, payload) > 0) {
 #ifndef MQTT_USE_PUBSUBCLIENT
-        // [INC-EA5484] AUT-56: Route lifecycle through publish queue for retry resilience.
+        // AUT-331: QoS 0 — lifecycle chain-stage events are observability telemetry only.
+        // QoS 1 put these into the ESP-IDF MQTT OUTBOX (4+ per command cycle), causing
+        // OUTBOX exhaustion under rapid ON+OFF (<2s) and cascading TCP write timeouts.
+        // Delivery guarantee for critical failures lives in NVS-backed intent_outcome replay,
+        // not in the lifecycle trace topic (QoS 0).
         const char* lifecycle_topic = TopicBuilder::buildIntentOutcomeLifecycleTopic();
-        if (!queuePublish(lifecycle_topic, payload.c_str(), 1, false, true, nullptr)) {
-            LOG_W(IC_TAG, "[INC-EA5484] Lifecycle chain-stage enqueue failed: " + String(stage));
+        // AUT-344: default chain-stage telemetry is non-critical (AUT-55 shed under burst).
+        // AUT-347: terminal outcome trace stages must survive queue pressure — same slot budget
+        // as one critical publish (evict one non-critical) so observability matches delivered outcomes.
+        const bool terminal_trace_stage =
+            strcmp(stage, "outcome_publish_ok") == 0 || strcmp(stage, "outcome_publish_failed") == 0;
+        const PublishQueueEnqueueResult pq = tryQueuePublish(lifecycle_topic,
+                                                             payload.c_str(),
+                                                             0,
+                                                             false,
+                                                             terminal_trace_stage,
+                                                             &metadata);
+        if (pq != PublishQueueEnqueueResult::Enqueued) {
+            s_chain_stage_enqueue_fail_count.fetch_add(1);
+            static unsigned long s_last_chain_stage_fail_log_ms = 0;
+            const unsigned long now_ms = millis();
+            if (s_last_chain_stage_fail_log_ms == 0UL ||
+                (now_ms - s_last_chain_stage_fail_log_ms) >= 5000UL) {
+                s_last_chain_stage_fail_log_ms = now_ms;
+                LOG_W(IC_TAG,
+                      String("AUT347 chain_stage_enqueue_failed stage=") + String(stage) +
+                      " pq=" + String(static_cast<int>(pq)) +
+                      " count=" + String(s_chain_stage_enqueue_fail_count.load()));
+            }
         }
 #else
-        mqttClient.publish(TopicBuilder::buildIntentOutcomeLifecycleTopic(), payload, 1);
+        mqttClient.publish(TopicBuilder::buildIntentOutcomeLifecycleTopic(), payload, 0);
 #endif
     }
 }
@@ -742,7 +789,11 @@ bool publishIntentOutcome(const char* flow,
     processIntentOutcomeOutbox();
 
     String topic = TopicBuilder::buildIntentOutcomeTopic();
-    bool ok = mqttClient.safePublish(topic, payload, 1);
+    // AUT-54: All intent_outcome publishes at QoS 0. Terminal QoS-1 filled the IDF OUTBOX;
+    // slow PUBACK + OUTBOX-expiry housekeeping caused write-timeout disconnects (AAAAA.md).
+    // Critical outcomes still persist to NVS and replay when publish fails.
+    const uint8_t outcome_qos = 0;
+    bool ok = mqttClient.safePublish(topic, payload, outcome_qos);
     bool persisted_for_replay = false;
     if (ok) {
         if (command_flow) {

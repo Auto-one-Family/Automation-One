@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # MQTT Topic Referenz
 
-> **Version:** 2.24 | **Aktualisiert:** 2026-04-28
+> **Version:** 2.29 | **Aktualisiert:** 2026-05-12
 > **Quellen:** `El Trabajante/docs/Mqtt_Protocoll.md`, `CLAUDE_SERVER.md` Section 4
 > **Verifiziert gegen:** `topic_builder.cpp`, `main.py`, `constants.py`
-> **Änderungen:** **AUT-118 (2026-04-28, Implementierung):** Bidirektionaler ACK-Flow für Emergency-Stop/Recovery: Neue Topics `actuator/emergency/ack` (Sections 2.6) und `actuator/recovery_confirm` (Section 2.7), beide ESP→Server QoS 1. Server: `EmergencyAckHandler`, `RecoveryConfirmHandler` in `handlers/`; `build_emergency_ack_topic`, `parse_recovery_confirm_topic` in `topics.py`; `MQTT_SUBSCRIBE_ESP_EMERGENCY_ACK/RECOVERY_CONFIRM` in `constants.py`. Firmware: `buildEmergencyAckTopic()`/`buildRecoveryConfirmTopic()` in `topic_builder.cpp`; ACK-Publish via direktem `mqttClient.publish()` (Safety-Epoch-Race-Mitigation). Zuvor: **AUT-121 (2026-04-24, Implementierung):** Topic `system/heartbeat_metrics` (ESP→Server, QoS 0) koppelt erweiterte Laufzeit-Counter und Queue-Stats vom schlanken Core-`system/heartbeat` ab. Server: `HeartbeatMetricsHandler` (TTLCache-Ingest, kein DB/WS), Merge flach in den nächsten Core-`handle_heartbeat` → `esp_health`; `parse_heartbeat_topic` endverankert, damit `heartbeat_metrics` nicht als Core matcht; `subscriber.py` mappt QoS inkl. `MQTT_SUBSCRIBE_ESP_HEARTBEAT_METRICS`. Firmware: `ENABLE_METRICS_SPLIT` → `publishHeartbeatMetrics()` in `mqtt_client.cpp` am Ende von `publishHeartbeat()`. Zuvor: **PKG-01 (2026-04-20, INC-2026-04-20-offline-mode-observability-hardening):** Neuer Topic `system/queue_pressure` (ESP→Server, QoS 1) für strukturierte Publish-Queue-Backpressure-Events (ENTER/RECOVERED, Hysterese). Server-TopicBuilder in `src/mqtt/topics.py` ergänzt (`build_queue_pressure_topic`, `parse_queue_pressure_topic`). Firmware-Emitter und Server-Handler folgen in Welle 2 (PKG-01a/01b). Zuvor: **AUT-69 (2026-04-20):** `session/announce` an Server-Consumer angepasst (`handle_session_announce` registriert), Session-Feld-Alias dokumentiert (**kanonisch `handover_epoch`, Fallback `session_epoch`**) und Heartbeat-Metriken um `handover_contract_reject_startup`/`handover_contract_reject_runtime` plus Summenfeld `handover_contract_reject` erweitert. Zuvor: **AUT-54 (2026-04-17):** Bootstrap-Heartbeat nach `heartbeat/ack`-Subscription wird auf ESP32 nur noch deferred im normalen Loop gesendet (nicht mehr direkt im `MQTT_EVENT_SUBSCRIBED`-Callback). Stale `MQTT_EVENT_SUBSCRIBED` bei bereits getrennter Verbindung werden verworfen; `publishHeartbeat(force=true)` sendet nie im disconnected Zustand. Zuvor: **AUT-5 (2026-04-17):** Heartbeat-Payload um `sensor_command_queue_overflow_count` ergänzt (Overflow-Telemetrie der Sensor-Command-Queue). Zuvor: **PKG-05 (2026-04-14):** `system/heartbeat/ack` Reject-Diagnose erweitert (optionale Felder `reason_code`, `revocation_source`, `upstream_deleted`, `delete_intent`, `correlation_id` für Revocation/Upstream-Delete-Auswertung auf ESP-Seite). Intent-Outcome-Codes ergänzt: `UPSTREAM_DELETE_REVOKED`, `HEARTBEAT_REJECTED`. Zuvor: **Epic1-05:** Server `publish_actuator_command`: bei gesetztem `correlation_id` zusätzlich **`intent_id`** (gleicher Wert) im JSON; nach erfolgreichem Publish schreibt `CommandContractRepository.record_intent_publish_sent` `command_intents.orchestration_state=sent` (Support: `El Servador/god_kaiser_server/docs/support/intent_orchestration_state.md`). Zuvor: **MQTTCommandBridge** `resolve_ack` nur per `correlation_id` (Epic1-04). Zone/Subzone-ACK ohne passende UUID → `ACK dropped: no correlation match`. Zuvor: `system/intent_outcome/lifecycle`; Heartbeat-Felder getrennt; Intent-Outcome-Codes u. a. `PENDING_RING_EVICTION`, `CONFIG_LANE_BUSY`, `PUBLISH_OUTBOX_FULL`, `JSON_PARSE_ERROR`; Zone/Subzone-ACK optional `reason_code`; Intent-Metadaten optional unter `data.*` (2026-04-05). Früher: Heartbeat-ACK Contract-Härtung, `CONFIG_PENDING_AFTER_RESET`, Intent-Outcome v2.9, Canonical-First Ingest, Firmware-Strict-Config (2026-04-04).
+> **Änderungen:** **AUT-363 (2026-05-12):** Nachzug-Doku — `El Trabajante/docs/Mqtt_Protocoll.md` §15a und `docs/.../E5-mqtt-topic-matrix.md` an **IST QoS 0** / Payload / Modulpfade für `system/queue_pressure` angeglichen (§3.6a + Quick-Lookup waren bereits AUT-357). Zuvor: **AUT-361 (2026-05-12):** `ENABLE_METRICS_SPLIT` — Doku an `feature_flags.h` angeglichen: Makro ist im Repo-Default **definiert** (Metrics-Topic aktiv); veraltete Formulierung „seit AUT-285 in esp32_dev nicht mehr standardmäßig gesetzt“ entfernt (`Mqtt_Protocoll.md` §3a, Payload-Hinweis §3.x). Zuvor: **AUT-357 / S4 (2026-05-12):** `§3.6a system/queue_pressure` auf IST-Payload (`entered_pressure`/`recovered`), QoS 0 (Firmware), Server-Reaktion „nur Observability“ + Handler-Tabelle korrigiert. Zuvor: **OUTBOX-Logging (2026-05-11):** `publish_outbox_full_count` nun auch im `#ifndef ENABLE_METRICS_SPLIT`-Pfad des Core-Heartbeats (`mqtt_client.cpp:publishHeartbeat()`). War bisher nur in `heartbeat_metrics` (`publishHeartbeatMetrics()`). Beide Payload-Beispiele aktualisiert. Zuvor: **AUT-331 (2026-05-11, Fix#4):** `config` + `system/command` QoS 2→1 (`constants.py:QOS_CONFIG`, `publisher.py` 4 Stellen). Eliminiert letzten häufigen QoS-2-Pfad (Config-Republishes auf Reconnect). Zuvor: **AUT-331 (2026-05-10):** `actuator/{gpio}/command` + `sensor/{gpio}/command` QoS 2→1 (Server `constants.py` + ESP subscribe `main.cpp`). `intent_outcome/lifecycle` chain stages (`recordIntentChainStage`) QoS 1→0 (`intent_contract.cpp`). MQTT-OUTBOX 4KB→16KB (`sdkconfig.defaults`). Root cause: rapid ON+OFF (<2s) exhausted 4096-byte OUTBOX → TCP write timeout → crash. Zuvor: **AUT-117 (2026-05-06):** Topic `actuator/{gpio}/latched_offline` (ESP→Server, QoS 0) meldet Aktor-Latch-Zustand bei Disconnect (reason: `offline_rule_hold`/`safety_forced_off`/`manual_override`). Server: `ActuatorLatchedOfflineHandler` (Log + WS-Broadcast). Firmware: `publishLatchedOffline()` in `actuator_manager.cpp`. Zuvor: **AUT-118 (2026-04-28):** Bidirektionaler ACK-Flow für Emergency-Stop/Recovery: Topics `actuator/emergency/ack` (Section 2.6) und `actuator/recovery_confirm` (Section 2.7). Zuvor: **AUT-121 (2026-04-24):** Topic `system/heartbeat_metrics` (ESP→Server, QoS 0) koppelt Laufzeit-Counter vom Core-Heartbeat ab. Server: `HeartbeatMetricsHandler`; Firmware: `ENABLE_METRICS_SPLIT` → `publishHeartbeatMetrics()`. Zuvor: **PKG-01 (2026-04-20):** Neuer Topic `system/queue_pressure` (ESP→Server, QoS 1). Zuvor: **AUT-69 (2026-04-20):** `session/announce` Contract. Zuvor: **AUT-54 (2026-04-17):** Heartbeat Bootstrap-Fix. Zuvor: **PKG-05 (2026-04-14):** Heartbeat/ack Reject-Diagnose. Zuvor: **Epic1-05:** Intent-Orchestration-State `sent`; **MQTTCommandBridge** `resolve_ack`; Heartbeat-Felder; Intent-Outcome-Codes (2026-04-05). Früher: Contract-Härtung, Canonical-First Ingest (2026-04-04).
 
 ---
 
@@ -31,29 +31,30 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 |---------------|----------|-----|--------------|
 | `kaiser/god/esp/{esp_id}/sensor/{gpio}/data` | ESP→Server | 1 | Sensor sendet Rohdaten |
 | `kaiser/god/esp/{esp_id}/sensor/batch` | ESP→Server | 1 | Batch Sensor-Daten |
-| `kaiser/god/esp/{esp_id}/sensor/{gpio}/command` | Server→ESP | 2 | Sensor-Befehl (on-demand) |
+| `kaiser/god/esp/{esp_id}/sensor/{gpio}/command` | Server→ESP | 1 | Sensor-Befehl (on-demand) |
 | `kaiser/god/esp/{esp_id}/sensor/{gpio}/response` | ESP→Server | 1 | Sensor-Command Response |
-| `kaiser/god/esp/{esp_id}/actuator/{gpio}/command` | Server→ESP | 2 | Server steuert Actuator |
+| `kaiser/god/esp/{esp_id}/actuator/{gpio}/command` | Server→ESP | 1 | Server steuert Actuator |
 | `kaiser/god/esp/{esp_id}/actuator/{gpio}/status` | ESP→Server | 1 | Actuator meldet Status |
 | `kaiser/god/esp/{esp_id}/actuator/{gpio}/response` | ESP→Server | 1 | Command Response |
 | `kaiser/god/esp/{esp_id}/actuator/{gpio}/alert` | ESP→Server | 1 | Actuator Alert |
 | `kaiser/god/esp/{esp_id}/actuator/emergency` | Server→ESP | 1 | ESP-spezifischer Emergency |
+| `kaiser/god/esp/{esp_id}/actuator/{gpio}/latched_offline` | ESP→Server | 0 | Aktor-Latch-Decision bei MQTT-Disconnect (AUT-117) |
 | `kaiser/god/esp/{esp_id}/session/announce` | ESP→Server | 1 | Reconnect Session-Announce (AUT-69) |
 | `kaiser/god/esp/{esp_id}/system/heartbeat` | ESP→Server | 0 | Heartbeat (Core: Liveness + Registration) |
 | `kaiser/god/esp/{esp_id}/system/heartbeat_metrics` | ESP→Server | 0 | Heartbeat Metrics (Extended Telemetry, AUT-121) |
 | `kaiser/god/esp/{esp_id}/system/heartbeat/ack` | Server→ESP | 1 | Heartbeat ACK (SAFETY-P5: QoS 1) |
 | `kaiser/god/server/status` | Server→ALL | 1 | Server LWT + Online/Offline (SAFETY-P5) |
-| `kaiser/god/esp/{esp_id}/system/command` | Server→ESP | 2 | System-Befehle |
+| `kaiser/god/esp/{esp_id}/system/command` | Server→ESP | 1 | System-Befehle |
 | `kaiser/god/esp/{esp_id}/system/response` | ESP→Server | 1 | System-Response |
 | `kaiser/god/esp/{esp_id}/system/diagnostics` | ESP→Server | 0 | Diagnostics |
 | `kaiser/god/esp/{esp_id}/system/will` | ESP→Server | 1 | LWT (Last Will) |
 | `kaiser/god/esp/{esp_id}/system/error` | ESP→Server | 1 | Error Event |
-| `kaiser/god/esp/{esp_id}/system/queue_pressure` | ESP→Server | 1 | Publish-Queue Backpressure Event (ENTER/RECOVERED, PKG-01) |
+| `kaiser/god/esp/{esp_id}/system/queue_pressure` | ESP→Server | 0 | Publish-Queue Backpressure (`entered_pressure` / `recovered`, PKG-01) |
 | `kaiser/god/esp/{esp_id}/system/intent_outcome` | ESP→Server | 1 | Intent/Outcome Events (kanonisch `buildOutcomePayload`) |
-| `kaiser/god/esp/{esp_id}/system/intent_outcome/lifecycle` | ESP→Server | 1 | CONFIG_PENDING Lifecycle (`config_pending_lifecycle_v1`) |
+| `kaiser/god/esp/{esp_id}/system/intent_outcome/lifecycle` | ESP→Server | 0/1 | Chain stages (`intent_chain_stage_v1`, QoS 0) + CONFIG_PENDING transitions (`config_pending_lifecycle_v1`, QoS 1) |
 | `kaiser/god/esp/{esp_id}/status` | ESP→Server | 1 | System-Status |
 | `kaiser/god/esp/{esp_id}/safe_mode` | ESP→Server | 1 | Safe-Mode Status |
-| `kaiser/god/esp/{esp_id}/config` | Server→ESP | 2 | Config Update |
+| `kaiser/god/esp/{esp_id}/config` | Server→ESP | 1 | Config Update |
 | `kaiser/god/esp/{esp_id}/config_response` | ESP→Server | 2 | Config ACK |
 | `kaiser/god/esp/{esp_id}/zone/assign` | Server→ESP | 1 | Zone Assignment |
 | `kaiser/god/esp/{esp_id}/zone/ack` | ESP→Server | 1 | Zone Assignment ACK |
@@ -185,16 +186,21 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 
 **Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/command`
 
-**QoS:** 2 (exactly once)
+**QoS:** 1 (at least once) — AUT-331: reduziert von 2; QoS 2 belegte PUBREC+PUBCOMP-Slots im ESP OUTBOX
 **Verwendung:** On-Demand Measurement (Phase 2C)
 
 **Payload:**
 ```json
 {
   "command": "measure",
-  "request_id": "req_12345"
+  "request_id": "req_12345",
+  "timeout_ms": 5000
 }
 ```
+
+Optional: `timeout_ms` (1–60000, Default 5000) — Obergrenze für den Messdauer-Guard in der Firmware (`main.cpp` / `triggerManualMeasurement`).
+
+**Firmware:** Messung läuft unter `g_sensor_mutex` (gleiche Semaphore wie `performAllMeasurements`), damit manuelle und autonome Messung nicht gleichzeitig denselben ADC-/Sensorpfad nutzen. Bei Mutex-Warte-Timeout: `reason_code` `MUTEX_TIMEOUT` in `sensor/{gpio}/response` (wenn `request_id` gesetzt).
 
 **Code-Referenzen:**
 - **ESP32:** `main.cpp` Zeile 740 (Subscription via Wildcard)
@@ -208,20 +214,34 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 
 **QoS:** 1
 
-**Payload:**
+**Payload (measure, mit `request_id` im Command — typisch Kalibrier-Wizard / On-Demand):**
+
+Firmware sendet u. a. `raw` (ADC-Rohwert), `sensor_type`, `quality`, Outcome-Felder (`measurement_ok`, `publish_ok`, `timeout`, `reason_code` — u. a. `MUTEX_TIMEOUT`, wenn `g_sensor_mutex` bis Ablauf der Wartezeit nicht frei wird) sowie optionale Intent-Felder (`intent_id`, `correlation_id`, `ttl_ms`). **El Servador** (`CalibrationResponseHandler`): bei aktiver Kalibrier-Session wird **kein** Ersatzwert aus der DB („latest reading“) genutzt, wenn `raw`/`raw_value` fehlen — stattdessen WebSocket `calibration_measurement_failed` (vermeidet Verwechslung mit periodischem Intervall-Messbetrieb).
+
 ```json
 {
   "request_id": "req_12345",
   "gpio": 4,
   "command": "measure",
   "success": true,
-  "ts": 1735818000
+  "measurement_ok": true,
+  "publish_ok": true,
+  "timeout": false,
+  "reason_code": "NONE",
+  "quality": "good",
+  "sensor_type": "moisture",
+  "raw": 2150,
+  "ts": 1735818000,
+  "seq": 42,
+  "intent_id": "intent-uuid",
+  "correlation_id": "corr-uuid",
+  "ttl_ms": 5000
 }
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildSensorResponseTopic()` (Zeile 79)
-- **Server:** `main.py` Zeile 254 (Handler Registration)
+- **ESP32:** `topic_builder.cpp` → `buildSensorResponseTopic()`; Antwortaufbau `main.cpp` → `handleSensorCommand` (measure)
+- **Server:** `main.py` (Handler-Registrierung `calibration_response_handler.handle_sensor_response`); `mqtt/handlers/calibration_response_handler.py`
 
 ---
 
@@ -231,7 +251,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 
 **Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/command`
 
-**QoS:** 2 (exactly once)
+**QoS:** 1 (at least once) — AUT-331: reduziert von 2; QoS 2 belegte PUBREC+PUBCOMP-Slots im ESP OUTBOX und erschöpfte die 4096-Byte-Grenze bei rapidem ON+OFF
 
 **Payload:**
 ```json
@@ -378,15 +398,20 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 
 **QoS:** 1
 
-**Payload:**
+**Payload (Ist-Firmware `publishActuatorAlert`, ergänzend zum Handler-Contract):**
 ```json
 {
+  "esp_id": "ESP_12AB34CD",
+  "seq": 42,
+  "zone_id": "zone_main",
   "ts": 1735818000,
   "gpio": 5,
-  "type": "emergency_stop",
+  "alert_type": "emergency_stop",
   "message": "Actuator stopped"
 }
 ```
+
+**Korrelation:** Der Server setzt pro MQTT-Ingress eine synthetische CID (`generate_mqtt_correlation_id` aus `esp_id`, Topic-Suffix `alert`, `seq`) und persistiert sie am Notification-Datensatz. Optional kann `correlation_id` gesetzt werden (z. B. Befehlsbezug) — sie landet zusätzlich in `metadata.device_correlation_id`, während die Ingress-CID in `notifications.correlation_id` und `metadata.mqtt_ingress_correlation_id` gespiegelt wird.
 
 **Alert-Types:**
 - `emergency_stop`: Actuator wurde notgestoppt
@@ -537,6 +562,84 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 
 ---
 
+### 2.8 actuator/{gpio}/latched_offline (ESP→Server) — AUT-117
+
+**Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/latched_offline`
+
+**QoS:** 0 (Telemetrie, Verlust tolerierbar — kein Safety-Impact, da Aktor-State autoritativ über `actuator/{gpio}/status` mit QoS 1 läuft)
+
+**Retain:** false
+
+**Richtung:** ESP → Server
+
+**Trigger:** Bei MQTT-Disconnect-Event (`NOTIFY_MQTT_DISCONNECTED`), wenn das Safety-System
+für jeden in Verwendung befindlichen Aktor entscheidet, ob er
+- im Offline-Pfad **aktiv gehalten** wird (Offline-Rule deckt den GPIO ab) oder
+- in den **Safe-State erzwungen** wird (kein Offline-Rule, oder gar keine Offline-Rules vorhanden).
+
+Das Event wird *nur* bei Aktoren publiziert, deren Zustand vor dem Disconnect "ON" war
+und für die eine Latch-Entscheidung getroffen wurde. Aktoren, die schon "OFF" waren,
+erzeugen keinen Eventstrom.
+
+**Payload:**
+```json
+{
+  "esp_id": "ESP_12AB34CD",
+  "gpio": 25,
+  "ts": 1735818000,
+  "reason": "offline_rule_hold",
+  "actuator_state": "on",
+  "offline_rule_count": 1
+}
+```
+
+**Fields:**
+
+| Feld | Typ | Required | Beschreibung |
+|------|-----|----------|--------------|
+| `esp_id` | string | Ja | ESP Device ID (Kontext für Server-Routing) |
+| `gpio` | int | Ja | GPIO Pin des betroffenen Aktors |
+| `ts` | int | Ja | Unix Timestamp (Sekunden) der Latch-Entscheidung |
+| `reason` | string | Ja | Begründung der Latch-Entscheidung (siehe unten) |
+| `actuator_state` | string | Ja | `"on"` oder `"off"` — Aktor-Zustand zum Latch-Zeitpunkt |
+| `offline_rule_count` | int | Ja | Anzahl im NVS persistierter Offline-Rules zum Latch-Zeitpunkt |
+
+**reason values (SSOT):**
+- `"offline_rule_hold"` — Offline-Rule deckt den GPIO ab (`hasCoveringRule(gpio)==true`),
+  Aktor bleibt aktiv, P4 übernimmt die Hysterese-Auswertung. Kein Safe-State erzwungen.
+- `"safety_forced_off"` — Aktor wurde durch Disconnect-Handler in den `default_state`
+  geführt, weil entweder keine Offline-Rule den GPIO abdeckt (`hasCoveringRule(gpio)==false`)
+  oder gar keine Offline-Rules persistiert sind (`getOfflineRuleCount()==0`).
+- `"manual_override"` — Reserviert für Manual-Recovery-Commands, die einen latched
+  Aktor steuern (zukünftige Erweiterung — nicht von der aktuellen Firmware emittiert).
+
+**Verhältnis zu `actuator/{gpio}/alert`:**
+- `actuator/{gpio}/alert` (QoS 1) ist menschenlesbar (`alert_type` + freie `message`)
+  und wird vom Frontend für Notification-Inbox/Toast verwendet.
+- `actuator/{gpio}/latched_offline` (QoS 0) ist maschinenlesbar/strukturiert und liefert
+  zusätzlich `actuator_state` und `offline_rule_count` für Forensik und Dashboards
+  (wie viele Aktoren wurden bei welchem Disconnect gehalten / forced).
+- Beide werden parallel publiziert, wenn ein Aktor latched wird. Der Alert ist
+  Operator-orientiert, das Latched-Event Telemetrie-orientiert.
+
+**Server-Verarbeitung:**
+- `ActuatorLatchedOfflineHandler` parst das Topic, loggt strukturiert und broadcastet
+  das Event als WebSocket-Message `actuator_latched_offline` mit unveränderter Payload.
+- Kein DB-Persist; Aktor-State-Authoritäten bleiben `actuator_history` (Commands)
+  und `actuator/{gpio}/status` (Telemetrie). Das Event ist beobachtbar, aber nicht
+  zustandsbestimmend.
+
+**Code-Referenzen:**
+- **ESP32:** `topic_builder.cpp:buildActuatorLatchedOfflineTopic()`,
+  `actuator_manager.cpp:setUncoveredActuatorsToSafeState()`,
+  `actuator_manager.cpp:setAllActuatorsToSafeState()`
+- **Server:** `actuator_latched_offline_handler.py:ActuatorLatchedOfflineHandler`,
+  `topics.py:build_actuator_latched_offline_topic()`,
+  `topics.py:parse_actuator_latched_offline_topic()`,
+  `main.py` (Handler-Registrierung)
+
+---
+
 ## 3. System Topics
 
 ### 3.1 system/heartbeat (ESP→Server)
@@ -574,11 +677,12 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
   "persistence_drift_count": 0,
   "critical_outcome_drop_count": 0,
   "publish_outbox_drop_count": 0,
+  "publish_outbox_full_count": 0,
   "sensor_command_queue_overflow_count": 0
 }
 ```
 
-**Degraded-Telemetrie (2026-04):** `persistence_degraded` / `persistence_degraded_reason` = Offline-Rules-Persistence-Drift; `runtime_state_degraded` = FSM (z. B. CONFIG_PENDING, SAFE_MODE); `network_degraded` = MQTT- oder WiFi-Circuit-Breaker OPEN. **`degraded` / `degraded_reason` werden von aktueller Firmware nicht mehr gesendet** (Legacy-Consumer migrieren). `critical_outcome_drop_count` spiegelt NVS-Outcome-Outbox-Verluste; `publish_outbox_drop_count` zählt ESP-IDF-Outbox-`-2`-Drops nicht-kritischer Publishes; `sensor_command_queue_overflow_count` zählt verworfene Sensor-Commands bei Queue-Overflow.
+**Degraded-Telemetrie (2026-04):** `persistence_degraded` / `persistence_degraded_reason` = Offline-Rules-Persistence-Drift; `runtime_state_degraded` = FSM (z. B. CONFIG_PENDING, SAFE_MODE); `network_degraded` = MQTT- oder WiFi-Circuit-Breaker OPEN. **`degraded` / `degraded_reason` werden von aktueller Firmware nicht mehr gesendet** (Legacy-Consumer migrieren). `critical_outcome_drop_count` spiegelt NVS-Outcome-Outbox-Verluste; `publish_outbox_drop_count` zählt nicht-kritische ESP-IDF-Outbox-`-2`-Drops (non-critical topics); `publish_outbox_full_count` zählt **alle** OUTBOX-full-Events unabhängig von Topic-Klasse (inkl. kritische, die via NVS-Replay entkommen); `sensor_command_queue_overflow_count` zählt verworfene Sensor-Commands bei Queue-Overflow.
 
 **Required Fields:** `ts`, `uptime`, `heap_free` / `free_heap`, `wifi_rssi`
 
@@ -654,7 +758,7 @@ ACK-Pfad verzögern. Serverseitig werden akzeptierte Metrics in den
 nächsten Core-Heartbeat gemerged (`heartbeat_handler`) und gehen
 mit `esp_health` an das Frontend.
 
-**Payload (Ist, `ENABLE_METRICS_SPLIT` — ESP-IDF-Pfad, nicht `MQTT_USE_PUBSUBCLIENT`):**
+**Payload (Ist, `ENABLE_METRICS_SPLIT` aktiv — ESP-IDF-Pfad, nicht `MQTT_USE_PUBSUBCLIENT`; Makro-Default siehe `El Trabajante/src/config/feature_flags.h`, im Repo **an**, AUT-361):**
 ```json
 {
   "esp_id": "ESP_12AB34CD",
@@ -670,6 +774,7 @@ mit `esp_health` an das Frontend.
   "persistence_drift_count": 0,
   "critical_outcome_drop_count": 0,
   "publish_outbox_drop_count": 0,
+  "publish_outbox_full_count": 0,
   "publish_queue_fill": 0,
   "publish_queue_hwm": 0,
   "publish_queue_shed_count": 0,
@@ -915,46 +1020,41 @@ Die Felder `publish_queue_*` fehlen bei `MQTT_USE_PUBSUBCLIENT=1` (siehe `mqtt_c
 
 **Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/system/queue_pressure`
 
-**QoS:** 1 (at least once)
+**QoS:** 0 (at most once — **IST-Firmware:** `communication_task.cpp` nutzt `publish(..., 0)`; Verlust möglich, für Observability akzeptiert)
 **Retain:** false
-**Frequency:** Nur bei Zustandswechsel (Hysterese: ENTER bei Queue-Fill ≥ `SHED_WATERMARK=6`, RECOVERED bei ≤ `PUBLISH_QUEUE_HYSTERESIS_LOW=3`). Keine periodische Emission.
+**Frequency:** Nur bei Zustandswechsel (Hysterese: `entered_pressure` bei Fill ≥ Shed-Watermark, `recovered` bei Fill unter Recovery-Schwelle). Keine periodische Emission.
 
 **Zweck:** Strukturiertes Event für Publish-Queue-Backpressure, getrennt vom
 generischen `system/error`-Fehlercode 4062. Ermöglicht dem Server/Frontend
 eine klare Unterscheidung "Burst-Druck (erwartet)" vs. "Fehler im engeren Sinn".
 
-**Payload (geplant, PKG-01a Welle 2):**
+**Payload (IST, PKG-01a Emitter):**
 ```json
 {
-  "ts": 1735818000,
-  "esp_id": "ESP_EA5484",
-  "event": "ENTER",
-  "queue_fill": 7,
-  "queue_capacity": 8,
-  "shed_watermark": 6,
-  "hysteresis_low": 3,
-  "shed_count": 1,
+  "event": "entered_pressure",
+  "fill_level": 7,
+  "high_watermark": 8,
+  "shed_count": 0,
   "drop_count": 0,
-  "high_watermark": 9,
-  "reason": "PUBLISH_OUTBOX_FULL"
+  "threshold": 6,
+  "ts": 1735818000
 }
 ```
 
-Event-Werte: `"ENTER"` (Backpressure aktiv), `"RECOVERED"` (Backpressure aufgehoben).
+Event-Werte: `"entered_pressure"` (Backpressure aktiv), `"recovered"` (Backpressure aufgehoben).
+
+**Server-Reaktion (PKG-01b, AUT-357):** **Nur Observability** — kein DB-Write, kein WebSocket, keine Laststeuerung. Handler `queue_pressure_handler.handle_queue_pressure`: Prometheus-Counter `queue_pressure_event_total{esp_id,event}` inkrementieren; strukturiertes Log (`entered_pressure` → WARNING, sonst INFO). Siehe `src/mqtt/handlers/queue_pressure_handler.py`.
 
 **Status:**
 - **TopicBuilder (Server):** `TopicBuilder.build_queue_pressure_topic()` +
-  `TopicBuilder.parse_queue_pressure_topic()` — implementiert in PKG-01
-  (Commit `7e7ae245`, `El Servador/god_kaiser_server/src/mqtt/topics.py`).
-- **Firmware-Emitter:** In Welle 2 (PKG-01a) — Hot-Path nach
-  `publish_queue.cpp:130/178` + `mqtt_client.cpp:processPublishQueue`.
-- **Server-Handler:** In Welle 2 (PKG-01b) — Prometheus-/Persist-Route offen
-  (Blocker `B-QP-PERSIST-01`).
+  `TopicBuilder.parse_queue_pressure_topic()` — `El Servador/god_kaiser_server/src/mqtt/topics.py`.
+- **Firmware-Emitter:** PKG-01a — `communication_task.cpp` (`handleQueuePressureHysteresis`), Core-0-Direktpfad ohne App-Publish-Queue-Slot.
+- **Server-Handler:** registriert in `main.py` (Subscription `kaiser/+/esp/+/system/queue_pressure`).
 
 **Code-Referenzen:**
 - **Server:** `src/mqtt/topics.py:build_queue_pressure_topic`,
-  `parse_queue_pressure_topic`
-- **ESP32:** `TopicBuilder::buildQueuePressureTopic()` *(PKG-01a, Welle 2)*
+  `parse_queue_pressure_topic`; Handler `src/mqtt/handlers/queue_pressure_handler.py`; Registrierung `src/main.py` (Queue-Pressure-Block)
+- **ESP32:** `TopicBuilder::buildQueuePressureTopic()`; Payload-Bau `communication_task.cpp`
 
 ---
 
@@ -1151,12 +1251,12 @@ Event-Werte: `"ENTER"` (Backpressure aktiv), `"RECOVERED"` (Backpressure aufgeho
 
 **Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/system/intent_outcome/lifecycle`
 
-**QoS:** 1  
-**Semantik:** Nur **CONFIG_PENDING**-Runtime-Transitions (`entered_config_pending`, `exit_blocked_config_pending`, `exited_config_pending`). **Nicht** mit kanonischem `system/intent_outcome` mischen.
+**QoS:** 0 (`intent_chain_stage_v1`) / 1 (`config_pending_lifecycle_v1`)  
+**Semantik:** Zwei Schema-Klassen auf demselben Topic: (1) `config_pending_lifecycle_v1` — CONFIG_PENDING-Runtime-Transitions (`entered_config_pending`, `exit_blocked_config_pending`, `exited_config_pending`), QoS 1; (2) `intent_chain_stage_v1` — Tracing-Events aus `recordIntentChainStage()`, QoS 0 seit AUT-331. **Nicht** mit kanonischem `system/intent_outcome` mischen.
 
 **Pflichtfelder (Schema-Tag):** `schema` = `config_pending_lifecycle_v1`, `boot_sequence_id` (Korrelation zum Heartbeat), plus bestehende Transition-Felder (`event_type`, `reason_code`, Counter, Readiness-Snapshot — siehe `El Trabajante/docs/runtime-readiness-policy.md`).
 
-**Zustellungsrobustheit (AUT-56, 2026-04-17):** Lifecycle-Events werden über die AUT-55-Publish-Queue (`queuePublish`, `critical=true`) geroutet. Damit profitieren sie von den gleichen Retry-Mechanismen (3 Versuche + Backoff) wie andere kritische Publishes. Vor AUT-56 gingen Lifecycle-Events über einen Raw-Publish ohne Retry — bei Outbox-Druck (Error 3012) waren sie silent-drop-anfällig. `recordIntentChainStage()` (intent_chain_stage_v1) und `publishConfigPendingTransitionEvent()` (config_pending_lifecycle_v1) sind beide gehärtet.
+**Zustellungsrobustheit (AUT-56/AUT-331):** `publishConfigPendingTransitionEvent()` (`config_pending_lifecycle_v1`) nutzt `queuePublish(qos=1, critical=true)` — AUT-56-Retry-Pfad. `recordIntentChainStage()` (`intent_chain_stage_v1`) nutzt seit AUT-331 `queuePublish(qos=0, shed=true)` — reine Observability-Telemetrie ohne Delivery-Guarantee. Vor AUT-331 war chain-stage QoS 1 und füllte den ESP-IDF MQTT OUTBOX bei rapid-fire Actuator-Commands (4+ Slots/Zyklus → 4096-Byte-Limit erschöpft → TCP-Timeout → Crash).
 
 **Code-Referenzen:**
 - **ESP32:** `topic_builder.cpp:buildIntentOutcomeLifecycleTopic()`, `main.cpp:publishConfigPendingTransitionEvent()`
@@ -1375,7 +1475,7 @@ Event-Werte: `"ENTER"` (Backpressure aktiv), `"RECOVERED"` (Backpressure aufgeho
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildZoneAssignTopic()` (Zeile 229) + `main.cpp` Subscription
+- **ESP32:** `topic_builder.cpp:buildZoneAssignTopic()` (Zeile 229) + `main.cpp` Subscription → AUT-285 M3: `handleZoneAssignOnCore1()` via `g_config_update_queue` auf Core-1 dispatcht
 - **Server:** `topics.py:build_zone_assign_topic()` (Zeile 142)
 
 ---
@@ -1428,7 +1528,7 @@ Event-Werte: `"ENTER"` (Backpressure aktiv), `"RECOVERED"` (Backpressure aufgeho
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `main.cpp` Zeile 734 (Subscription)
+- **ESP32:** `main.cpp` Subscription → AUT-285 M3: `handleSubzoneAssignOnCore1()` / `handleSubzoneRemoveOnCore1()` via `g_config_update_queue` auf Core-1 dispatcht
 - **Server:** `topics.py:build_subzone_assign_topic()` (Zeile 178)
 
 ---
@@ -1527,7 +1627,7 @@ Event-Werte: `"ENTER"` (Backpressure aktiv), `"RECOVERED"` (Backpressure aufgeho
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildSubzoneSafeTopic()`, `main.cpp` subscribt und verarbeitet (Handler: action enable/disable, gpioManager.enableSafeModeForSubzone/disableSafeModeForSubzone)
+- **ESP32:** `topic_builder.cpp:buildSubzoneSafeTopic()`, `main.cpp` subscribt → AUT-285 M3: `handleSubzoneSafeOnCore1()` via `g_config_update_queue` auf Core-1 dispatcht (action enable/disable, gpioManager.enableSafeModeForSubzone/disableSafeModeForSubzone)
 - **Server:** `topics.py:build_subzone_safe_topic()` (Zeile 192)
 
 ---
@@ -1594,6 +1694,7 @@ Der Server subscribed zu folgenden Topic-Patterns:
 | `kaiser/+/esp/+/actuator/+/status` | `handle_actuator_status` | `actuator_handler.py:45` |
 | `kaiser/+/esp/+/actuator/+/response` | `handle_actuator_response` | `main.py:239` |
 | `kaiser/+/esp/+/actuator/+/alert` | `handle_actuator_alert` | `main.py:244` |
+| `kaiser/+/esp/+/actuator/+/latched_offline` | `handle_actuator_latched_offline` | `actuator_latched_offline_handler.py` (AUT-117) |
 | `kaiser/+/esp/+/session/announce` | `handle_session_announce` | `heartbeat_handler.py` |
 | `kaiser/+/esp/+/system/heartbeat` | `handle_heartbeat` | `heartbeat_handler.py:61` |
 | `kaiser/+/esp/+/system/heartbeat_metrics` | `handle_heartbeat_metrics` | `heartbeat_metrics_handler.py:56` |
@@ -1602,7 +1703,7 @@ Der Server subscribed zu folgenden Topic-Patterns:
 | `kaiser/+/esp/+/subzone/ack` | `handle_subzone_ack` | `main.py:280` |
 | `kaiser/+/esp/+/system/will` | `handle_lwt` | `lwt_handler.py:35` |
 | `kaiser/+/esp/+/system/error` | `handle_system_error` | `main.py:293` |
-| `kaiser/+/esp/+/system/queue_pressure` | *(PKG-01b, Welle 2: `handle_queue_pressure`)* | *(server-dev, Welle 2)* |
+| `kaiser/+/esp/+/system/queue_pressure` | `handle_queue_pressure` | `queue_pressure_handler.py` (Prometheus + Log, keine aktive Backpressure) |
 | `kaiser/+/esp/+/system/intent_outcome` | `handle_intent_outcome` | `intent_outcome_handler.py` |
 | `kaiser/+/esp/+/system/intent_outcome/lifecycle` | `handle_intent_outcome_lifecycle` | `intent_outcome_lifecycle_handler.py` (Audit + WS `intent_outcome_lifecycle`, Metrik `intent_outcome_lifecycle_total`) |
 | `kaiser/+/esp/+/status` | *(nicht registriert)* | *(derzeit kein Handler in `main.py`)* |

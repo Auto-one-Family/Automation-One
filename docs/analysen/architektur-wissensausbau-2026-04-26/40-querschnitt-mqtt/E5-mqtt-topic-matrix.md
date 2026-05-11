@@ -75,7 +75,7 @@ Die folgende Tabelle dokumentiert alle im Code verifizierten Topics. Quellen: `t
 | 18 | `kaiser/god/esp/{esp_id}/system/will` | ESP→Server (Broker) | 1 | — | (LWT beim Connect) | `LWTHandler` | Last-Will-Testament |
 | 19 | `kaiser/god/esp/{esp_id}/system/intent_outcome` | ESP→Server | 1 | — | `buildIntentOutcomeTopic()` | `IntentOutcomeHandler` | Intent/Outcome-Events |
 | 20 | `kaiser/god/esp/{esp_id}/system/intent_outcome/lifecycle` | ESP→Server | 1 | — | `buildIntentOutcomeLifecycleTopic()` | `IntentOutcomeLifecycleHandler` | CONFIG_PENDING-Lifecycle |
-| 21 | `kaiser/god/esp/{esp_id}/system/queue_pressure` | ESP→Server | 1 | — | `buildQueuePressureTopic()` | `QueuePressureHandler` | Publish-Queue-Backpressure (PKG-01) |
+| 21 | `kaiser/god/esp/{esp_id}/system/queue_pressure` | ESP→Server | 0 | — | `buildQueuePressureTopic()` | `QueuePressureHandler` | Publish-Queue-Backpressure (PKG-01); QoS 0 IST-Firmware (`communication_task.cpp`, AUT-363) |
 | 22 | `kaiser/god/esp/{esp_id}/config` | Server→ESP | 2 | 2 (kritisch) | `buildConfigTopic()` | `MQTT_TOPIC_ESP_CONFIG` / `Publisher.publish_config()` | Gesamt-Config (Sensoren + Aktoren) |
 | 23 | `kaiser/god/esp/{esp_id}/config_response` | ESP→Server | 2 | — | `buildConfigResponseTopic()` | `MQTT_TOPIC_ESP_CONFIG_RESPONSE` / `ConfigHandler` | Config-ACK vom ESP32 |
 | 24 | `kaiser/god/esp/{esp_id}/config/sensor/{gpio}` | Server→ESP | 2 | — | — | `MQTT_TOPIC_ESP_CONFIG_SENSOR` / `Publisher.publish_sensor_config()` | Einzelner Sensor-Config-Push |
@@ -264,15 +264,16 @@ Fehler-Codes: `JSON_PARSE_ERROR`, `VALIDATION_FAILED`, `GPIO_CONFLICT`, `NVS_WRI
 ```json
 {
   "event": "entered_pressure",
-  "fill_level": 85,
-  "high_watermark": 92,
-  "shed_count": 3,
-  "drop_count": 1,
+  "fill_level": 7,
+  "high_watermark": 8,
+  "shed_count": 0,
+  "drop_count": 0,
+  "threshold": 6,
   "ts": 1735818000
 }
 ```
 
-`event` ist entweder `"entered_pressure"` oder `"recovered"`.
+`event` ist entweder `"entered_pressure"` oder `"recovered"`. Feld `threshold` entspricht `PUBLISH_QUEUE_SHED_WATERMARK` (Firmware).
 
 ### 3.9 actuator/{gpio}/response (verifiziert aus `actuator_response_handler.py`)
 
@@ -315,8 +316,8 @@ Fehler-Codes: `JSON_PARSE_ERROR`, `VALIDATION_FAILED`, `GPIO_CONFLICT`, `NVS_WRI
 
 | QoS | Topics | Begründung |
 |-----|--------|------------|
-| **0** (At most once) | `system/heartbeat`, `system/heartbeat_metrics`, `system/diagnostics` | Regelmäßig, Verlust akzeptabel: nächste Nachricht kommt bald. Latenz-optimiert. |
-| **1** (At least once) | `sensor/{gpio}/data`, `sensor/batch`, `sensor/{gpio}/response`, `actuator/{gpio}/status`, `actuator/{gpio}/response`, `actuator/{gpio}/alert`, `actuator/emergency`, `session/announce`, `system/will` (LWT), `system/error`, `system/intent_outcome`, `system/intent_outcome/lifecycle`, `system/queue_pressure`, `zone/assign`, `zone/ack`, alle `subzone/*`, `server/status`, `system/heartbeat/ack` | Datenverlust unerwünscht, Duplikate sind verarbeitbar (idempotente Handler oder Dedup-Schlüssel). |
+| **0** (At most once) | `system/heartbeat`, `system/heartbeat_metrics`, `system/diagnostics`, `system/queue_pressure` | Regelmäßig bzw. seltene Telemetrie; Verlust akzeptabel (`queue_pressure`: Observability-only, direkter Publish-Pfad). Latenz-optimiert. |
+| **1** (At least once) | `sensor/{gpio}/data`, `sensor/batch`, `sensor/{gpio}/response`, `actuator/{gpio}/status`, `actuator/{gpio}/response`, `actuator/{gpio}/alert`, `actuator/emergency`, `session/announce`, `system/will` (LWT), `system/error`, `system/intent_outcome`, `system/intent_outcome/lifecycle`, `zone/assign`, `zone/ack`, alle `subzone/*`, `server/status`, `system/heartbeat/ack` | Datenverlust unerwünscht, Duplikate sind verarbeitbar (idempotente Handler oder Dedup-Schlüssel). |
 | **2** (Exactly once) | `sensor/{gpio}/command`, `actuator/{gpio}/command`, `system/command`, `config`, `config/sensor/{gpio}`, `config/actuator/{gpio}`, `config_response`, `broadcast/emergency` | Duplikate wären gefährlich: Aktor wird zweimal geschaltet, Config zweimal angewendet, Not-Aus zweimal ausgelöst. |
 
 ### QoS-Konstanten im Server (`constants.py`, verifiziert)

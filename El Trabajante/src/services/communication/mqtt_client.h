@@ -147,6 +147,10 @@ public:
     // ESP-IDF MQTT client outbox full (-2) drops for non-critical publishes (telemetry only)
     uint32_t getPublishOutboxNoncriticalDropCount() const;
 
+    // [FIX5-VERIFY] Total MQTT outbox-full events (msg_id == -2), all topic classes.
+    // Distinct from NoncriticalDropCount: critical topics go to NVS replay, still counted here.
+    uint32_t getPublishOutboxFullCount() const;
+
     // AUT-57: safePublish retry telemetry (total retries across all calls)
     uint32_t getSafePublishRetryCount() const;
 
@@ -260,6 +264,7 @@ private:
     // ============================================
 #ifdef ENABLE_METRICS_SPLIT
     struct MetricsSnapshot {
+        uint32_t publish_outbox_full_count;  // [FIX5-VERIFY] total msg_id==-2 events
         uint32_t offline_enter_count;
         uint32_t adopting_enter_count;
         uint32_t adoption_noop_count;
@@ -271,6 +276,7 @@ private:
         uint32_t publish_outbox_drop_count;
         uint32_t sensor_cmd_queue_overflow_count;
         uint32_t safe_publish_retry_count;
+        uint32_t intent_chain_stage_enqueue_fail_count;
         uint32_t emergency_rejected_no_token_total;
     };
     MetricsSnapshot last_metrics_;

@@ -16,6 +16,7 @@
 // Memory guard (ESP32 without PSRAM):
 // 15 slots consumed ~33 KB heap and repeatedly prevented CommTask creation on real devices.
 // 8 slots still absorb short bursts while preserving headroom for Core-0 network task startup.
+// (AUT-344: older docs may still say 15 — single queue `g_publish_queue`, depth is PUBLISH_QUEUE_SIZE.)
 static const uint8_t  PUBLISH_QUEUE_SIZE      = 8;      // 8 * ~2180 B = ~18 KB heap
 static const uint16_t PUBLISH_TOPIC_MAX_LEN   = 128;
 // AUT-134: Heartbeat payload can exceed 1KB during reconnect/config bursts.
@@ -47,18 +48,36 @@ struct PublishQueuePressureStats {
 
 extern QueueHandle_t g_publish_queue;
 
+// AUT-344: Distinguish proactive shed (backpressure) from hard enqueue failures so
+// MQTTClient can avoid counting intentional telemetry drops as transport/CB failures.
+enum class PublishQueueEnqueueResult : uint8_t {
+    Enqueued = 0,
+    ShedBackpressure = 1,
+    Failed = 2,
+};
+
 // Create the publish queue — call in setup() BEFORE createSafetyTask().
 void initPublishQueue();
 
 // Enqueue a publish request from any task. Non-blocking: returns false if queue is full.
 // AUT-55: When queue fill >= PUBLISH_QUEUE_SHED_WATERMARK and !critical, the message
 // is proactively shed (returns false) to protect critical publish headroom.
-bool queuePublish(const char* topic,
-                  const char* payload,
-                  uint8_t qos,
-                  bool retain = false,
-                  bool critical = false,
-                  const IntentMetadata* metadata = nullptr);
+PublishQueueEnqueueResult tryQueuePublish(const char* topic,
+                                          const char* payload,
+                                          uint8_t qos,
+                                          bool retain = false,
+                                          bool critical = false,
+                                          const IntentMetadata* metadata = nullptr);
+
+inline bool queuePublish(const char* topic,
+                         const char* payload,
+                         uint8_t qos,
+                         bool retain = false,
+                         bool critical = false,
+                         const IntentMetadata* metadata = nullptr) {
+    return tryQueuePublish(topic, payload, qos, retain, critical, metadata) ==
+           PublishQueueEnqueueResult::Enqueued;
+}
 
 // AUT-55: Query current queue pressure stats for heartbeat telemetry.
 PublishQueuePressureStats getPublishQueuePressureStats();

@@ -216,7 +216,13 @@ QOS_ACTUATOR_COMMAND = 1  # At least once (was: 2 — see AUT-331)
 QOS_SENSOR_COMMAND = 1  # At least once (was: 2 — same reason as AUT-331)
 QOS_HEARTBEAT = 0  # At most once
 QOS_HEARTBEAT_METRICS = 0  # At most once (same as core heartbeat)
-QOS_CONFIG = 2  # Exactly once
+# AUT-331: Reduced from QoS 2 to QoS 1.
+# Config pushes on reconnect (sensor_config, actuator_config, full config) used QoS 2,
+# generating PUBREC+PUBCOMP OUTBOX slots on the ESP. Combined with actuator command bursts
+# these exhausted the 4096-byte OUTBOX → TCP write timeout → crash.
+# QoS 1 (at-least-once) is sufficient: ESP firmware deduplicates config via config_response
+# contract and safety-epoch invalidation. Re-delivery on reconnect is acceptable.
+QOS_CONFIG = 1  # At least once (was: 2 — see AUT-331)
 
 # =============================================================================
 # LIMITS & CONSTRAINTS
