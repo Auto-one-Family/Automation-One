@@ -335,6 +335,12 @@ INTENT_OUTCOME_LIFECYCLE_TOTAL = Counter(
     ["event_type", "schema"],
 )
 
+INTENT_TRACING_DEGRADED_TOTAL = Counter(
+    "intent_tracing_degraded_total",
+    "Intent trace ingest degraded (malformed lifecycle, contract-unknown bursts, etc.)",
+    ["reason", "esp_id"],
+)
+
 MQTT_ACK_REASON_CODE_TOTAL = Counter(
     "mqtt_ack_reason_code_total",
     "Zone/subzone ACK payloads carrying firmware reason_code",
@@ -677,6 +683,13 @@ def init_metrics() -> None:
             INTENT_OUTCOME_FIRMWARE_CODE_TOTAL.labels(flow=_flow, code=_code)
     for _et in ("entered_config_pending", "exit_blocked_config_pending", "exited_config_pending"):
         INTENT_OUTCOME_LIFECYCLE_TOTAL.labels(event_type=_et, schema="config_pending_lifecycle_v1")
+    for _reason in (
+        "malformed_lifecycle_payload",
+        "contract_unknown_intent_outcome",
+        "intent_outcome_missing_intent_id",
+    ):
+        for _esp in ("unknown", "ESP_TEST"):
+            INTENT_TRACING_DEGRADED_TOTAL.labels(reason=_reason, esp_id=_esp)
     for _kind in ("zone", "subzone"):
         for _rc in ("config_lane_busy", "json_parse_error", "subzone_not_found", "none"):
             MQTT_ACK_REASON_CODE_TOTAL.labels(ack_kind=_kind, reason_code=_rc)
@@ -973,6 +986,13 @@ def increment_intent_outcome_lifecycle(event_type: str, schema: str) -> None:
     INTENT_OUTCOME_LIFECYCLE_TOTAL.labels(event_type=et, schema=sc).inc()
 
 
+def increment_intent_tracing_degraded(reason: str, esp_id: str, amount: int = 1) -> None:
+    """Count degraded intent-trace ingest paths (AUT-347 / Loki-friendly correlation)."""
+    r = _sanitize_metric_label(reason, max_len=48)
+    e = _sanitize_metric_label(esp_id, max_len=48)
+    INTENT_TRACING_DEGRADED_TOTAL.labels(reason=r, esp_id=e).inc(max(int(amount), 1))
+
+
 def increment_mqtt_ack_reason_code(ack_kind: str, reason_code: str) -> None:
     """Count zone/subzone ACK reason_code values from firmware."""
     kind = _sanitize_metric_label(ack_kind, max_len=16)
@@ -1015,6 +1035,7 @@ def observe_heartbeat_firmware_counters(esp_id: str, payload: dict) -> None:
         "heartbeat_degraded_count",
         "publish_queue_drop_count",
         "safe_publish_retry_count",
+        "intent_chain_stage_enqueue_fail_count",
     )
     esp_label = str(esp_id) if esp_id else "unknown"
     for field in counter_fields:

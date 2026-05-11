@@ -8,6 +8,9 @@ Scope:
 - Parse the topic to extract the ESP identifier.
 - Increment a Prometheus counter labelled by (esp_id, event).
 - Emit a structured log line for Loki/Grafana correlation.
+  ``entered_pressure`` uses **WARNING** so entries remain visible when the
+  process root logger is set to WARNING (e.g. Pi/production); ``recovered``
+  stays at INFO.
 
 Explicitly NOT in scope:
 - No database writes.
@@ -80,26 +83,32 @@ class QueuePressureHandler:
 
             increment_queue_pressure_event(esp_id, event)
 
-            logger.info(
+            log_msg = (
                 "Queue pressure event: esp_id=%s event=%s fill_level=%s "
-                "high_watermark=%s shed_count=%s drop_count=%s",
+                "high_watermark=%s shed_count=%s drop_count=%s"
+            )
+            log_args = (
                 esp_id,
                 event,
                 safe_payload.get("fill_level"),
                 safe_payload.get("high_watermark"),
                 safe_payload.get("shed_count"),
                 safe_payload.get("drop_count"),
-                extra={
-                    "event_class": "QUEUE_PRESSURE",
-                    "result": event,
-                    "classification": "observability",
-                    "esp_id": esp_id,
-                    "fill_level": safe_payload.get("fill_level"),
-                    "high_watermark": safe_payload.get("high_watermark"),
-                    "shed_count": safe_payload.get("shed_count"),
-                    "drop_count": safe_payload.get("drop_count"),
-                },
             )
+            log_extra = {
+                "event_class": "QUEUE_PRESSURE",
+                "result": event,
+                "classification": "observability",
+                "esp_id": esp_id,
+                "fill_level": safe_payload.get("fill_level"),
+                "high_watermark": safe_payload.get("high_watermark"),
+                "shed_count": safe_payload.get("shed_count"),
+                "drop_count": safe_payload.get("drop_count"),
+            }
+            if event == "entered_pressure":
+                logger.warning(log_msg, *log_args, extra=log_extra)
+            else:
+                logger.info(log_msg, *log_args, extra=log_extra)
             return True
 
         except Exception as e:

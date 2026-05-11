@@ -41,6 +41,7 @@ from ...services.intent_outcome_contract import (
     serialize_intent_outcome_row,
 )
 from ..topics import TopicBuilder
+from .tracing_degraded_emit import emit_tracing_degraded
 
 logger = get_logger(__name__)
 
@@ -70,8 +71,13 @@ class IntentOutcomeHandler:
                 payload["code"] = "CONTRACT_MISSING_INTENT_ID"
                 payload["reason"] = "Contract violation: missing intent_id"
                 payload["retryable"] = False
-                logger.warning(
-                    "intent_outcome missing intent_id normalized: esp_id=%s correlation_id=%s seq=%s ts=%s",
+                emit_tracing_degraded(
+                    esp_id,
+                    "intent_outcome_missing_intent_id",
+                    (
+                        "tracing_degraded esp_id=%s reason=intent_outcome_missing_intent_id "
+                        "correlation_id=%s seq=%s ts=%s (AUT-347)"
+                    ),
                     esp_id,
                     corr_seed,
                     seq_seed,
@@ -163,6 +169,18 @@ class IntentOutcomeHandler:
             )
             if canonical.is_contract_violation and canonical.code == "CONTRACT_UNKNOWN_CODE":
                 increment_contract_unknown_code("intent_outcome")
+                emit_tracing_degraded(
+                    esp_id,
+                    "contract_unknown_intent_outcome",
+                    (
+                        "tracing_degraded esp_id=%s reason=contract_unknown_intent_outcome "
+                        "raw_flow=%s raw_outcome=%s intent_id=%s (AUT-347)"
+                    ),
+                    esp_id,
+                    canonical.raw_flow,
+                    canonical.raw_outcome,
+                    intent_id,
+                )
             if payload.get("code"):
                 observe_intent_outcome_firmware_code(
                     str(payload.get("flow") or ""), str(payload.get("code"))
