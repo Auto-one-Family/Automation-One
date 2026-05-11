@@ -13,9 +13,17 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.command_contract import CommandIntent, CommandOutcome
+from ...core.logging_config import get_logger
 from ...services.intent_outcome_contract import canonicalize_intent_outcome
 
+logger = get_logger(__name__)
+
 LEGACY_OUTCOMES = {"accepted", "applied", "rejected", "failed", "expired"}
+
+# AUT-329: Outcomes that are considered terminal/final for ordering-race protection.
+# Maps to FINAL_OUTCOMES in intent_outcome_contract.py plus "applied" which the firmware
+# may emit after "accepted" (non-terminal → terminal progression is allowed; the reverse is not).
+_TERMINAL_OUTCOMES = frozenset({"persisted", "rejected", "failed", "expired", "applied"})
 
 # Inbound intent_outcome already advanced orchestration — never overwrite with "sent".
 _INTENT_ORCH_ADVANCED_FROM_DEVICE = frozenset({"accepted", "ack_pending"})
@@ -198,6 +206,25 @@ class CommandContractRepository:
 
         existing_generation = existing.generation if existing.generation is not None else -1
         existing_seq = existing.seq if existing.seq is not None else -1
+
+        # AUT-329: Terminal-beats-non-terminal guard.
+        # MQTT OUTBOX pressure or reconnect bursts can deliver a non-terminal message
+        # (e.g. "accepted") *after* a terminal one (e.g. "failed") due to QoS reordering.
+        # If the stored outcome is already terminal and the incoming one is non-terminal,
+        # the incoming message is a stale delivery and must be silently discarded.
+        existing_outcome_str = str(existing.outcome).lower()
+        canonical_outcome_str = str(normalized["outcome"]).lower()
+        if (
+            existing_outcome_str in _TERMINAL_OUTCOMES
+            and canonical_outcome_str not in _TERMINAL_OUTCOMES
+        ):
+            logger.debug(
+                "[AUT-329] Skipping non-terminal '%s' delivery after terminal '%s': intent_id=%s",
+                canonical_outcome_str,
+                existing_outcome_str,
+                intent_id,
+            )
+            return existing, True
 
         # Out-of-order protection: stale generations/sequences are ignored.
         if (incoming_generation < existing_generation) or (
