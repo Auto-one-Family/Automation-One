@@ -659,13 +659,20 @@ void subscribeToAllTopics() {
   // Queue in priority order to avoid post-connect subscribe bursts on weak TCP windows.
   // Critical control-plane topics come first.
   mqttClient.queueSubscribe(TopicBuilder::buildSystemHeartbeatAckTopic(), 1, true);
-  mqttClient.queueSubscribe(TopicBuilder::buildConfigTopic(), 2, true);
-  mqttClient.queueSubscribe(TopicBuilder::buildSystemCommandTopic(), 2, true);
-  mqttClient.queueSubscribe(TopicBuilder::buildBroadcastEmergencyTopic(), 2, true);
+  // AUT-331 Fix#4: QoS 1 (was: 2). Server reduced QOS_CONFIG 2→1 (constants.py).
+  // QoS 2 subscribe + retained QoS-2 config messages from before Fix#4 would still
+  // generate PUBREC+PUBCOMP OUTBOX slots. QoS 1 subscribe caps delivery at QoS 1
+  // regardless of retained message QoS, eliminating residual OUTBOX pressure.
+  mqttClient.queueSubscribe(TopicBuilder::buildConfigTopic(), 1, true);
+  mqttClient.queueSubscribe(TopicBuilder::buildSystemCommandTopic(), 1, true);
+  mqttClient.queueSubscribe(TopicBuilder::buildBroadcastEmergencyTopic(), 2, true);  // kept: server publishes broadcast/emergency at QoS 2
 
   String actuator_wildcard = String(TopicBuilder::buildActuatorCommandTopic(0));
   actuator_wildcard.replace("/0/command", "/+/command");
-  mqttClient.queueSubscribe(actuator_wildcard, 2, true);
+  // AUT-331: QoS 1 (was: 2). Server also reduced to QoS 1 (constants.py QOS_ACTUATOR_COMMAND).
+  // QoS 2 delivery binds two OUTBOX slots per command (PUBREC + PUBCOMP); under rapid
+  // ON+OFF (<2s) this exhausts the 4096-byte OUTBOX alongside lifecycle publishes.
+  mqttClient.queueSubscribe(actuator_wildcard, 1, true);
 
   mqttClient.queueSubscribe(TopicBuilder::buildActuatorEmergencyTopic(), 1, true);
   mqttClient.queueSubscribe(TopicBuilder::buildZoneAssignTopic(), 1, true);
@@ -675,7 +682,7 @@ void subscribeToAllTopics() {
 
   String sensor_wildcard = String(TopicBuilder::buildSensorCommandTopic(0));
   sensor_wildcard.replace("/0/command", "/+/command");
-  mqttClient.queueSubscribe(sensor_wildcard, 2, false);
+  mqttClient.queueSubscribe(sensor_wildcard, 1, false);  // AUT-331: QoS 1 (was: 2)
 
   mqttClient.queueSubscribe(TopicBuilder::buildServerStatusTopic(), 1, false);  // SAFETY-P5: Server LWT (QoS 1)
 

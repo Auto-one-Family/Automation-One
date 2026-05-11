@@ -679,8 +679,8 @@ void ActuatorManager::processActuatorLoops() {
       actuators_[i].command_duration_end_ms = 0;
       actuators_[i].last_command_source = "firmware:auto_duration";
       controlActuatorBinary(actuators_[i].config.gpio, false);
+      // controlActuatorBinary already calls publishActuatorStatus on state change — no second call.
       actuators_[i].config = actuators_[i].driver->getConfig();
-      publishActuatorStatus(actuators_[i].config.gpio);
       continue;  // Skip further processing this iteration
     }
 
@@ -1071,9 +1071,11 @@ void ActuatorManager::publishActuatorStatus(uint8_t gpio) {
   actuator->config = actuator->driver->getConfig();
   String payload = buildStatusPayload(status, actuator->config);
   const char* topic = TopicBuilder::buildActuatorStatusTopic(gpio);
-  // Status is high-frequency telemetry. Keep QoS1, but avoid safePublish retry bursts
-  // under broker/outbox backpressure (AUT-55 pressure scenario).
-  mqttClient.publish(String(topic), payload, 1);
+  // AUT-326: QoS 0 — actuator status is supplementary telemetry, not a safety signal.
+  // Authority for command delivery is actuator/response (QoS 1) + system/intent_outcome (QoS 1).
+  // QoS 0 keeps status messages out of the ESP-IDF MQTT outbox entirely, preventing
+  // heap exhaustion under TCP backpressure when ON+OFF commands arrive in rapid succession.
+  mqttClient.publish(String(topic), payload, 0);
 }
 
 void ActuatorManager::publishAllActuatorStatus() {

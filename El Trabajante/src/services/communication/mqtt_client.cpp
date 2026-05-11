@@ -7,6 +7,7 @@
 #include "../../services/communication/wifi_manager.h"
 #include "../../utils/time_manager.h"
 #include "../../config/feature_flags.h"
+#include "../../config/firmware_version.h"
 #include <WiFi.h>
 #include <esp_system.h>
 #include <atomic>
@@ -39,6 +40,10 @@ static bool isCriticalPublishTopic(const String& topic) {
 
 #ifndef MQTT_USE_PUBSUBCLIENT
 static std::atomic<uint32_t> g_publish_outbox_noncritical_drops{0};
+// [FIX5-VERIFY] Total MQTT outbox-full events (msg_id == -2), all topic classes.
+// Distinct from noncritical_drops: critical topics hit NVS replay instead of drop,
+// but still count as outbox-full events — this counter tracks event frequency.
+static std::atomic<uint32_t> g_publish_outbox_full_count{0};
 // True while routeIncomingMessage() executes inside MQTT_EVENT_DATA callback.
 // Publishing directly from this context can re-enter MQTT internals on Core 0.
 static std::atomic<bool> g_in_mqtt_event_callback{false};
@@ -72,12 +77,18 @@ static void logAdmissionCorrelationBlockedPublish(const String& topic,
         return;
     }
     IntentMetadata metadata = extractIntentMetadataFromPayload(payload.c_str(), "admission");
-    LOG_W(TAG, String("[ADMISSION] Publish blocked (reason_code=") +
-               (reason_code != nullptr ? reason_code : "UNKNOWN") +
-               ", topic=" + topic +
-               ", intent_id=" + String(metadata.intent_id) +
-               ", correlation_id=" + String(metadata.correlation_id) +
-               ", epoch=" + String(metadata.epoch_at_accept) + ")");
+    // [FIX3-VERIFY] snprintf on stack — previous String-concat was OOM-risky on the
+    // OUTBOX-pressure path where this function is called (safePublish blocked).
+    char log_buf[256];
+    snprintf(log_buf, sizeof(log_buf),
+             "[ADMISSION][FIX3-VERIFY] blocked reason=%s topic=%s intent=%s corr=%s epoch=%lu",
+             reason_code != nullptr ? reason_code : "UNKNOWN",
+             topic.c_str(),
+             metadata.intent_id,
+             metadata.correlation_id,
+             (unsigned long)metadata.epoch_at_accept);
+    log_buf[sizeof(log_buf) - 1] = '\0';
+    LOG_W(TAG, log_buf);
 }
 
 static bool isWritePathTimeoutErrno(int sock_errno) {
@@ -407,6 +418,18 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     // Portal recovery for MQTT failure now happens via the 5-minute persistent-failure timer
     // in loop() (CircuitBreaker OPEN → provisionManager.startAPModeForReconfig()).
     LOG_I(TAG, "[M2] ESP-IDF MQTT client started — connecting in background");
+    // [FIX2-VERIFY] Log MQTT buffer config at connect time so serial monitor confirms
+    // OUTBOX=16384 (via sdkconfig CONFIG_MQTT_OUTBOX_SIZE_BYTES) is active.
+    // out_buffer_size is the transport send buffer (runtime); OUTBOX is compile-time sdkconfig.
+    {
+        char cfg_log[128];
+        snprintf(cfg_log, sizeof(cfg_log),
+                 "[FIX2-VERIFY] MQTT cfg: out_buffer=%u buffer=%u "
+                 "OUTBOX=16384(sdkconfig) expiry=10000ms",
+                 (unsigned)mqtt_cfg.out_buffer_size,
+                 (unsigned)mqtt_cfg.buffer_size);
+        LOG_I(TAG, cfg_log);
+    }
     return true;
 
 #else
@@ -542,6 +565,14 @@ uint32_t MQTTClient::getPublishOutboxNoncriticalDropCount() const {
 #endif
 }
 
+uint32_t MQTTClient::getPublishOutboxFullCount() const {
+#ifndef MQTT_USE_PUBSUBCLIENT
+    return g_publish_outbox_full_count.load();
+#else
+    return 0;
+#endif
+}
+
 uint32_t MQTTClient::getSafePublishRetryCount() const {
     return safe_publish_retry_count_;
 }
@@ -642,7 +673,16 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
         LOG_D(TAG, "Published [msg_id=" + String(msg_id) + "]: " + topic);
         return true;
     } else if (msg_id == -2) {
-        LOG_W(TAG, "MQTT Outbox full, message dropped: " + topic);
+        uint32_t full_count = g_publish_outbox_full_count.fetch_add(1) + 1;
+        // [FIX5-VERIFY] Serial confirms outbox-full events with heap + counter so we
+        // can verify that OUTBOX=16384 (sdkconfig) reduces this count under burst load.
+        {
+            char outbox_log[112];
+            snprintf(outbox_log, sizeof(outbox_log),
+                     "[FIX5-VERIFY] OUTBOX full #%u topic=%.60s heap=%u",
+                     (unsigned)full_count, topic.c_str(), (unsigned)ESP.getFreeHeap());
+            LOG_W(TAG, outbox_log);
+        }
         circuit_breaker_.recordFailure();
         // Avoid recursive publishIntentOutcome when the failing publish IS intent_outcome
         // (publishIntentOutcome already persists to NVS on publish failure).
@@ -1383,6 +1423,9 @@ void MQTTClient::publishHeartbeat(bool force) {
     payload += "\"uptime\":" + String(millis() / 1000) + ",";
     payload += "\"heap_free\":" + String(ESP.getFreeHeap()) + ",";
     payload += "\"wifi_rssi\":" + String(WiFi.RSSI()) + ",";
+    // [FIX5-VERIFY] firmware_version in core heartbeat — server can confirm which
+    // firmware build is running without a separate API call or provisioning page.
+    payload += "\"firmware_version\":\"" + String(KAISER_FIRMWARE_VERSION_STRING) + "\",";
     payload += "\"sensor_count\":" + String(sensorManager.getActiveSensorCount()) + ",";
     payload += "\"actuator_count\":" + String(actuatorManager.getActiveActuatorCount()) + ",";
     payload += "\"zone_name\":\"" + g_kaiser.zone_name + "\",";
@@ -1509,6 +1552,7 @@ void MQTTClient::publishHeartbeatMetrics() {
     }
 
     MetricsSnapshot current = {};
+    current.publish_outbox_full_count = getPublishOutboxFullCount();
     current.offline_enter_count = offlineModeManager.getOfflineEnterCount();
     current.adopting_enter_count = offlineModeManager.getAdoptingEnterCount();
     current.adoption_noop_count = offlineModeManager.getAdoptionNoopCount();
@@ -1556,6 +1600,10 @@ void MQTTClient::publishHeartbeatMetrics() {
                String(current.critical_outcome_drop_count) + ",";
     payload += "\"publish_outbox_drop_count\":" +
                String(current.publish_outbox_drop_count) + ",";
+    // [FIX5-VERIFY] publish_outbox_full_count: total msg_id==-2 outbox-full events.
+    // Complements drop_count: critical topics escape via NVS replay so drop_count != full_count.
+    payload += "\"publish_outbox_full_count\":" +
+               String(current.publish_outbox_full_count) + ",";
 #ifndef MQTT_USE_PUBSUBCLIENT
     {
         PublishQueuePressureStats pq_stats = getPublishQueuePressureStats();

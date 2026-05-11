@@ -9,3 +9,10 @@ CONFIG_MQTT_TASK_STACK_SIZE=10240
 # Prevents heap exhaustion when PUBACK is delayed by TCP send-buffer pressure.
 # 10s covers realistic reconnect windows. Non-critical data loss on slow brokers: accepted.
 CONFIG_MQTT_OUTBOX_EXPIRED_TIMEOUT_MS=10000
+
+# AUT-331: Increase OUTBOX from 4096 (default) to 16384 bytes.
+# Root cause: rapid ON+OFF actuator commands within <2s generate ~2300 bytes of QoS-1
+# messages (lifecycle chain stages + terminal intent_outcome) per command cycle.
+# At default 4096 bytes, two cycles saturate the outbox → TCP write timeout → disconnect.
+# 16384 bytes gives 4x headroom for burst scenarios without changing delivery semantics.
+CONFIG_MQTT_OUTBOX_SIZE_BYTES=16384

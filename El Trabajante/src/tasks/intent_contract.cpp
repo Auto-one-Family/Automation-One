@@ -117,8 +117,24 @@ static const char* mapLegacyStatus(const char* normalized_outcome) {
 
 static String buildFallbackId(const char* prefix, std::atomic<uint32_t>& counter_ref) {
     uint32_t idx = counter_ref.fetch_add(1) + 1;
-    String p = prefix != nullptr ? String(prefix) : String("fw");
-    return p + "_" + String(millis()) + "_" + String(idx);
+    // [FIX1-VERIFY] snprintf on a stack buffer — zero heap allocs before String(buf).
+    // Previous 4-concat chain (String(prefix) + "_" + String(millis()) + ...) could
+    // allocate-fail under OUTBOX pressure, leaving buffer=nullptr → LoadProhibited crash.
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%s_%lu_%u",
+             prefix != nullptr ? prefix : "fw",
+             (unsigned long)millis(), (unsigned int)idx);
+    buf[sizeof(buf) - 1] = '\0';
+    uint32_t heap = ESP.getFreeHeap();
+    char log_msg[96];
+    snprintf(log_msg, sizeof(log_msg),
+             "[FIX1-VERIFY] buildFallbackId: id=%s heap=%u", buf, heap);
+    if (heap < 30000) {
+        LOG_W(IC_TAG, log_msg);
+    } else {
+        LOG_D(IC_TAG, log_msg);
+    }
+    return String(buf);
 }
 
 static SemaphoreHandle_t getOutboxMutex() {
@@ -641,13 +657,17 @@ void recordIntentChainStage(const IntentMetadata& metadata,
     String payload;
     if (serializeJson(event_doc, payload) > 0) {
 #ifndef MQTT_USE_PUBSUBCLIENT
-        // [INC-EA5484] AUT-56: Route lifecycle through publish queue for retry resilience.
+        // AUT-331: QoS 0 — lifecycle chain-stage events are observability telemetry only.
+        // QoS 1 put these into the ESP-IDF MQTT OUTBOX (4+ per command cycle), causing
+        // OUTBOX exhaustion under rapid ON+OFF (<2s) and cascading TCP write timeouts.
+        // Delivery guarantee for actuator outcomes lives in intent_outcome (QoS 1 terminal)
+        // and NVS replay outbox — not in the lifecycle trace topic.
         const char* lifecycle_topic = TopicBuilder::buildIntentOutcomeLifecycleTopic();
-        if (!queuePublish(lifecycle_topic, payload.c_str(), 1, false, true, nullptr)) {
+        if (!queuePublish(lifecycle_topic, payload.c_str(), 0, false, true, nullptr)) {
             LOG_W(IC_TAG, "[INC-EA5484] Lifecycle chain-stage enqueue failed: " + String(stage));
         }
 #else
-        mqttClient.publish(TopicBuilder::buildIntentOutcomeLifecycleTopic(), payload, 1);
+        mqttClient.publish(TopicBuilder::buildIntentOutcomeLifecycleTopic(), payload, 0);
 #endif
     }
 }
