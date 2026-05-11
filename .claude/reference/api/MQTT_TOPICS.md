@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # MQTT Topic Referenz
 
-> **Version:** 2.26 | **Aktualisiert:** 2026-05-08
+> **Version:** 2.27 | **Aktualisiert:** 2026-05-11
 > **Quellen:** `El Trabajante/docs/Mqtt_Protocoll.md`, `CLAUDE_SERVER.md` Section 4
 > **Verifiziert gegen:** `topic_builder.cpp`, `main.py`, `constants.py`
-> **Änderungen:** **AUT-117 (2026-05-06):** Topic `actuator/{gpio}/latched_offline` (ESP→Server, QoS 0) meldet Aktor-Latch-Zustand bei Disconnect (reason: `offline_rule_hold`/`safety_forced_off`/`manual_override`). Server: `ActuatorLatchedOfflineHandler` (Log + WS-Broadcast). Firmware: `publishLatchedOffline()` in `actuator_manager.cpp`. Zuvor: **AUT-118 (2026-04-28):** Bidirektionaler ACK-Flow für Emergency-Stop/Recovery: Topics `actuator/emergency/ack` (Section 2.6) und `actuator/recovery_confirm` (Section 2.7). Zuvor: **AUT-121 (2026-04-24):** Topic `system/heartbeat_metrics` (ESP→Server, QoS 0) koppelt Laufzeit-Counter vom Core-Heartbeat ab. Server: `HeartbeatMetricsHandler`; Firmware: `ENABLE_METRICS_SPLIT` → `publishHeartbeatMetrics()`. Zuvor: **PKG-01 (2026-04-20):** Neuer Topic `system/queue_pressure` (ESP→Server, QoS 1). Zuvor: **AUT-69 (2026-04-20):** `session/announce` Contract. Zuvor: **AUT-54 (2026-04-17):** Heartbeat Bootstrap-Fix. Zuvor: **PKG-05 (2026-04-14):** Heartbeat/ack Reject-Diagnose. Zuvor: **Epic1-05:** Intent-Orchestration-State `sent`; **MQTTCommandBridge** `resolve_ack`; Heartbeat-Felder; Intent-Outcome-Codes (2026-04-05). Früher: Contract-Härtung, Canonical-First Ingest (2026-04-04).
+> **Änderungen:** **AUT-331 (2026-05-11, Fix#4):** `config` + `system/command` QoS 2→1 (`constants.py:QOS_CONFIG`, `publisher.py` 4 Stellen). Eliminiert letzten häufigen QoS-2-Pfad (Config-Republishes auf Reconnect). Zuvor: **AUT-331 (2026-05-10):** `actuator/{gpio}/command` + `sensor/{gpio}/command` QoS 2→1 (Server `constants.py` + ESP subscribe `main.cpp`). `intent_outcome/lifecycle` chain stages (`recordIntentChainStage`) QoS 1→0 (`intent_contract.cpp`). MQTT-OUTBOX 4KB→16KB (`sdkconfig.defaults`). Root cause: rapid ON+OFF (<2s) exhausted 4096-byte OUTBOX → TCP write timeout → crash. Zuvor: **AUT-117 (2026-05-06):** Topic `actuator/{gpio}/latched_offline` (ESP→Server, QoS 0) meldet Aktor-Latch-Zustand bei Disconnect (reason: `offline_rule_hold`/`safety_forced_off`/`manual_override`). Server: `ActuatorLatchedOfflineHandler` (Log + WS-Broadcast). Firmware: `publishLatchedOffline()` in `actuator_manager.cpp`. Zuvor: **AUT-118 (2026-04-28):** Bidirektionaler ACK-Flow für Emergency-Stop/Recovery: Topics `actuator/emergency/ack` (Section 2.6) und `actuator/recovery_confirm` (Section 2.7). Zuvor: **AUT-121 (2026-04-24):** Topic `system/heartbeat_metrics` (ESP→Server, QoS 0) koppelt Laufzeit-Counter vom Core-Heartbeat ab. Server: `HeartbeatMetricsHandler`; Firmware: `ENABLE_METRICS_SPLIT` → `publishHeartbeatMetrics()`. Zuvor: **PKG-01 (2026-04-20):** Neuer Topic `system/queue_pressure` (ESP→Server, QoS 1). Zuvor: **AUT-69 (2026-04-20):** `session/announce` Contract. Zuvor: **AUT-54 (2026-04-17):** Heartbeat Bootstrap-Fix. Zuvor: **PKG-05 (2026-04-14):** Heartbeat/ack Reject-Diagnose. Zuvor: **Epic1-05:** Intent-Orchestration-State `sent`; **MQTTCommandBridge** `resolve_ack`; Heartbeat-Felder; Intent-Outcome-Codes (2026-04-05). Früher: Contract-Härtung, Canonical-First Ingest (2026-04-04).
 
 ---
 
@@ -31,9 +31,9 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 |---------------|----------|-----|--------------|
 | `kaiser/god/esp/{esp_id}/sensor/{gpio}/data` | ESP→Server | 1 | Sensor sendet Rohdaten |
 | `kaiser/god/esp/{esp_id}/sensor/batch` | ESP→Server | 1 | Batch Sensor-Daten |
-| `kaiser/god/esp/{esp_id}/sensor/{gpio}/command` | Server→ESP | 2 | Sensor-Befehl (on-demand) |
+| `kaiser/god/esp/{esp_id}/sensor/{gpio}/command` | Server→ESP | 1 | Sensor-Befehl (on-demand) |
 | `kaiser/god/esp/{esp_id}/sensor/{gpio}/response` | ESP→Server | 1 | Sensor-Command Response |
-| `kaiser/god/esp/{esp_id}/actuator/{gpio}/command` | Server→ESP | 2 | Server steuert Actuator |
+| `kaiser/god/esp/{esp_id}/actuator/{gpio}/command` | Server→ESP | 1 | Server steuert Actuator |
 | `kaiser/god/esp/{esp_id}/actuator/{gpio}/status` | ESP→Server | 1 | Actuator meldet Status |
 | `kaiser/god/esp/{esp_id}/actuator/{gpio}/response` | ESP→Server | 1 | Command Response |
 | `kaiser/god/esp/{esp_id}/actuator/{gpio}/alert` | ESP→Server | 1 | Actuator Alert |
@@ -44,17 +44,17 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 | `kaiser/god/esp/{esp_id}/system/heartbeat_metrics` | ESP→Server | 0 | Heartbeat Metrics (Extended Telemetry, AUT-121) |
 | `kaiser/god/esp/{esp_id}/system/heartbeat/ack` | Server→ESP | 1 | Heartbeat ACK (SAFETY-P5: QoS 1) |
 | `kaiser/god/server/status` | Server→ALL | 1 | Server LWT + Online/Offline (SAFETY-P5) |
-| `kaiser/god/esp/{esp_id}/system/command` | Server→ESP | 2 | System-Befehle |
+| `kaiser/god/esp/{esp_id}/system/command` | Server→ESP | 1 | System-Befehle |
 | `kaiser/god/esp/{esp_id}/system/response` | ESP→Server | 1 | System-Response |
 | `kaiser/god/esp/{esp_id}/system/diagnostics` | ESP→Server | 0 | Diagnostics |
 | `kaiser/god/esp/{esp_id}/system/will` | ESP→Server | 1 | LWT (Last Will) |
 | `kaiser/god/esp/{esp_id}/system/error` | ESP→Server | 1 | Error Event |
 | `kaiser/god/esp/{esp_id}/system/queue_pressure` | ESP→Server | 1 | Publish-Queue Backpressure Event (ENTER/RECOVERED, PKG-01) |
 | `kaiser/god/esp/{esp_id}/system/intent_outcome` | ESP→Server | 1 | Intent/Outcome Events (kanonisch `buildOutcomePayload`) |
-| `kaiser/god/esp/{esp_id}/system/intent_outcome/lifecycle` | ESP→Server | 1 | CONFIG_PENDING Lifecycle (`config_pending_lifecycle_v1`) |
+| `kaiser/god/esp/{esp_id}/system/intent_outcome/lifecycle` | ESP→Server | 0/1 | Chain stages (`intent_chain_stage_v1`, QoS 0) + CONFIG_PENDING transitions (`config_pending_lifecycle_v1`, QoS 1) |
 | `kaiser/god/esp/{esp_id}/status` | ESP→Server | 1 | System-Status |
 | `kaiser/god/esp/{esp_id}/safe_mode` | ESP→Server | 1 | Safe-Mode Status |
-| `kaiser/god/esp/{esp_id}/config` | Server→ESP | 2 | Config Update |
+| `kaiser/god/esp/{esp_id}/config` | Server→ESP | 1 | Config Update |
 | `kaiser/god/esp/{esp_id}/config_response` | ESP→Server | 2 | Config ACK |
 | `kaiser/god/esp/{esp_id}/zone/assign` | Server→ESP | 1 | Zone Assignment |
 | `kaiser/god/esp/{esp_id}/zone/ack` | ESP→Server | 1 | Zone Assignment ACK |
@@ -186,7 +186,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 
 **Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/command`
 
-**QoS:** 2 (exactly once)
+**QoS:** 1 (at least once) — AUT-331: reduziert von 2; QoS 2 belegte PUBREC+PUBCOMP-Slots im ESP OUTBOX
 **Verwendung:** On-Demand Measurement (Phase 2C)
 
 **Payload:**
@@ -251,7 +251,7 @@ Firmware sendet u. a. `raw` (ADC-Rohwert), `sensor_type`, `quality`, Outcome-Fel
 
 **Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/command`
 
-**QoS:** 2 (exactly once)
+**QoS:** 1 (at least once) — AUT-331: reduziert von 2; QoS 2 belegte PUBREC+PUBCOMP-Slots im ESP OUTBOX und erschöpfte die 4096-Byte-Grenze bei rapidem ON+OFF
 
 **Payload:**
 ```json
@@ -1254,12 +1254,12 @@ Event-Werte: `"ENTER"` (Backpressure aktiv), `"RECOVERED"` (Backpressure aufgeho
 
 **Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/system/intent_outcome/lifecycle`
 
-**QoS:** 1  
-**Semantik:** Nur **CONFIG_PENDING**-Runtime-Transitions (`entered_config_pending`, `exit_blocked_config_pending`, `exited_config_pending`). **Nicht** mit kanonischem `system/intent_outcome` mischen.
+**QoS:** 0 (`intent_chain_stage_v1`) / 1 (`config_pending_lifecycle_v1`)  
+**Semantik:** Zwei Schema-Klassen auf demselben Topic: (1) `config_pending_lifecycle_v1` — CONFIG_PENDING-Runtime-Transitions (`entered_config_pending`, `exit_blocked_config_pending`, `exited_config_pending`), QoS 1; (2) `intent_chain_stage_v1` — Tracing-Events aus `recordIntentChainStage()`, QoS 0 seit AUT-331. **Nicht** mit kanonischem `system/intent_outcome` mischen.
 
 **Pflichtfelder (Schema-Tag):** `schema` = `config_pending_lifecycle_v1`, `boot_sequence_id` (Korrelation zum Heartbeat), plus bestehende Transition-Felder (`event_type`, `reason_code`, Counter, Readiness-Snapshot — siehe `El Trabajante/docs/runtime-readiness-policy.md`).
 
-**Zustellungsrobustheit (AUT-56, 2026-04-17):** Lifecycle-Events werden über die AUT-55-Publish-Queue (`queuePublish`, `critical=true`) geroutet. Damit profitieren sie von den gleichen Retry-Mechanismen (3 Versuche + Backoff) wie andere kritische Publishes. Vor AUT-56 gingen Lifecycle-Events über einen Raw-Publish ohne Retry — bei Outbox-Druck (Error 3012) waren sie silent-drop-anfällig. `recordIntentChainStage()` (intent_chain_stage_v1) und `publishConfigPendingTransitionEvent()` (config_pending_lifecycle_v1) sind beide gehärtet.
+**Zustellungsrobustheit (AUT-56/AUT-331):** `publishConfigPendingTransitionEvent()` (`config_pending_lifecycle_v1`) nutzt `queuePublish(qos=1, critical=true)` — AUT-56-Retry-Pfad. `recordIntentChainStage()` (`intent_chain_stage_v1`) nutzt seit AUT-331 `queuePublish(qos=0, shed=true)` — reine Observability-Telemetrie ohne Delivery-Guarantee. Vor AUT-331 war chain-stage QoS 1 und füllte den ESP-IDF MQTT OUTBOX bei rapid-fire Actuator-Commands (4+ Slots/Zyklus → 4096-Byte-Limit erschöpft → TCP-Timeout → Crash).
 
 **Code-Referenzen:**
 - **ESP32:** `topic_builder.cpp:buildIntentOutcomeLifecycleTopic()`, `main.cpp:publishConfigPendingTransitionEvent()`

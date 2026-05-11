@@ -362,23 +362,19 @@ void publishSensorReading(const SensorReading& reading) {
 
 ### QoS-Verwendung (Firmware-Defaults)
 
-<<<<<<< Updated upstream
-| Message | QoS |
-|---------|-----|
-| Sensor Data | 1 |
-| Actuator Commands | 1 |
-| Session Announce | 1 |
-| Heartbeat | 0 |
-| Emergency Stop | 1 |
-=======
-| Message | Typischer QoS (Firmware) |
-|---------|---------------------------|
-| Sensor Data (Publish) | 1 |
-| Heartbeat (Publish) | 0 |
-| Emergency / kritische Publishes | oft 1 |
+| Message | QoS | Hinweis |
+|---------|-----|---------|
+| Sensor Data (Publish) | 1 | |
+| Actuator Commands (Subscribe) | 1 | AUT-331: war 2 |
+| Sensor Commands (Subscribe) | 1 | AUT-331: war 2 |
+| Session Announce | 1 | |
+| Heartbeat | 0 | |
+| Emergency Stop | 1 | |
+| intent_outcome terminal | 1 | NVS-Replay bei Fail |
+| intent_outcome lifecycle chain stages | 0 | AUT-331: war 1, reine Telemetrie |
+| actuator status | 0 | AUT-326 |
 
 **Abgleich:** Server- und Doku-QoS (`MQTT_TOPICS.md`) können von `subscribe`/`publish`-Aufrufen in `main.cpp` / `mqtt_client.cpp` abweichen — vor Änderungen beide lesen.
->>>>>>> Stashed changes
 
 ---
 

@@ -2823,14 +2823,14 @@ retry_count++;
 - MQTT-Dokument: "QoS 2 aktuell nicht verwendet"
 - Systemarchitektur: "Kaiser-Bridge nutzt QoS 2 (exactly once)"
 
-**✅ LÖSUNG (Finale Entscheidung):**
+**✅ LÖSUNG (Finale Entscheidung, bestätigt durch AUT-331 2026-05-10):**
 
-**QoS 1 überall (inkl. Kaiser-Node-Bridge)**
+**QoS 1 für Commands + Outcomes; QoS 0 für Telemetrie**
 
 **Begründung:**
 1. **Performance:** QoS 2 hat 2x Overhead (PUBREC/PUBREL/PUBCOMP)
-2. **ESP32-Limitierungen:** Begrenzte Ressourcen (Heap, CPU)
-3. **Duplikat-Detection:** God-Kaiser implementiert Idempotenz (siehe oben)
+2. **ESP32-Limitierungen:** Begrenzte MQTT OUTBOX (4096→16384 Bytes, AUT-331); QoS-2-Handshake erschöpfte OUTBOX bei rapid ON+OFF → TCP-Timeout → Crash
+3. **Duplikat-Detection:** God-Kaiser implementiert Idempotenz (intent_outcome + safety-epoch)
 4. **Praktikabilität:** QoS 1 + Duplikat-Detection = "effectively exactly once"
 5. **Simplicity:** Einheitliche QoS-Strategie im gesamten System
 
