@@ -23,6 +23,8 @@ public:
   static const char* buildActuatorStatusTopic(uint8_t gpio);    // Pattern 4
   static const char* buildActuatorResponseTopic(uint8_t gpio);  // Phase 5
   static const char* buildActuatorAlertTopic(uint8_t gpio);     // Phase 5
+  // AUT-117: latch telemetry at disconnect (ESP → Server, QoS 0)
+  static const char* buildActuatorLatchedOfflineTopic(uint8_t gpio);
   // ORPHANED - Redundant to actuator/{gpio}/alert. See Mqtt_Protocoll.md inventory.
   static const char* buildActuatorEmergencyTopic();             // Phase 5
   // AUT-118: Parallel application-level transport to intent_outcome (QoS 1)

@@ -22,6 +22,35 @@
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "SENSOR";
 
+// SAFETY-RTOS M4: serialize manual vs autonomous measurement (same as performAllMeasurements).
+namespace {
+class SensorArrayMutexLock {
+public:
+    SensorArrayMutexLock() = default;
+    bool tryTake(uint32_t wait_ms) {
+        if (xSemaphoreTake(g_sensor_mutex, pdMS_TO_TICKS(wait_ms)) == pdTRUE) {
+            held_ = true;
+            return true;
+        }
+        return false;
+    }
+    void give() {
+        if (held_) {
+            xSemaphoreGive(g_sensor_mutex);
+            held_ = false;
+        }
+    }
+    ~SensorArrayMutexLock() { give(); }
+
+    SensorArrayMutexLock(const SensorArrayMutexLock&) = delete;
+    SensorArrayMutexLock& operator=(const SensorArrayMutexLock&) = delete;
+
+private:
+    bool held_ = false;
+};
+
+static constexpr uint32_t kManualSensorMutexWaitMs = 10000;  // bounded wait vs portMAX_DELAY in autonomous path
+}  // namespace
 
 // ============================================
 // DS18B20 SPECIAL VALUE DETECTION (Defense-in-Depth)

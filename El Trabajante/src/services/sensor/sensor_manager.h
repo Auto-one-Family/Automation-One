@@ -164,6 +164,8 @@ private:
     #endif
     SensorConfig sensors_[MAX_SENSORS];
     uint8_t sensor_count_;
+    // AUT-303: reject duplicate on-demand measure while one is in progress (per slot)
+    bool manual_measure_busy_[MAX_SENSORS] = {};
     bool initialized_;
 
     // ============================================

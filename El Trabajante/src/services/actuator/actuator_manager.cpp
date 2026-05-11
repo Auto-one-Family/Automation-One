@@ -616,6 +616,7 @@ void ActuatorManager::setUncoveredActuatorsToSafeState() {
                    String(actuators_[i].config.critical ? "true" : "false") + ")");
         publishActuatorAlert(gpio, "offline_rule_hold",
                              "Actuator held ON — offline rule coverage active");
+        publishLatchedOffline(gpio, "offline_rule_hold", is_on);
       }
     } else {
       // AUT-66: Respect per-actuator fail_safe_on_disconnect policy.
@@ -1141,5 +1142,35 @@ void ActuatorManager::publishActuatorAlert(uint8_t gpio,
   payload += "\"message\":\"" + message + "\"";
   payload += "}";
   // AUT-54: QoS 0 — same OUTBOX/backpressure rationale as actuator/response.
+  mqttClient.safePublish(String(topic), payload, 0);
+}
+
+// QoS 0 — telemetry is best-effort: actuator state authority remains
+// `actuator/{gpio}/status` (QoS 1) and `actuator_history` (server-side).
+void ActuatorManager::publishLatchedOffline(uint8_t gpio,
+                                            const char* reason,
+                                            bool pre_disconnect_state) const {
+  if (reason == nullptr) {
+    return;
+  }
+  extern SystemConfig g_system_config;
+
+  time_t unix_ts = timeManager.getUnixTimestamp();
+  uint8_t offline_rule_count = offlineModeManager.getOfflineRuleCount();
+
+  const char* topic = TopicBuilder::buildActuatorLatchedOfflineTopic(gpio);
+  if (topic == nullptr || topic[0] == '\0') {
+    return;
+  }
+
+  String payload = "{";
+  payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
+  payload += "\"gpio\":" + String(gpio) + ",";
+  payload += "\"ts\":" + String((unsigned long)unix_ts) + ",";
+  payload += "\"reason\":\"" + String(reason) + "\",";
+  payload += "\"actuator_state\":\"" + String(pre_disconnect_state ? "on" : "off") + "\",";
+  payload += "\"offline_rule_count\":" + String(offline_rule_count);
+  payload += "}";
+
   mqttClient.safePublish(String(topic), payload, 0);
 }

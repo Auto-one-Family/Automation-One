@@ -174,6 +174,14 @@ const char* TopicBuilder::buildRecoveryConfirmTopic() {
   return validateTopicBuffer(written);
 }
 
+// AUT-117: kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/latched_offline (ESP → Server)
+const char* TopicBuilder::buildActuatorLatchedOfflineTopic(uint8_t gpio) {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/actuator/%d/latched_offline",
+                         kaiser_id_, esp_id_, gpio);
+  return validateTopicBuffer(written);
+}
+
 // Pattern 5: kaiser/god/esp/{esp_id}/system/heartbeat
 const char* TopicBuilder::buildSystemHeartbeatTopic() {
   int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
