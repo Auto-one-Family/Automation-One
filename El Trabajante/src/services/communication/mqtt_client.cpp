@@ -9,6 +9,7 @@
 #include "../../config/feature_flags.h"
 #include "../../config/firmware_version.h"
 #include <WiFi.h>
+#include <sdkconfig.h>
 #include <esp_system.h>
 #include <atomic>
 #include <errno.h>
@@ -29,6 +30,11 @@ static const char* TAG = "MQTT";
 
 // Shared by safePublish (both backends) and processPublishQueue (ESP-IDF only).
 static bool isCriticalPublishTopic(const String& topic) {
+    // AUT-344 / AUT-331: lifecycle is QoS-0 observability; substring "/system/intent_outcome"
+    // would incorrectly mark it critical and disable publish-queue shed for chain-stage bursts.
+    if (topic.indexOf("/system/intent_outcome/lifecycle") >= 0) {
+        return false;
+    }
     return topic.indexOf("/alert") != -1 ||
            topic.indexOf("/response") != -1 ||
            topic.indexOf("/config_response") != -1 ||
@@ -44,6 +50,9 @@ static std::atomic<uint32_t> g_publish_outbox_noncritical_drops{0};
 // Distinct from noncritical_drops: critical topics hit NVS replay instead of drop,
 // but still count as outbox-full events — this counter tracks event frequency.
 static std::atomic<uint32_t> g_publish_outbox_full_count{0};
+// Counts QoS-1 PUBACK events (MQTT_EVENT_PUBLISHED). Pairing [OUTBOX+1] enqueue
+// count against [OUTBOX-1] PUBACK count reveals OUTBOX accumulation rate.
+static std::atomic<uint32_t> g_puback_count{0};
 // True while routeIncomingMessage() executes inside MQTT_EVENT_DATA callback.
 // Publishing directly from this context can re-enter MQTT internals on Core 0.
 static std::atomic<bool> g_in_mqtt_event_callback{false};
@@ -62,6 +71,10 @@ static constexpr unsigned long MANAGED_RECONNECT_WRITE_TIMEOUT_BOOST_MS = 5000;
 // Post-reconnect queue hold after write-timeout history — lets TCP/TLS
 // handshake and first keepalive round-trip complete before queue drain.
 static constexpr uint32_t POST_RECONNECT_TRANSPORT_SETTLE_MS = 2000;
+
+// AUT-54 / ESP-IDF default: network_timeout_ms = 10000 — transport aborts with
+// "Writing didn't complete in specified timeout" when TCP is slow under publish bursts.
+static constexpr int MQTT_CLIENT_NETWORK_TIMEOUT_MS = 45000;
 
 static bool shouldLogAdmissionCorrelation(const String& topic) {
     return topic.indexOf("/command") != -1 ||
@@ -368,9 +381,9 @@ bool MQTTClient::connect(const MQTTConfig& config) {
                                   // +6144 B headroom for future handlers and config payload growth
     mqtt_cfg.task_prio = 3;
 
-    // Do not force custom network/reconnect timeouts here.
-    // ESP-IDF defaults are currently more stable in the observed field setup
-    // (EA5484 + second ESP) than the aggressive explicit overrides.
+    // AUT-54: Override IDF default network_timeout_ms (10s). Field logs showed write-path
+    // disconnects ~10s after bursts — that default caps blocking transport writes.
+    mqtt_cfg.network_timeout_ms = MQTT_CLIENT_NETWORK_TIMEOUT_MS;
 
     // Destroy old client if present (e.g. reconnect after config change)
     if (mqtt_client_ != nullptr) {
@@ -422,12 +435,19 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     // OUTBOX=16384 (via sdkconfig CONFIG_MQTT_OUTBOX_SIZE_BYTES) is active.
     // out_buffer_size is the transport send buffer (runtime); OUTBOX is compile-time sdkconfig.
     {
-        char cfg_log[128];
+        char cfg_log[160];
+#if defined(CONFIG_MQTT_OUTBOX_EXPIRED_TIMEOUT_MS)
+        const unsigned outbox_expiry_ms = static_cast<unsigned>(CONFIG_MQTT_OUTBOX_EXPIRED_TIMEOUT_MS);
+#else
+        const unsigned outbox_expiry_ms = 0U;
+#endif
         snprintf(cfg_log, sizeof(cfg_log),
                  "[FIX2-VERIFY] MQTT cfg: out_buffer=%u buffer=%u "
-                 "OUTBOX=16384(sdkconfig) expiry=10000ms",
+                 "OUTBOX=16384(sdkconfig) expiry=%ums net_timeout=%dms",
                  (unsigned)mqtt_cfg.out_buffer_size,
-                 (unsigned)mqtt_cfg.buffer_size);
+                 (unsigned)mqtt_cfg.buffer_size,
+                 outbox_expiry_ms,
+                 mqtt_cfg.network_timeout_ms);
         LOG_I(TAG, cfg_log);
     }
     return true;
@@ -645,14 +665,31 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
     if (xPortGetCoreID() == 1 || g_in_mqtt_event_callback.load()) {
         bool critical = isCriticalPublishTopic(topic);
         IntentMetadata metadata = extractIntentMetadataFromPayload(payload.c_str(), critical ? "critical_pub" : "pub");
-        bool enqueued = queuePublish(topic.c_str(), payload.c_str(), qos, false, critical, &metadata);
-        if (!enqueued) {
-            LOG_W(TAG, "Publish queue full — dropping: " + topic);
-            circuit_breaker_.recordFailure();
+        // AUT-344: tryQueuePublish distinguishes AUT-55 shed from hard failures.
+        // Shed / non-critical enqueue misses must NOT trip the MQTT circuit breaker
+        // (misclassified as broker-down), which previously amplified disconnects under burst.
+        PublishQueueEnqueueResult pq = tryQueuePublish(topic.c_str(),
+                                                       payload.c_str(),
+                                                       qos,
+                                                       false,
+                                                       critical,
+                                                       &metadata);
+        if (pq == PublishQueueEnqueueResult::Enqueued) {
+            circuit_breaker_.recordSuccess();
+            return true;
+        }
+        if (pq == PublishQueueEnqueueResult::ShedBackpressure) {
+            LOG_D(TAG, "[AUT-344] Publish shed (COMM backpressure), not a CB failure: " + topic);
             return false;
         }
-        circuit_breaker_.recordSuccess();
-        return true;
+        // Failed: queue full, oversize, null, or queue not initialised
+        if (!critical) {
+            LOG_W(TAG, "Publish queue enqueue failed (non-critical): " + topic);
+            return false;
+        }
+        LOG_W(TAG, "Publish queue full — dropping: " + topic);
+        circuit_breaker_.recordFailure();
+        return false;
     }
 
     // Core 0: direct publish via ESP-IDF (thread-safe internally).
@@ -670,7 +707,17 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
 
     if (msg_id >= 0) {
         circuit_breaker_.recordSuccess();
-        LOG_D(TAG, "Published [msg_id=" + String(msg_id) + "]: " + topic);
+        if (qos > 0) {
+            // [OUTBOX+1]: QoS-1 message entered IDF OUTBOX — stays there until PUBACK.
+            // Counting these vs [OUTBOX-1] PUBACK events reveals accumulation rate.
+            char pub_log[128];
+            snprintf(pub_log, sizeof(pub_log),
+                     "[OUTBOX+1] QoS-%u enqueued msg_id=%d heap=%u topic=%.60s",
+                     (unsigned)qos, msg_id, (unsigned)ESP.getFreeHeap(), topic.c_str());
+            LOG_D(TAG, pub_log);
+        } else {
+            LOG_D(TAG, "Published [msg_id=" + String(msg_id) + "]: " + topic);
+        }
         return true;
     } else if (msg_id == -2) {
         uint32_t full_count = g_publish_outbox_full_count.fetch_add(1) + 1;
@@ -707,7 +754,12 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
         } else if (topic.indexOf("/system/intent_outcome") >= 0) {
             LOG_W(TAG, "intent_outcome publish hit outbox full — NVS replay path handles persistence");
         } else {
-            g_publish_outbox_noncritical_drops.fetch_add(1);
+            uint32_t drop_cnt = g_publish_outbox_noncritical_drops.fetch_add(1) + 1;
+            char drop_log[128];
+            snprintf(drop_log, sizeof(drop_log),
+                     "[OUTBOX-TRACE] OUTBOX full, non-crit drop #%u topic=%.60s heap=%u",
+                     (unsigned)drop_cnt, topic.c_str(), (unsigned)ESP.getFreeHeap());
+            LOG_D(TAG, drop_log);
         }
         return false;
     } else {
@@ -1150,7 +1202,13 @@ static uint32_t getRetryBackoffMs(uint8_t attempt) {
 
 // Drain limit per communication tick to avoid publish micro-bursts that can
 // saturate the TCP write path (observed as errno=11 under load).
-static constexpr uint8_t PUBLISH_DRAIN_BUDGET_PER_TICK = 3;
+// AUT-54: Drain at most one queued publish per comm-task tick — was 3, which stacked
+// multiple esp_mqtt_client_publish calls in one loop iteration and amplified TCP write
+// pressure during rapid actuator ON/OFF + sensor/heartbeat traffic.
+// AUT-360: Intentional fixed 1/tick — a separate write-timeout drain throttle (PKG-18)
+// became dead code once the default budget was lowered to 1; write-path backpressure is
+// still handled via retry/shed paths using isWritePathTimeoutErrno (AUT-55).
+static constexpr uint8_t PUBLISH_DRAIN_BUDGET_PER_TICK = 1;
 
 void MQTTClient::processPublishQueue() {
     if (mqtt_client_ == nullptr) return;
@@ -1158,16 +1216,37 @@ void MQTTClient::processPublishQueue() {
     if (isPublishQueuePaused()) return;
     processIntentOutcomeOutbox();
 
+    // AUT-359: Drain-Admission-Symmetrie zur publish()-Pfad-Logik.
+    //
+    // Vorher: processPublishQueue() rief esp_mqtt_client_publish() ohne
+    // CB-Check auf — Drain transportierte trotz OPEN, waehrend neue
+    // publish()-Aufrufe (Heartbeat, Core-0-Direkt) am CB sofort scheiterten
+    // (siehe AUT-346 / S3-recovery-pfad-2026-05-12 §5).
+    //
+    // Jetzt: Drain skippt vollstaendig, solange der MQTT-CircuitBreaker OPEN
+    // ist. Das schuetzt die ESP-IDF-Outbox (AUT-326-Crash-Pfad) und die
+    // TCP-Schicht (errno=11/EAGAIN) waehrend persistenter Broker-Ausfaelle.
+    // allowRequest() liefert in HALF_OPEN automatisch true (max. 10 s
+    // Test-Fenster) — der Recovery-Probe passiert also ohne Sondercode.
+    // Queue-Wachstum ist gewollt: bestehende Mechanismen greifen
+    // (Shedding ab WATERMARK 6, intent_outcome-NVS-Replay, queue_pressure
+    // Hysterese). intent_outcome-Outbox wurde oben bereits prozessiert,
+    // damit Replay-Fluss bei OPEN nicht haengen bleibt.
+    if (!circuit_breaker_.allowRequest()) {
+        static unsigned long last_cb_drain_log_ms = 0;
+        unsigned long now = millis();
+        if (now - last_cb_drain_log_ms > 5000) {
+            last_cb_drain_log_ms = now;
+            LOG_D(TAG, "[OUTBOX-TRACE] Drain skipped: MQTT Circuit Breaker OPEN");
+        }
+        return;
+    }
+
     static PublishRequest req;
     unsigned long now_ms = millis();
     uint8_t drained_this_tick = 0;
 
-    // PKG-18: Reduce drain rate when last transport error was a write-path timeout.
-    // Prevents saturating a recovering socket with queued publishes after resume.
-    const uint8_t drain_budget = isWritePathTimeoutErrno(last_transport_errno_)
-                                     ? 1U : PUBLISH_DRAIN_BUDGET_PER_TICK;
-
-    while (drained_this_tick < drain_budget &&
+    while (drained_this_tick < PUBLISH_DRAIN_BUDGET_PER_TICK &&
            xQueueReceive(g_publish_queue, &req, 0) == pdTRUE) {
         if (now_ms < req.next_retry_ms) {
             if (xQueueSend(g_publish_queue, &req, 0) != pdTRUE) {
@@ -1187,7 +1266,35 @@ void MQTTClient::processPublishQueue() {
         );
         drained_this_tick++;
         if (msg_id >= 0) {
+            // AUT-359: Drain-Feedback-Symmetrie zu publish() Z. 708:
+            // erfolgreiche Drain-Publishes treiben CB Richtung CLOSED
+            // (Recovery aus HALF_OPEN). Vorher fehlte dieser Pfad ganz —
+            // Drain-Erfolge wurden vom CB nicht registriert.
+            circuit_breaker_.recordSuccess();
             continue;
+        }
+
+        // Queue-drain path can also hit OUTBOX full — count and log separately from
+        // the direct publish() path so both sources are visible in the serial trace.
+        if (msg_id == -2) {
+            uint32_t cnt = g_publish_outbox_full_count.fetch_add(1) + 1;
+            char q_log[128];
+            snprintf(q_log, sizeof(q_log),
+                     "[OUTBOX-TRACE][QUEUE] OUTBOX full #%u topic=%.60s heap=%u",
+                     (unsigned)cnt, req.topic, (unsigned)ESP.getFreeHeap());
+            LOG_W(TAG, q_log);
+            // AUT-359: Drain-Feedback-Symmetrie zu publish() Z. 733 —
+            // OUTBOX-full ist Backpressure-Signal Richtung Broker/IDF und
+            // wird auch im Direktpfad als CB-Failure gezaehlt.
+            circuit_breaker_.recordFailure();
+        } else if (msg_id == -1) {
+            // AUT-359: Drain-Feedback-Symmetrie zu publish() Z. 765-776 —
+            // -1 ist „connected but error“; nur dann CB-Failure zaehlen,
+            // wenn aktuell verbunden. Ohne Verbindung waere es ein
+            // Pre-Connection-Drop und sollte CB nicht eskalieren.
+            if (g_mqtt_connected.load()) {
+                circuit_breaker_.recordFailure();
+            }
         }
 
         bool is_sensor_data = isSensorDataTopic(String(req.topic));
@@ -1297,7 +1404,7 @@ bool MQTTClient::publishSessionAnnounce(uint32_t epoch) {
         topic,
         payload,
         0,
-        1,  // QoS 1
+        0,  // AUT-54: QoS 0 — same backpressure rationale as actuator telemetry
         0   // retain = false
     );
 
@@ -1485,6 +1592,8 @@ void MQTTClient::publishHeartbeat(bool force) {
                String(getCriticalOutcomeDropCountTelemetry()) + ",";
     payload += "\"publish_outbox_drop_count\":" +
                String(getPublishOutboxNoncriticalDropCount()) + ",";
+    payload += "\"publish_outbox_full_count\":" +
+               String(getPublishOutboxFullCount()) + ",";
 #ifndef MQTT_USE_PUBSUBCLIENT
     {
         PublishQueuePressureStats pq_stats = getPublishQueuePressureStats();
@@ -1501,6 +1610,8 @@ void MQTTClient::publishHeartbeat(bool force) {
                String(getSensorCommandQueueOverflowCount()) + ",";
     payload += "\"safe_publish_retry_count\":" +
                String(safe_publish_retry_count_) + ",";
+    payload += "\"intent_chain_stage_enqueue_fail_count\":" +
+               String(getIntentChainStageEnqueueFailCount()) + ",";
     payload += "\"emergency_rejected_no_token_total\":" +
                String(getEmergencyRejectedNoTokenCount()) + ",";
 #endif
@@ -1564,6 +1675,7 @@ void MQTTClient::publishHeartbeatMetrics() {
     current.publish_outbox_drop_count = getPublishOutboxNoncriticalDropCount();
     current.sensor_cmd_queue_overflow_count = getSensorCommandQueueOverflowCount();
     current.safe_publish_retry_count = safe_publish_retry_count_;
+    current.intent_chain_stage_enqueue_fail_count = getIntentChainStageEnqueueFailCount();
     current.emergency_rejected_no_token_total = getEmergencyRejectedNoTokenCount();
 
     bool changed = metricsChanged_(current);
@@ -1620,6 +1732,8 @@ void MQTTClient::publishHeartbeatMetrics() {
                String(current.sensor_cmd_queue_overflow_count) + ",";
     payload += "\"safe_publish_retry_count\":" +
                String(current.safe_publish_retry_count) + ",";
+    payload += "\"intent_chain_stage_enqueue_fail_count\":" +
+               String(current.intent_chain_stage_enqueue_fail_count) + ",";
     payload += "\"emergency_rejected_no_token_total\":" +
                String(current.emergency_rejected_no_token_total);
     payload += "}";
@@ -1701,6 +1815,13 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
 
         case MQTT_EVENT_CONNECTED: {
             LOG_I(TAG, "=== MQTT_EVENT_CONNECTED ===");
+            // session_present=1 means the broker has a saved session from a prior
+            // connection (clean_session=false). The broker will replay all pending
+            // QoS-1 PUBREC/PUBCOMP state → OUTBOX fills immediately on reconnect.
+            // This is the Session-Takeover-Replay vector observed in INC-OUTBOX-2026-05-10.
+            LOG_I(TAG, String("[OUTBOX-TRACE] session_present=") +
+                       String(event->session_present) +
+                       " (1=broker replays pending QoS-1 state -> OUTBOX may pre-fill)");
 
             // Update shared connection state (atomic — read by Safety-Task Core 1)
             g_mqtt_connected.store(true);
@@ -1989,14 +2110,22 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             break;
         }
 
-        case MQTT_EVENT_PUBLISHED:
-            LOG_D(TAG, "MQTT_EVENT_PUBLISHED msg_id=" + String(event->msg_id));
+        case MQTT_EVENT_PUBLISHED: {
+            // [OUTBOX-1]: IDF OUTBOX slot freed by broker PUBACK. Pairing these
+            // against [OUTBOX+1] enqueue logs reveals how fast OUTBOX drains.
+            uint32_t ack_cnt = g_puback_count.fetch_add(1) + 1;
+            char ack_log[80];
+            snprintf(ack_log, sizeof(ack_log),
+                     "[OUTBOX-1] PUBACK #%u msg_id=%d heap=%u",
+                     (unsigned)ack_cnt, event->msg_id, (unsigned)ESP.getFreeHeap());
+            LOG_D(TAG, ack_log);
             if (self->pending_session_announce_msg_id_ >= 0 &&
                 event->msg_id == self->pending_session_announce_msg_id_) {
                 self->pending_session_announce_msg_id_ = -1;
                 resumeAfterAnnounceAck("ack");
             }
             break;
+        }
 
         case MQTT_EVENT_ERROR:
             // INC-2026-04-11-ea5484-mqtt-transport-keepalive (PKG-01):
@@ -2304,4 +2433,3 @@ void MQTTClient::staticCallback(char* topic, byte* payload, unsigned int length)
 }
 
 #endif  // MQTT_USE_PUBSUBCLIENT
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      

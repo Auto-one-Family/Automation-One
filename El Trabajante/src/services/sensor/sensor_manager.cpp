@@ -1950,8 +1950,9 @@ bool SensorManager::publishSensorReading(const SensorReading& reading) {
     // Build payload
     String payload = buildMQTTPayload(reading);
 
-    // Publish
-    if (!mqtt_client_->publish(topic, payload, 1)) {
+    // AUT-54: QoS 0 — raw sensor stream is high-frequency telemetry; QoS-1 filled the IDF
+    // OUTBOX alongside other traffic and contributed to write-timeout disconnects.
+    if (!mqtt_client_->publish(topic, payload, 0)) {
         LOG_E(TAG, "Sensor Manager: Failed to publish sensor data for GPIO " + String(reading.gpio));
         errorTracker.trackError(ERROR_MQTT_PUBLISH_FAILED, ERROR_SEVERITY_ERROR,
                                "Failed to publish sensor data");

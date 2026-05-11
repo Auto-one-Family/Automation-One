@@ -296,7 +296,7 @@ static void publishActuatorAdmissionRejectedResponse(const String& topic,
   }
   mqttClient.safePublish(String(TopicBuilder::buildActuatorResponseTopic(static_cast<uint8_t>(gpio))),
                          response_payload,
-                         1);
+                         0);
 }
 
 static bool hasRevocationDeleteHint(const String& raw_value) {
@@ -599,11 +599,12 @@ static void publishConfigPendingTransitionEvent(const char* event_type,
 #ifndef MQTT_USE_PUBSUBCLIENT
     // [INC-EA5484] AUT-56: Route lifecycle through publish queue for retry resilience.
     const char* lifecycle_topic = TopicBuilder::buildIntentOutcomeLifecycleTopic();
-    if (!queuePublish(lifecycle_topic, payload.c_str(), 1, false, true, nullptr)) {
+    // AUT-344: lifecycle is observability-only; must not consume critical publish-queue slots.
+    if (!queuePublish(lifecycle_topic, payload.c_str(), 0, false, false, nullptr)) {
       LOG_W(TAG, "[INC-EA5484] Lifecycle transition enqueue failed: " + String(event_type));
     }
 #else
-    mqttClient.publish(TopicBuilder::buildIntentOutcomeLifecycleTopic(), payload, 1);
+    mqttClient.publish(TopicBuilder::buildIntentOutcomeLifecycleTopic(), payload, 0);
 #endif
   }
 }
@@ -4409,7 +4410,7 @@ SensorCommandExecutionResult handleSensorCommand(const String& topic, const Stri
         }
       }
 #endif
-      mqttClient.safePublish(response_topic, response_payload, 1, 2);
+      mqttClient.safePublish(response_topic, response_payload, 0, 2);
 
       LOG_D(TAG, "Sensor command response sent: " + response_payload);
     }

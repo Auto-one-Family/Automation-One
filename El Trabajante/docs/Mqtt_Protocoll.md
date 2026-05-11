@@ -57,7 +57,7 @@ kaiser/
 │   │       │   ├── command        # System-Befehle (subscribe)
 │   │       │   ├── session/announce # Reconnect Session-Announce (publish)
 │   │       │   ├── heartbeat      # System-Heartbeat (publish)
-│   │       │   ├── heartbeat_metrics # Extended Metrics (publish, optional ENABLE_METRICS_SPLIT, AUT-121)
+│   │       │   ├── heartbeat_metrics # Extended Metrics (publish; ENABLE_METRICS_SPLIT — Default an, siehe feature_flags.h, AUT-361)
 │   │       │   ├── intent_outcome # Intent/Outcome kanonisch (publish)
 │   │       │   ├── intent_outcome/lifecycle # CONFIG_PENDING lifecycle (publish, Schema v1)
 │   │       │   └── diagnostics   # System-Diagnostics (publish)
@@ -310,7 +310,7 @@ Zusätzlich optional: `intent_id`, `correlation_id`, `ttl_ms`. `reason_code` z. 
 
 **QoS:** 0 **Retain:** false
 
-**Aktivierung:** Compile-Flag `ENABLE_METRICS_SPLIT` (kanonisch in `src/config/feature_flags.h` definiert; seit AUT-285 in `esp32_dev` nicht mehr gesetzt — standardmäßig inaktiv). Ohne Flag bleiben die Zähler/Queue-Stats im Core-`system/heartbeat`-JSON (siehe `#ifndef ENABLE_METRICS_SPLIT` in `publishHeartbeat()`).
+**Aktivierung:** Compile-Makro `ENABLE_METRICS_SPLIT` — **kanonisch nur** in `src/config/feature_flags.h` (kein `-D` mehr in `platformio.ini`, AUT-293). Im Repo-Stand ist `#define ENABLE_METRICS_SPLIT` **gesetzt** → Split ist **standardmäßig aktiv** für alle Firmware-Envs, die diese Header einbinden (AUT-361). Zum Abschalten: die `#define`-Zeile auskommentieren; dann bleiben die Zähler/Queue-Stats im Core-`system/heartbeat`-JSON (siehe `#ifndef ENABLE_METRICS_SPLIT` in `publishHeartbeat()`).
 
 **Modul:** `services/communication/mqtt_client.cpp` → `publishHeartbeatMetrics()` (wird am Ende von `publishHeartbeat()` aufgerufen). **TopicBuilder:** `TopicBuilder::buildSystemHeartbeatMetricsTopic()`.
 
@@ -1298,47 +1298,43 @@ Libraries werden über MQTT in Chunks übertragen, da MQTT-Payloads limitiert si
 
 **Topic:** `kaiser/god/esp/{esp_id}/system/queue_pressure`
 
-**QoS:** 1
+**QoS:** 0 (at most once — **IST-Firmware:** `communication_task.cpp` ruft `mqttClient.publish(..., 0)` auf; Verlust möglich, für Observability akzeptiert; siehe `.claude/reference/api/MQTT_TOPICS.md` §3.6a, AUT-363)
 **Retain:** false
 **Frequency:** Nur bei Zustandswechsel (Hysterese, kein periodischer Emit)
-**Module:** `services/communication/publish_queue.cpp` + `mqtt_client.cpp`
-**TopicBuilder:** `TopicBuilder::buildQueuePressureTopic()` *(in Welle 2, PKG-01a)*
+**Module:** `tasks/publish_queue.cpp` (Statistiken), `tasks/communication_task.cpp` (`handleQueuePressureHysteresis`), `services/communication/mqtt_client.cpp` (Publish)
+**TopicBuilder:** `TopicBuilder::buildQueuePressureTopic()`
+
+**ESP-IDF-Pfad only:** Die Hysterese und der Emit laufen nur wenn **`MQTT_USE_PUBSUBCLIENT` nicht gesetzt** ist (kein Core-1→Core-0-`g_publish_queue` bei PubSubClient/Seeed/Wokwi).
 
 **Zweck:** Strukturiertes Backpressure-Event, komplementär zum generischen
 `system/error`-Code 4062. Ermöglicht dem Server die klare Unterscheidung
 "Burst-Druck (erwartet, deterministisch)" vs. "Fehler".
 
-**Payload-Schema (Entwurf PKG-01a):**
+**Payload-Schema (IST, PKG-01a Emitter):**
 ```json
 {
-  "ts": 1735818000,
-  "esp_id": "ESP_EA5484",
-  "event": "ENTER",              // "ENTER" | "RECOVERED"
-  "queue_fill": 7,               // aktueller Füllstand
-  "queue_capacity": 8,           // PUBLISH_QUEUE_SIZE
-  "shed_watermark": 6,           // SHED_WATERMARK
-  "hysteresis_low": 3,           // PUBLISH_QUEUE_HYSTERESIS_LOW (neu)
-  "shed_count": 1,
+  "event": "entered_pressure",
+  "fill_level": 7,
+  "high_watermark": 8,
+  "shed_count": 0,
   "drop_count": 0,
-  "high_watermark": 9,
-  "reason": "PUBLISH_OUTBOX_FULL"
+  "threshold": 6,
+  "ts": 1735818000
 }
 ```
 
-**Hysterese-Regeln:**
-- **ENTER** wird emittiert, wenn `queue_fill >= SHED_WATERMARK` (6) UND bisher kein aktives Backpressure-State
-- **RECOVERED** wird emittiert, wenn `queue_fill <= PUBLISH_QUEUE_HYSTERESIS_LOW` (3) UND aktives Backpressure-State
-- Keine wiederholten ENTER-Events ohne vorheriges RECOVERED (Schutz vor Flood)
+Event-Werte: `"entered_pressure"` (Backpressure aktiv), `"recovered"` (aufgehoben).
 
-**Publish-Route:** Emission geschieht über `MQTTClient::publishDirect()`
-(direkter `esp_mqtt_client_publish` / PubSubClient-Pfad) und umgeht bewusst
-die reguläre `queuePublish()`-Route, um sich selbst nicht zu verlieren, wenn
-die Publish-Queue voll ist.
+**Hysterese-Regeln (IST):**
+- **`entered_pressure`:** `fill_level >= PUBLISH_QUEUE_SHED_WATERMARK` (6) und zuvor nicht im Druck-Zustand
+- **`recovered`:** zuvor im Druck-Zustand und `fill_level < PRESSURE_RECOVERED_THRESHOLD` (4)
+- Kein Emit wenn `fill_level >= PUBLISH_QUEUE_SIZE` (8) — vermeidet zusätzliche Last bei gesättigter Queue (PKG-01a)
 
-**Call-Sites (geplant):**
-- `publish_queue.cpp:130` (nach `updateHighWatermark` → ENTER-Check)
-- `publish_queue.cpp:178` (post-enqueue → ENTER-Check)
-- `mqtt_client.cpp:processPublishQueue` (post-`xQueueReceive` → RECOVERED-Check)
+**Publish-Route:** Core-0 Communication-Task, 50 ms Takt — `MQTTClient::publish` mit QoS 0; **kein** Slot in `g_publish_queue`, damit das Event sich nicht selbst blockiert.
+
+**Call-Sites (IST):**
+- `communication_task.cpp` — `handleQueuePressureHysteresis()` (Hysterese + JSON + Publish)
+- `publish_queue.cpp` — `getPublishQueuePressureStats()` / Zähler für Fill, Shed, Drop, HWM
 
 **Korrelation mit Error-Events:**
 - `system/error` mit `error_code=4062` (Subcategory `MQTT_PUBLISH_BACKPRESSURE`,

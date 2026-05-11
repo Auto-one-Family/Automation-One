@@ -1072,9 +1072,9 @@ void ActuatorManager::publishActuatorStatus(uint8_t gpio) {
   String payload = buildStatusPayload(status, actuator->config);
   const char* topic = TopicBuilder::buildActuatorStatusTopic(gpio);
   // AUT-326: QoS 0 — actuator status is supplementary telemetry, not a safety signal.
-  // Authority for command delivery is actuator/response (QoS 1) + system/intent_outcome (QoS 1).
-  // QoS 0 keeps status messages out of the ESP-IDF MQTT outbox entirely, preventing
-  // heap exhaustion under TCP backpressure when ON+OFF commands arrive in rapid succession.
+  // AUT-54: Command execution is acknowledged on actuator/response + system/intent_outcome
+  // at QoS 0 (best-effort); critical failures still use NVS-backed intent_outcome replay.
+  // QoS 0 keeps status + outcome traffic out of the IDF QoS-1 OUTBOX (PUBACK expiry path).
   mqttClient.publish(String(topic), payload, 0);
 }
 
@@ -1126,7 +1126,9 @@ void ActuatorManager::publishActuatorResponse(const ActuatorCommand& command,
                                               const String& message) {
   const char* topic = TopicBuilder::buildActuatorResponseTopic(command.gpio);
   String payload = buildResponsePayload(command, success, message);
-  mqttClient.safePublish(String(topic), payload, 1);
+  // AUT-54: QoS 0 — response is telemetry; QoS-1 OUTBOX + OUTBOX-expiry caused transport
+  // disconnects under slow PUBACK (field: ~11s after last command, AAAAA.md).
+  mqttClient.safePublish(String(topic), payload, 0);
 }
 
 void ActuatorManager::publishActuatorAlert(uint8_t gpio,
@@ -1150,7 +1152,8 @@ void ActuatorManager::publishActuatorAlert(uint8_t gpio,
   payload += "\"alert_type\":\"" + alert_type + "\",";
   payload += "\"message\":\"" + message + "\"";
   payload += "}";
-  mqttClient.safePublish(String(topic), payload, 1);
+  // AUT-54: QoS 0 — same OUTBOX/backpressure rationale as actuator/response.
+  mqttClient.safePublish(String(topic), payload, 0);
 }
 
 // AUT-117: Publish structured telemetry for actuator latch decision at MQTT disconnect.

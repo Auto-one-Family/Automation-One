@@ -276,6 +276,7 @@ private:
         uint32_t publish_outbox_drop_count;
         uint32_t sensor_cmd_queue_overflow_count;
         uint32_t safe_publish_retry_count;
+        uint32_t intent_chain_stage_enqueue_fail_count;
         uint32_t emergency_rejected_no_token_total;
     };
     MetricsSnapshot last_metrics_;

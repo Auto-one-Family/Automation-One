@@ -21,7 +21,8 @@
 // Separates telemetry counters from core heartbeat into a dedicated
 // .../system/heartbeat_metrics topic (QoS 0, delta/freshness gated).
 // Core heartbeat retains ACK/validation/config/zone/handover fields.
-// DEFAULT: Disabled (opt-in, full legacy heartbeat preserved)
+// Kanonische Schaltstelle: nur hier toggeln (auskommentieren = aus, AUT-293).
+// Repo-Default: an (#define unten); Doku-SSOT fuer Verhalten: Mqtt_Protocoll.md §3a + MQTT_TOPICS.md (AUT-361).
 #define ENABLE_METRICS_SPLIT
 
 // ============================================

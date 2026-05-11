@@ -5,10 +5,13 @@ CONFIG_MQTT_TASK_CORE_SELECTION=0
 # MQTT task stack increased from default 6144 to 10240 — stack overflow on connect with 11 topics
 CONFIG_MQTT_TASK_STACK_SIZE=10240
 
-# AUT-326: Reduce OUTBOX expiry from 30s default to 10s.
-# Prevents heap exhaustion when PUBACK is delayed by TCP send-buffer pressure.
-# 10s covers realistic reconnect windows. Non-critical data loss on slow brokers: accepted.
-CONFIG_MQTT_OUTBOX_EXPIRED_TIMEOUT_MS=10000
+# AUT-54 / AAAAA.md: 10s expiry correlated with post-command disconnect (~11s): IDF expiry
+# handler runs while QoS-1 PUBACKs are still pending under TCP backpressure → write timeout.
+# 60s lets slow-broker ACK paths clear before expired-message handling (still bounded).
+CONFIG_MQTT_OUTBOX_EXPIRED_TIMEOUT_MS=60000
+
+# AUT-54: Larger lwIP TCP send buffer reduces EAGAIN under MQTT bursts (default often ~5744).
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=16384
 
 # AUT-331: Increase OUTBOX from 4096 (default) to 16384 bytes.
 # Root cause: rapid ON+OFF actuator commands within <2s generate ~2300 bytes of QoS-1
