@@ -252,7 +252,8 @@ ESP Heartbeat/Status Update. Wird bei jedem Heartbeat vom ESP gesendet (Zähler/
     "persistence_degraded": false,
     "network_degraded": false,
     "critical_outcome_drop_count": 0,
-    "publish_outbox_drop_count": 0
+    "publish_outbox_drop_count": 0,
+    "publish_outbox_full_count": 0
     // gpio_status: optional, nur aus DB-Cache (Firmware ≥ AUT-68 PKG-17 sendet das Array nicht mehr im Live-Heartbeat)
   }
 }
@@ -264,7 +265,7 @@ ESP Heartbeat/Status Update. Wird bei jedem Heartbeat vom ESP gesendet (Zähler/
 - `contract_reason`: Detaillierte Vertragsverletzung für Audit/UI
 - `raw_system_state`: Originalwert aus Firmware vor Canonicalisierung
 - Offline-Varianten (`status="offline"`, z.B. LWT/Timeout) folgen derselben Payload-Struktur und enthalten zusätzlich `reason`, optional `source`, `timeout_seconds`, `actuator_states_reset`.
-- Optional (Firmware ab 2026-04, nicht breaking): u. a. `persistence_degraded`, `persistence_degraded_reason`, `runtime_state_degraded`, `mqtt_circuit_breaker_open`, `wifi_circuit_breaker_open`, `network_degraded`, `critical_outcome_drop_count`, `publish_outbox_drop_count`, `persistence_drift_count`, `metrics_schema_version` — ersetzen das ältere paar `degraded`/`degraded_reason`.
+- Optional (Firmware ab 2026-04, nicht breaking): u. a. `persistence_degraded`, `persistence_degraded_reason`, `runtime_state_degraded`, `mqtt_circuit_breaker_open`, `wifi_circuit_breaker_open`, `network_degraded`, `critical_outcome_drop_count`, `publish_outbox_drop_count`, `publish_outbox_full_count`, `persistence_drift_count`, `metrics_schema_version` — ersetzen das ältere paar `degraded`/`degraded_reason`.
 
 ---
 

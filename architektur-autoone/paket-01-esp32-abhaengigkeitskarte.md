@@ -236,7 +236,7 @@ checkServerAckTimeout() every loop:
 
 ### F-002: RTOS Inter-Core-Kommunikation via 4 Queues
 
-- **Beschreibung:** Die RTOS-Architektur erfordert exakt 4 Queues für Cross-Core-Kommunikation. Jede Queue hat ein festes Memory-Budget (Publish: 15 Slots ~17KB, Config: 5 Slots ~20KB, Actuator: 10 Slots, Sensor: N Slots).
+- **Beschreibung:** Die RTOS-Architektur erfordert exakt 4 Queues für Cross-Core-Kommunikation. Jede Queue hat ein festes Memory-Budget (Publish: **8** Slots ~18 KB, SSOT `El Trabajante/src/tasks/publish_queue.h` `PUBLISH_QUEUE_SIZE`; früher 15, AUT-344; Doku-Bereinigung AUT-362. Config: 5 Slots ~20KB, Actuator: 10 Slots, Sensor: N Slots).
 - **Wirkungsradius:** Queue-Overflow → Drop (non-blocking). Bei hoher Last können Commands verloren gehen.
 - **Ausfallwirkung:** Silent drop bei Queue-Full. PublishQueue-Drop = fehlende Sensor-Readings auf Server.
 

@@ -150,7 +150,7 @@ Hinweis zu Entry-Points aus Auftragsrahmen:
 3. **Messzyklus:** Publish-Aufruf aus Sensorpfad auf Core 1.
 4. **Datenverarbeitung:** Payload-Build inkl. `esp_id`, `seq`, `zone_id`, `subzone_id`, `raw`, `value`, `unit`, `quality`, `ts`, `time_valid`, `raw_mode`, optional Adresse.
 5. **Publish:**
-   - Core 1: enqueue `g_publish_queue` (Tiefe 15, non-blocking).
+   - Core 1: enqueue `g_publish_queue` (Tiefe 8, `PUBLISH_QUEUE_SIZE` in `publish_queue.h`; non-blocking).
    - Core 0: `processPublishQueue()` ruft `esp_mqtt_client_publish`.
 6. **Cache/Persistenz:** Sensor-Value-Cache wird vor MQTT-Check aktualisiert.
 7. **Fehlerpfade:** queue full drop, MQTT outbox full (`msg_id=-2`), disconnected drop.

@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # MQTT Topic Referenz
 
-> **Version:** 2.27 | **Aktualisiert:** 2026-05-11
+> **Version:** 2.29 | **Aktualisiert:** 2026-05-12
 > **Quellen:** `El Trabajante/docs/Mqtt_Protocoll.md`, `CLAUDE_SERVER.md` Section 4
 > **Verifiziert gegen:** `topic_builder.cpp`, `main.py`, `constants.py`
-> **Änderungen:** **AUT-331 (2026-05-11, Fix#4):** `config` + `system/command` QoS 2→1 (`constants.py:QOS_CONFIG`, `publisher.py` 4 Stellen). Eliminiert letzten häufigen QoS-2-Pfad (Config-Republishes auf Reconnect). Zuvor: **AUT-331 (2026-05-10):** `actuator/{gpio}/command` + `sensor/{gpio}/command` QoS 2→1 (Server `constants.py` + ESP subscribe `main.cpp`). `intent_outcome/lifecycle` chain stages (`recordIntentChainStage`) QoS 1→0 (`intent_contract.cpp`). MQTT-OUTBOX 4KB→16KB (`sdkconfig.defaults`). Root cause: rapid ON+OFF (<2s) exhausted 4096-byte OUTBOX → TCP write timeout → crash. Zuvor: **AUT-117 (2026-05-06):** Topic `actuator/{gpio}/latched_offline` (ESP→Server, QoS 0) meldet Aktor-Latch-Zustand bei Disconnect (reason: `offline_rule_hold`/`safety_forced_off`/`manual_override`). Server: `ActuatorLatchedOfflineHandler` (Log + WS-Broadcast). Firmware: `publishLatchedOffline()` in `actuator_manager.cpp`. Zuvor: **AUT-118 (2026-04-28):** Bidirektionaler ACK-Flow für Emergency-Stop/Recovery: Topics `actuator/emergency/ack` (Section 2.6) und `actuator/recovery_confirm` (Section 2.7). Zuvor: **AUT-121 (2026-04-24):** Topic `system/heartbeat_metrics` (ESP→Server, QoS 0) koppelt Laufzeit-Counter vom Core-Heartbeat ab. Server: `HeartbeatMetricsHandler`; Firmware: `ENABLE_METRICS_SPLIT` → `publishHeartbeatMetrics()`. Zuvor: **PKG-01 (2026-04-20):** Neuer Topic `system/queue_pressure` (ESP→Server, QoS 1). Zuvor: **AUT-69 (2026-04-20):** `session/announce` Contract. Zuvor: **AUT-54 (2026-04-17):** Heartbeat Bootstrap-Fix. Zuvor: **PKG-05 (2026-04-14):** Heartbeat/ack Reject-Diagnose. Zuvor: **Epic1-05:** Intent-Orchestration-State `sent`; **MQTTCommandBridge** `resolve_ack`; Heartbeat-Felder; Intent-Outcome-Codes (2026-04-05). Früher: Contract-Härtung, Canonical-First Ingest (2026-04-04).
+> **Änderungen:** **AUT-363 (2026-05-12):** Nachzug-Doku — `El Trabajante/docs/Mqtt_Protocoll.md` §15a und `docs/.../E5-mqtt-topic-matrix.md` an **IST QoS 0** / Payload / Modulpfade für `system/queue_pressure` angeglichen (§3.6a + Quick-Lookup waren bereits AUT-357). Zuvor: **AUT-361 (2026-05-12):** `ENABLE_METRICS_SPLIT` — Doku an `feature_flags.h` angeglichen: Makro ist im Repo-Default **definiert** (Metrics-Topic aktiv); veraltete Formulierung „seit AUT-285 in esp32_dev nicht mehr standardmäßig gesetzt“ entfernt (`Mqtt_Protocoll.md` §3a, Payload-Hinweis §3.x). Zuvor: **AUT-357 / S4 (2026-05-12):** `§3.6a system/queue_pressure` auf IST-Payload (`entered_pressure`/`recovered`), QoS 0 (Firmware), Server-Reaktion „nur Observability“ + Handler-Tabelle korrigiert. Zuvor: **OUTBOX-Logging (2026-05-11):** `publish_outbox_full_count` nun auch im `#ifndef ENABLE_METRICS_SPLIT`-Pfad des Core-Heartbeats (`mqtt_client.cpp:publishHeartbeat()`). War bisher nur in `heartbeat_metrics` (`publishHeartbeatMetrics()`). Beide Payload-Beispiele aktualisiert. Zuvor: **AUT-331 (2026-05-11, Fix#4):** `config` + `system/command` QoS 2→1 (`constants.py:QOS_CONFIG`, `publisher.py` 4 Stellen). Eliminiert letzten häufigen QoS-2-Pfad (Config-Republishes auf Reconnect). Zuvor: **AUT-331 (2026-05-10):** `actuator/{gpio}/command` + `sensor/{gpio}/command` QoS 2→1 (Server `constants.py` + ESP subscribe `main.cpp`). `intent_outcome/lifecycle` chain stages (`recordIntentChainStage`) QoS 1→0 (`intent_contract.cpp`). MQTT-OUTBOX 4KB→16KB (`sdkconfig.defaults`). Root cause: rapid ON+OFF (<2s) exhausted 4096-byte OUTBOX → TCP write timeout → crash. Zuvor: **AUT-117 (2026-05-06):** Topic `actuator/{gpio}/latched_offline` (ESP→Server, QoS 0) meldet Aktor-Latch-Zustand bei Disconnect (reason: `offline_rule_hold`/`safety_forced_off`/`manual_override`). Server: `ActuatorLatchedOfflineHandler` (Log + WS-Broadcast). Firmware: `publishLatchedOffline()` in `actuator_manager.cpp`. Zuvor: **AUT-118 (2026-04-28):** Bidirektionaler ACK-Flow für Emergency-Stop/Recovery: Topics `actuator/emergency/ack` (Section 2.6) und `actuator/recovery_confirm` (Section 2.7). Zuvor: **AUT-121 (2026-04-24):** Topic `system/heartbeat_metrics` (ESP→Server, QoS 0) koppelt Laufzeit-Counter vom Core-Heartbeat ab. Server: `HeartbeatMetricsHandler`; Firmware: `ENABLE_METRICS_SPLIT` → `publishHeartbeatMetrics()`. Zuvor: **PKG-01 (2026-04-20):** Neuer Topic `system/queue_pressure` (ESP→Server, QoS 1). Zuvor: **AUT-69 (2026-04-20):** `session/announce` Contract. Zuvor: **AUT-54 (2026-04-17):** Heartbeat Bootstrap-Fix. Zuvor: **PKG-05 (2026-04-14):** Heartbeat/ack Reject-Diagnose. Zuvor: **Epic1-05:** Intent-Orchestration-State `sent`; **MQTTCommandBridge** `resolve_ack`; Heartbeat-Felder; Intent-Outcome-Codes (2026-04-05). Früher: Contract-Härtung, Canonical-First Ingest (2026-04-04).
 
 ---
 
@@ -49,7 +49,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 | `kaiser/god/esp/{esp_id}/system/diagnostics` | ESP→Server | 0 | Diagnostics |
 | `kaiser/god/esp/{esp_id}/system/will` | ESP→Server | 1 | LWT (Last Will) |
 | `kaiser/god/esp/{esp_id}/system/error` | ESP→Server | 1 | Error Event |
-| `kaiser/god/esp/{esp_id}/system/queue_pressure` | ESP→Server | 1 | Publish-Queue Backpressure Event (ENTER/RECOVERED, PKG-01) |
+| `kaiser/god/esp/{esp_id}/system/queue_pressure` | ESP→Server | 0 | Publish-Queue Backpressure (`entered_pressure` / `recovered`, PKG-01) |
 | `kaiser/god/esp/{esp_id}/system/intent_outcome` | ESP→Server | 1 | Intent/Outcome Events (kanonisch `buildOutcomePayload`) |
 | `kaiser/god/esp/{esp_id}/system/intent_outcome/lifecycle` | ESP→Server | 0/1 | Chain stages (`intent_chain_stage_v1`, QoS 0) + CONFIG_PENDING transitions (`config_pending_lifecycle_v1`, QoS 1) |
 | `kaiser/god/esp/{esp_id}/status` | ESP→Server | 1 | System-Status |
@@ -677,11 +677,12 @@ erzeugen keinen Eventstrom.
   "persistence_drift_count": 0,
   "critical_outcome_drop_count": 0,
   "publish_outbox_drop_count": 0,
+  "publish_outbox_full_count": 0,
   "sensor_command_queue_overflow_count": 0
 }
 ```
 
-**Degraded-Telemetrie (2026-04):** `persistence_degraded` / `persistence_degraded_reason` = Offline-Rules-Persistence-Drift; `runtime_state_degraded` = FSM (z. B. CONFIG_PENDING, SAFE_MODE); `network_degraded` = MQTT- oder WiFi-Circuit-Breaker OPEN. **`degraded` / `degraded_reason` werden von aktueller Firmware nicht mehr gesendet** (Legacy-Consumer migrieren). `critical_outcome_drop_count` spiegelt NVS-Outcome-Outbox-Verluste; `publish_outbox_drop_count` zählt ESP-IDF-Outbox-`-2`-Drops nicht-kritischer Publishes; `sensor_command_queue_overflow_count` zählt verworfene Sensor-Commands bei Queue-Overflow.
+**Degraded-Telemetrie (2026-04):** `persistence_degraded` / `persistence_degraded_reason` = Offline-Rules-Persistence-Drift; `runtime_state_degraded` = FSM (z. B. CONFIG_PENDING, SAFE_MODE); `network_degraded` = MQTT- oder WiFi-Circuit-Breaker OPEN. **`degraded` / `degraded_reason` werden von aktueller Firmware nicht mehr gesendet** (Legacy-Consumer migrieren). `critical_outcome_drop_count` spiegelt NVS-Outcome-Outbox-Verluste; `publish_outbox_drop_count` zählt nicht-kritische ESP-IDF-Outbox-`-2`-Drops (non-critical topics); `publish_outbox_full_count` zählt **alle** OUTBOX-full-Events unabhängig von Topic-Klasse (inkl. kritische, die via NVS-Replay entkommen); `sensor_command_queue_overflow_count` zählt verworfene Sensor-Commands bei Queue-Overflow.
 
 **Required Fields:** `ts`, `uptime`, `heap_free` / `free_heap`, `wifi_rssi`
 
@@ -757,7 +758,7 @@ ACK-Pfad verzögern. Serverseitig werden akzeptierte Metrics in den
 nächsten Core-Heartbeat gemerged (`heartbeat_handler`) und gehen
 mit `esp_health` an das Frontend.
 
-**Payload (Ist, `ENABLE_METRICS_SPLIT` aktiv — ESP-IDF-Pfad, nicht `MQTT_USE_PUBSUBCLIENT`; seit AUT-285 in `esp32_dev` nicht mehr standardmäßig gesetzt):**
+**Payload (Ist, `ENABLE_METRICS_SPLIT` aktiv — ESP-IDF-Pfad, nicht `MQTT_USE_PUBSUBCLIENT`; Makro-Default siehe `El Trabajante/src/config/feature_flags.h`, im Repo **an**, AUT-361):**
 ```json
 {
   "esp_id": "ESP_12AB34CD",
@@ -773,6 +774,7 @@ mit `esp_health` an das Frontend.
   "persistence_drift_count": 0,
   "critical_outcome_drop_count": 0,
   "publish_outbox_drop_count": 0,
+  "publish_outbox_full_count": 0,
   "publish_queue_fill": 0,
   "publish_queue_hwm": 0,
   "publish_queue_shed_count": 0,
@@ -1018,46 +1020,41 @@ Die Felder `publish_queue_*` fehlen bei `MQTT_USE_PUBSUBCLIENT=1` (siehe `mqtt_c
 
 **Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/system/queue_pressure`
 
-**QoS:** 1 (at least once)
+**QoS:** 0 (at most once — **IST-Firmware:** `communication_task.cpp` nutzt `publish(..., 0)`; Verlust möglich, für Observability akzeptiert)
 **Retain:** false
-**Frequency:** Nur bei Zustandswechsel (Hysterese: ENTER bei Queue-Fill ≥ `SHED_WATERMARK=6`, RECOVERED bei ≤ `PUBLISH_QUEUE_HYSTERESIS_LOW=3`). Keine periodische Emission.
+**Frequency:** Nur bei Zustandswechsel (Hysterese: `entered_pressure` bei Fill ≥ Shed-Watermark, `recovered` bei Fill unter Recovery-Schwelle). Keine periodische Emission.
 
 **Zweck:** Strukturiertes Event für Publish-Queue-Backpressure, getrennt vom
 generischen `system/error`-Fehlercode 4062. Ermöglicht dem Server/Frontend
 eine klare Unterscheidung "Burst-Druck (erwartet)" vs. "Fehler im engeren Sinn".
 
-**Payload (geplant, PKG-01a Welle 2):**
+**Payload (IST, PKG-01a Emitter):**
 ```json
 {
-  "ts": 1735818000,
-  "esp_id": "ESP_EA5484",
-  "event": "ENTER",
-  "queue_fill": 7,
-  "queue_capacity": 8,
-  "shed_watermark": 6,
-  "hysteresis_low": 3,
-  "shed_count": 1,
+  "event": "entered_pressure",
+  "fill_level": 7,
+  "high_watermark": 8,
+  "shed_count": 0,
   "drop_count": 0,
-  "high_watermark": 9,
-  "reason": "PUBLISH_OUTBOX_FULL"
+  "threshold": 6,
+  "ts": 1735818000
 }
 ```
 
-Event-Werte: `"ENTER"` (Backpressure aktiv), `"RECOVERED"` (Backpressure aufgehoben).
+Event-Werte: `"entered_pressure"` (Backpressure aktiv), `"recovered"` (Backpressure aufgehoben).
+
+**Server-Reaktion (PKG-01b, AUT-357):** **Nur Observability** — kein DB-Write, kein WebSocket, keine Laststeuerung. Handler `queue_pressure_handler.handle_queue_pressure`: Prometheus-Counter `queue_pressure_event_total{esp_id,event}` inkrementieren; strukturiertes Log (`entered_pressure` → WARNING, sonst INFO). Siehe `src/mqtt/handlers/queue_pressure_handler.py`.
 
 **Status:**
 - **TopicBuilder (Server):** `TopicBuilder.build_queue_pressure_topic()` +
-  `TopicBuilder.parse_queue_pressure_topic()` — implementiert in PKG-01
-  (Commit `7e7ae245`, `El Servador/god_kaiser_server/src/mqtt/topics.py`).
-- **Firmware-Emitter:** In Welle 2 (PKG-01a) — Hot-Path nach
-  `publish_queue.cpp:130/178` + `mqtt_client.cpp:processPublishQueue`.
-- **Server-Handler:** In Welle 2 (PKG-01b) — Prometheus-/Persist-Route offen
-  (Blocker `B-QP-PERSIST-01`).
+  `TopicBuilder.parse_queue_pressure_topic()` — `El Servador/god_kaiser_server/src/mqtt/topics.py`.
+- **Firmware-Emitter:** PKG-01a — `communication_task.cpp` (`handleQueuePressureHysteresis`), Core-0-Direktpfad ohne App-Publish-Queue-Slot.
+- **Server-Handler:** registriert in `main.py` (Subscription `kaiser/+/esp/+/system/queue_pressure`).
 
 **Code-Referenzen:**
 - **Server:** `src/mqtt/topics.py:build_queue_pressure_topic`,
-  `parse_queue_pressure_topic`
-- **ESP32:** `TopicBuilder::buildQueuePressureTopic()` *(PKG-01a, Welle 2)*
+  `parse_queue_pressure_topic`; Handler `src/mqtt/handlers/queue_pressure_handler.py`; Registrierung `src/main.py` (Queue-Pressure-Block)
+- **ESP32:** `TopicBuilder::buildQueuePressureTopic()`; Payload-Bau `communication_task.cpp`
 
 ---
 
@@ -1706,7 +1703,7 @@ Der Server subscribed zu folgenden Topic-Patterns:
 | `kaiser/+/esp/+/subzone/ack` | `handle_subzone_ack` | `main.py:280` |
 | `kaiser/+/esp/+/system/will` | `handle_lwt` | `lwt_handler.py:35` |
 | `kaiser/+/esp/+/system/error` | `handle_system_error` | `main.py:293` |
-| `kaiser/+/esp/+/system/queue_pressure` | *(PKG-01b, Welle 2: `handle_queue_pressure`)* | *(server-dev, Welle 2)* |
+| `kaiser/+/esp/+/system/queue_pressure` | `handle_queue_pressure` | `queue_pressure_handler.py` (Prometheus + Log, keine aktive Backpressure) |
 | `kaiser/+/esp/+/system/intent_outcome` | `handle_intent_outcome` | `intent_outcome_handler.py` |
 | `kaiser/+/esp/+/system/intent_outcome/lifecycle` | `handle_intent_outcome_lifecycle` | `intent_outcome_lifecycle_handler.py` (Audit + WS `intent_outcome_lifecycle`, Metrik `intent_outcome_lifecycle_total`) |
 | `kaiser/+/esp/+/status` | *(nicht registriert)* | *(derzeit kein Handler in `main.py`)* |

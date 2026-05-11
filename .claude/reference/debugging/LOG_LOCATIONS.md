@@ -660,6 +660,37 @@ LOG_CRITICAL("message")
 - Konfigurierbar via `setLogLevel()`, `setSerialEnabled()`
 - Timestamp pro Eintrag (millis())
 
+### 5.9 OUTBOX-Trace Tags (mqtt_client.cpp, seit 2026-05-11)
+
+Für OUTBOX-Fill-Diagnose (INC-OUTBOX-2026-05-10 / AUT-54) wurden folgende Log-Tags eingefügt. Alle im Serial-Monitor greifbar; `[OUTBOX+1]`/`[OUTBOX-1]` nur bei LOG_LEVEL=DEBUG. **AUT-360:** Das frühere DEBUG-Tag `Drain throttled` wurde entfernt (nach AUT-54 war die zugehörige Budget-Drosselung strukturell wirkungslos).
+
+| Tag | Level | Bedeutung | Grep-Pattern |
+|-----|-------|-----------|-------------|
+| `[OUTBOX+1]` | DEBUG | QoS-1 Nachricht wurde in IDF OUTBOX eingereiht (msg_id + heap + topic) | `\[OUTBOX\+1\]` |
+| `[OUTBOX-1]` | DEBUG | PUBACK empfangen — OUTBOX-Slot freigegeben (PUBACK-Zähler + msg_id + heap) | `\[OUTBOX-1\]` |
+| `[OUTBOX-TRACE] OUTBOX full, non-crit drop` | DEBUG | OUTBOX voll, nicht-kritisches Topic verworfen (drop-Zähler + topic + heap) | `non-crit drop` |
+| `[OUTBOX-TRACE][QUEUE] OUTBOX full` | WARN | OUTBOX voll im Queue-Drain-Pfad (`processPublishQueue`) — zählt jetzt ebenfalls in `g_publish_outbox_full_count` | `\[OUTBOX-TRACE\]\[QUEUE\]` |
+| `[OUTBOX-TRACE] session_present=` | INFO | Beim Connect: `session_present=1` = Broker hat pending QoS-1 State → OUTBOX pre-füllt sich sofort (Session-Takeover-Replay) | `session_present=` |
+| `[FIX5-VERIFY] OUTBOX full #N` | WARN | OUTBOX-full im direkten `publish()`-Pfad (Core-0) — Zähler, topic, heap | `FIX5-VERIFY.*OUTBOX full` |
+
+**Serial-Grep-Beispiele:**
+```bash
+# Alle OUTBOX-Bewegungen (fill + drain)
+grep -E "\[OUTBOX[+-]" serial.log
+
+# Nur Fill-Events (QoS-1 publishes in OUTBOX)
+grep "\[OUTBOX+1\]" serial.log | wc -l
+
+# Nur Drain-Events (PUBACKs)
+grep "\[OUTBOX-1\]" serial.log | wc -l
+
+# Session-Takeover am Connect?
+grep "session_present=" serial.log
+
+# OUTBOX full (direct + queue drain)
+grep "OUTBOX full" serial.log
+```
+
 ---
 
 ## 6. MQTT Traffic
@@ -1028,9 +1059,10 @@ curl -sG "http://localhost:9090/api/v1/query" --data-urlencode "query=rate(god_k
 
 ---
 
-**Letzte Aktualisierung:** 2026-04-10
-**Version:** 4.14
+**Letzte Aktualisierung:** 2026-05-11
+**Version:** 4.15
 **Changelog:**
+- 4.15: §5.9 OUTBOX-Trace Tags (INC-OUTBOX-2026-05-10): `[OUTBOX+1]` (QoS-1 enqueue), `[OUTBOX-1]` (PUBACK drain), `[OUTBOX-TRACE]` (non-crit drop, queue-drain full, drain throttle), `session_present` (Connect). Grep-Pattern-Tabelle + Serial-Grep-Beispiele.
 - 4.14: §2.1.1 Ground Truth Docker: zwei Handler (JSON-Datei vs. stdout-Text), Reload-Overlay, `docker logs` vs. Host-Datei; Quick-Reference + Tabellen Docker-Zeilen
 - 4.13: `failure_class` (I08): JSON-Datei vs. Docker-Text dokumentiert; §2.3 Beispiel; §12.0 Server-Zeile; LogQL in `docs/debugging/logql-queries.md`
 - 4.12: Grafana Provisioning `system-health.json`: Panels MQTT-Fehlerrate + WS-Contract-Mismatch; §12.4/12.5 um Prometheus-Verify-Beispiele ergänzt

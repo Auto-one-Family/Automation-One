@@ -47,8 +47,8 @@
 ### R-005 — PublishQueue Overflow → Silent Drop (MEDIUM-HIGH)
 
 **Kategorie:** Kommunikation / Datenverlust  
-**Beschreibung:** Die Publish-Queue (Core 1 → Core 0) hat nur 15 Slots (~17 KB Heap). queuePublish() ist non-blocking und gibt false zurück wenn die Queue voll ist. Es gibt keine Retry-Logik für gedroppte Publishes.  
-**Auswirkung:** Bei hoher Sensor-Last (>15 Messungen gleichzeitig im Intervall) oder langsamer MQTT-Verbindung können Sensor-Readings verloren gehen. Der Server erhält dann kein vollständiges Bild.  
+**Beschreibung:** Die Publish-Queue (Core 1 → Core 0) hat **8** Slots (~18 KB Heap, SSOT `El Trabajante/src/tasks/publish_queue.h` `PUBLISH_QUEUE_SIZE`; früher 15, AUT-344; Planungs-Doku AUT-362). queuePublish() ist non-blocking und gibt false zurück wenn die Queue voll ist. Es gibt keine Retry-Logik für gedroppte Publishes.  
+**Auswirkung:** Bei hoher Sensor-Last (Burst über die Queue-Tiefe hinaus) oder langsamer MQTT-Verbindung können Sensor-Readings verloren gehen. Der Server erhält dann kein vollständiges Bild.  
 **Folgepaket:** P1.6
 
 ---
