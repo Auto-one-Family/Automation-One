@@ -386,7 +386,14 @@ function handleDeviceDelete() {
     ref="cardRef"
     :esp="device"
     variant="mini"
-    :class="['device-mini-card', { 'device-mini-card--stale': !isDeviceOnline }]"
+    :class="[
+      'device-mini-card',
+      {
+        'device-mini-card--stale': !isDeviceOnline,
+        'device-mini-card--mock': isMock,
+        'device-mini-card--real': !isMock,
+      },
+    ]"
     @click="handleClick"
     @keydown.enter.prevent="handleClick"
     @settings="handleSettings"
@@ -487,6 +494,9 @@ function handleDeviceDelete() {
         <span v-if="sensorFallback">{{ sensorFallback }}</span>
         <span v-else>Keine Sensoren oder Aktoren</span>
       </div>
+
+      <!-- Hover hint -->
+      <div class="device-mini-card__hint" aria-hidden="true">Details öffnen →</div>
     </template>
   </ESPCardBase>
 </template>
@@ -494,7 +504,7 @@ function handleDeviceDelete() {
 <style scoped>
 /* ── Root overrides on ESPCardBase for mini card styling ── */
 .device-mini-card {
-  background: var(--color-bg-tertiary);
+  background: var(--glass-bg-l2);
   padding: var(--space-3);
   cursor: pointer;
   transition:
@@ -506,6 +516,7 @@ function handleDeviceDelete() {
   max-width: 100%;
   position: relative;
   overflow: hidden;
+  will-change: transform;
 }
 
 .device-mini-card.esp-card-base {
@@ -538,15 +549,80 @@ function handleDeviceDelete() {
 .device-mini-card:hover {
   background: var(--color-bg-quaternary);
   border-color: var(--glass-border-hover);
-  transform: translateY(-1px);
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.26);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
   filter: brightness(1.05);
+}
+
+.device-mini-card:hover .device-mini-card__hint {
+  opacity: 1;
 }
 
 /* Tactile touch feedback */
 .device-mini-card:active {
   transform: scale(0.99);
   transition-duration: 60ms;
+}
+
+/* Mock / Real glow border — analog to esp-info-compact--mock/--real */
+.device-mini-card--mock {
+  border-left: 3px solid var(--color-mock);
+  box-shadow:
+    var(--glass-shadow-l2),
+    0 0 16px color-mix(in srgb, var(--color-mock) 15%, transparent);
+}
+
+.device-mini-card--mock:hover {
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.35),
+    0 0 22px color-mix(in srgb, var(--color-mock) 22%, transparent);
+}
+
+.device-mini-card--real {
+  border-left: 3px solid var(--color-real);
+  box-shadow:
+    var(--glass-shadow-l2),
+    0 0 16px color-mix(in srgb, var(--color-real) 13%, transparent);
+}
+
+.device-mini-card--real:hover {
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.35),
+    0 0 22px color-mix(in srgb, var(--color-real) 18%, transparent);
+}
+
+/* Status-dot puls ring on online devices */
+:deep(.esp-card-base__status-dot)::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: var(--radius-full);
+  border: 1px solid currentColor;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.device-mini-card:not(.device-mini-card--stale) :deep(.esp-card-base__status-dot)::after {
+  animation: status-ring-pulse 2.4s ease-out infinite;
+}
+
+@keyframes status-ring-pulse {
+  0% { opacity: 0.6; transform: scale(1); }
+  60% { opacity: 0; transform: scale(2.2); }
+  100% { opacity: 0; transform: scale(2.2); }
+}
+
+/* Hover hint text */
+.device-mini-card__hint {
+  position: absolute;
+  bottom: var(--space-2);
+  right: var(--space-3);
+  font-size: var(--text-xxs);
+  color: var(--color-text-muted);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 /* ── Grip handle (always visible for discoverability) ── */

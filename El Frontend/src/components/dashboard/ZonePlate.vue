@@ -900,6 +900,7 @@ function handleDragEnd() {
 
 /* Device grid — auto-fill stretches cards when few devices */
 .zone-plate__devices {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: var(--space-2);
   min-height: 32px;
   padding-top: var(--space-1);
