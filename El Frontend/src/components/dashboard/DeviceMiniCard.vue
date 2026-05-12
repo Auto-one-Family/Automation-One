@@ -513,6 +513,7 @@ function handleDeviceDelete() {
     transform var(--transition-fast),
     box-shadow var(--transition-fast);
   min-width: 180px;
+  min-height: 260px;
   max-width: 100%;
   position: relative;
   overflow: hidden;
@@ -668,10 +669,10 @@ function handleDeviceDelete() {
 
 /* ── ESPCardBase inner overrides for mini sizing ── */
 
-/* Smaller status dot */
+/* Status dot: 8px per orbital design spec */
 :deep(.esp-card-base__status-dot) {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 /* Status dot glow on hover */
