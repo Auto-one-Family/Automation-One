@@ -31,12 +31,11 @@ import { shouldFallbackToHardwareOverview } from '@/utils/hardwareRouteGuard'
 
 const logger = createLogger('HardwareView')
 
-// Tab Bar + SlideOver + Config Panels
+// Tab Bar + Config Modal
 import ViewTabBar from '@/components/common/ViewTabBar.vue'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
-import SensorConfigPanel from '@/components/esp/SensorConfigPanel.vue'
-import ActuatorConfigPanel from '@/components/esp/ActuatorConfigPanel.vue'
 import ESPConfigPanel from '@/components/esp/ESPConfigPanel.vue'
+import ConfigWizardModal from '@/components/esp/ConfigWizardModal.vue'
 
 // Components
 import CreateMockEspModal from '@/components/modals/CreateMockEspModal.vue'
@@ -231,12 +230,17 @@ watch(
   { immediate: true }
 )
 
-// SlideOver states for config panels
-const showSensorConfig = ref(false)
-const showActuatorConfig = ref(false)
+// Config Wizard Modal state (unified sensor + actuator)
+const isWizardOpen = ref(false)
+const wizardPayload = ref<{
+  espId: string
+  gpio: number
+  sensorType?: string
+  unit?: string
+  configId?: string
+  actuatorType?: string
+} | null>(null)
 const showEspConfig = ref(false)
-const configSensorData = ref<{ espId: string; gpio: number; sensorType: string; unit: string; configId?: string } | null>(null)
-const configActuatorData = ref<{ espId: string; gpio: number; actuatorType: string } | null>(null)
 const configEspDevice = ref<ESPDevice | null>(null)
 
 // =============================================================================
@@ -826,28 +830,19 @@ function handleSettingsClose() {
   }, 200)
 }
 
-function closeSensorConfigPanel() {
+function closeWizard() {
   endAnyDragIfActive()
-  showSensorConfig.value = false
-}
-
-function closeActuatorConfigPanel() {
-  endAnyDragIfActive()
-  showActuatorConfig.value = false
+  isWizardOpen.value = false
 }
 
 /**
- * AUT-251: User clicked "im Geraet aendern" inside SensorConfigPanel/ActuatorConfigPanel.
- * Closes the config panel and opens the ESP-Settings-Sheet for the device, where the
- * Zone is actually managed (Zone gehoert zum Geraet, nicht zum einzelnen Sensor/Aktor).
+ * AUT-251: User clicked "im Geraet aendern" inside ConfigWizardModal.
+ * Closes the wizard and opens the ESP-Settings-Sheet for the device.
  */
 function handleOpenEspSettingsFromConfig(payload: { espId: string }) {
   const device = espStore.devices.find(d => espStore.getDeviceId(d) === payload.espId)
   if (!device) return
-  // Close the inner config panels first (avoid stacked SlideOvers competing)
-  showSensorConfig.value = false
-  showActuatorConfig.value = false
-  // Open ESP-Settings-Sheet
+  isWizardOpen.value = false
   if (settingsCloseTimer) { clearTimeout(settingsCloseTimer); settingsCloseTimer = null }
   settingsDevice.value = device
   isSettingsOpen.value = true
@@ -918,14 +913,14 @@ function handleSensorClickFromDetail(payload: { espId: string; gpio: number; sen
   if (!sensor) sensor = sensors.find((s: any) => s.gpio === payload.gpio)
   if (!sensor) return
 
-  configSensorData.value = {
+  wizardPayload.value = {
     espId: payload.espId,
     gpio: payload.gpio,
     sensorType: sensor.sensor_type || 'unknown',
     unit: sensor.unit || '',
     configId: payload.configId || sensor.config_id,
   }
-  showSensorConfig.value = true
+  isWizardOpen.value = true
 }
 
 function handleActuatorClickFromDetail(payload: { espId: string; gpio: number }) {
@@ -934,12 +929,12 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
   const actuator = actuators.find((a: any) => a.gpio === payload.gpio)
   if (!actuator) return
 
-  configActuatorData.value = {
+  wizardPayload.value = {
     espId: payload.espId,
     gpio: payload.gpio,
     actuatorType: actuator.actuator_type || 'relay',
   }
-  showActuatorConfig.value = true
+  isWizardOpen.value = true
 }
 
 </script>
@@ -1278,47 +1273,22 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
       />
     </SlideOver>
 
-    <!-- Sensor Config SlideOver (elevation=high wenn über Settings-Sheet) -->
-    <SlideOver
-      :open="showSensorConfig"
-      :title="configSensorData?.sensorType || 'Sensor'"
-      width="lg"
-      elevation="high"
-      @close="closeSensorConfigPanel"
-    >
-      <SensorConfigPanel
-        v-if="configSensorData"
-        :esp-id="configSensorData.espId"
-        :gpio="configSensorData.gpio"
-        :sensor-type="configSensorData.sensorType"
-        :unit="configSensorData.unit"
-        :config-id="configSensorData.configId"
-        :show-metadata="false"
-        @deleted="closeSensorConfigPanel(); espStore.fetchDevice(configSensorData!.espId)"
-        @saved="closeSensorConfigPanel(); espStore.fetchDevice(configSensorData!.espId)"
-        @open-esp-settings="handleOpenEspSettingsFromConfig"
-      />
-    </SlideOver>
-
-    <!-- Actuator Config SlideOver (elevation=high wenn über Settings-Sheet) -->
-    <SlideOver
-      :open="showActuatorConfig"
-      :title="configActuatorData?.actuatorType || 'Aktor'"
-      width="lg"
-      elevation="high"
-      @close="closeActuatorConfigPanel"
-    >
-      <ActuatorConfigPanel
-        v-if="configActuatorData"
-        :esp-id="configActuatorData.espId"
-        :gpio="configActuatorData.gpio"
-        :actuator-type="configActuatorData.actuatorType"
-        :show-metadata="false"
-        @deleted="closeActuatorConfigPanel(); espStore.fetchDevice(configActuatorData!.espId)"
-        @saved="closeActuatorConfigPanel(); espStore.fetchDevice(configActuatorData!.espId)"
-        @open-esp-settings="handleOpenEspSettingsFromConfig"
-      />
-    </SlideOver>
+    <!-- Config Wizard Modal (Sensor + Actuator unified, S8) -->
+    <ConfigWizardModal
+      v-if="wizardPayload"
+      :open="isWizardOpen"
+      :esp-id="wizardPayload.espId"
+      :gpio="wizardPayload.gpio"
+      :sensor-type="wizardPayload.sensorType"
+      :unit="wizardPayload.unit"
+      :config-id="wizardPayload.configId"
+      :actuator-type="wizardPayload.actuatorType"
+      @update:open="isWizardOpen = $event"
+      @close="closeWizard"
+      @deleted="closeWizard(); espStore.fetchDevice(wizardPayload!.espId)"
+      @saved="espStore.fetchDevice(wizardPayload!.espId)"
+      @open-esp-settings="handleOpenEspSettingsFromConfig"
+    />
 
     <!-- ESP Config SlideOver -->
     <SlideOver
