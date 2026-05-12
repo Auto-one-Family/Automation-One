@@ -18,6 +18,7 @@ import { Badge } from '@/shared/design'
 import { getActuatorTypeInfo } from '@/utils/labels'
 import { formatRelativeTime } from '@/utils/formatters'
 import { useDragStateStore } from '@/shared/stores/dragState.store'
+import { useEspStore } from '@/stores/esp'
 
 interface Props {
   /** ESP ID this actuator belongs to */
@@ -72,6 +73,7 @@ const emit = defineEmits<{
 
 // Drag state store (global ESP-Card drag tracking)
 const dragStore = useDragStateStore()
+const espStore = useEspStore()
 
 // Drag state
 const isDragging = ref(false)
@@ -190,6 +192,18 @@ const statusDisplay = computed(() => {
   } as const
 })
 
+// Toggle ON/OFF — stopPropagation prevents Config Wizard from opening
+async function handleToggle(event: MouseEvent) {
+  event.stopPropagation()
+  if (props.emergencyStopped) return
+  await espStore.sendActuatorCommand(props.espId, props.gpio, props.state ? 'OFF' : 'ON')
+}
+
+// Whether quick-toggle is available (digital/relay only, not PWM/fan)
+const isToggleable = computed(() =>
+  props.actuatorType !== 'pwm' && props.actuatorType !== 'fan'
+)
+
 // Handle click
 function handleClick() {
   emit('click', props.gpio)
@@ -277,6 +291,20 @@ function handleDragEnd(event: DragEvent) {
           >
             {{ statusDisplay.text }}
           </Badge>
+
+          <button
+            v-if="isToggleable"
+            class="actuator-satellite__toggle"
+            :class="{
+              'actuator-satellite__toggle--on': state && !emergencyStopped,
+              'actuator-satellite__toggle--disabled': emergencyStopped,
+            }"
+            :disabled="emergencyStopped"
+            @click.stop="handleToggle"
+            :title="state ? 'Ausschalten' : 'Einschalten'"
+          >
+            <span class="actuator-satellite__toggle-thumb" />
+          </button>
 
           <span
             v-if="scopeBadge"
@@ -535,6 +563,45 @@ function handleDragEnd(event: DragEvent) {
 .actuator-satellite__scope-badge--mobile {
   background: var(--color-accent-bg);
   color: var(--color-accent-bright);
+}
+
+/* Toggle slider — 28×16px quick on/off for digital actuators */
+.actuator-satellite__toggle {
+  width: 28px;
+  height: 16px;
+  flex-shrink: 0;
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: var(--color-bg-tertiary, rgba(255, 255, 255, 0.06));
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.actuator-satellite__toggle--on {
+  background: var(--color-real);
+  border-color: var(--color-real);
+}
+
+.actuator-satellite__toggle--disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.actuator-satellite__toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 50%;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.actuator-satellite__toggle--on .actuator-satellite__toggle-thumb {
+  transform: translateX(12px);
 }
 
 /* Connection indicator */
