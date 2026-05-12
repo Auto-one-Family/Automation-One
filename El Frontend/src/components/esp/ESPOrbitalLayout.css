@@ -70,6 +70,51 @@
 }
 
 /* =============================================================================
+   Orbital SVG Overlay (S6): decorative orbit ring + radial connection lines
+   ============================================================================= */
+.esp-orbital-svg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 0;
+}
+
+.esp-orbital-svg__ring {
+  fill: none;
+  stroke: var(--color-iridescent-3);
+  stroke-width: 1;
+  stroke-dasharray: 2 6;
+  opacity: 0.35;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: orbital-ring-rotate 60s linear infinite;
+}
+
+.esp-orbital-svg__line {
+  stroke: var(--color-iridescent-3);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+
+.esp-orbital-svg__line--visible {
+  opacity: 0.5;
+  animation: orbital-dash-march 1.5s linear infinite;
+}
+
+@keyframes orbital-ring-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes orbital-dash-march {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -14; }
+}
+
+/* =============================================================================
    Compact ESP Info Card
    ============================================================================= */
 .esp-info-compact {

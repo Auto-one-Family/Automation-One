@@ -15,7 +15,7 @@
  * - Chart panel expands within center card (not overlaying satellites)
  */
 
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { X, Heart, Settings2, Loader2, Pencil, Check } from 'lucide-vue-next'
 import ESPCard from './ESPCard.vue'
 import SensorSatellite from './SensorSatellite.vue'
@@ -186,9 +186,22 @@ const orbitPositions = computed(() => {
 })
 
 const visibleSatellites = ref(false)
+const containerSize = ref(700)
+const orbitRadiusPx = ref(280)
+let orbitalResizeObserver: ResizeObserver | null = null
 
 onMounted(() => {
   requestAnimationFrame(() => { visibleSatellites.value = true })
+  if (containerRef.value) {
+    orbitalResizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+      containerSize.value = entry.contentRect.width
+      const orbitRaw = window.getComputedStyle(entry.target).getPropertyValue('--orbit-radius').trim()
+      orbitRadiusPx.value = parseFloat(orbitRaw) || 280
+    })
+    orbitalResizeObserver.observe(containerRef.value)
+  }
 })
 
 watch(
@@ -198,6 +211,11 @@ watch(
     requestAnimationFrame(() => { visibleSatellites.value = true })
   },
 )
+
+onUnmounted(() => {
+  orbitalResizeObserver?.disconnect()
+  orbitalResizeObserver = null
+})
 
 // =============================================================================
 // Event Handlers
@@ -252,6 +270,33 @@ function handleActuatorClick(gpio: number) {
     @dragleave="onDragLeave"
     @drop="onDrop"
   >
+    <!-- Orbital SVG Overlay: decorative orbit ring + radial connection lines (S6) -->
+    <svg
+      class="esp-orbital-svg"
+      :width="containerSize"
+      :height="containerSize"
+      :viewBox="`0 0 ${containerSize} ${containerSize}`"
+      aria-hidden="true"
+    >
+      <circle
+        class="esp-orbital-svg__ring"
+        :cx="containerSize / 2"
+        :cy="containerSize / 2"
+        :r="orbitRadiusPx"
+      />
+      <line
+        v-for="sat in orbitPositions"
+        :key="`line-${sat.key}`"
+        class="esp-orbital-svg__line"
+        :class="{ 'esp-orbital-svg__line--visible': visibleSatellites }"
+        :x1="containerSize / 2"
+        :y1="containerSize / 2"
+        :x2="containerSize / 2 + sat.txNorm * orbitRadiusPx"
+        :y2="containerSize / 2 + sat.tyNorm * orbitRadiusPx"
+        :style="{ 'transition-delay': sat.transitionDelay, 'animation-delay': sat.transitionDelay }"
+      />
+    </svg>
+
     <!-- Radial Satellites (Sensors + Actuators) -->
     <div
       v-for="sat in orbitPositions"
