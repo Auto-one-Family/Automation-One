@@ -43,6 +43,12 @@ import {
 import { useDragStateStore } from '@/shared/stores/dragState.store'
 import { createLogger } from '@/utils/logger'
 
+const props = withDefaults(defineProps<{
+  orbitalMode?: boolean
+}>(), {
+  orbitalMode: false,
+})
+
 const logger = createLogger('ComponentSidebar')
 const dragStore = useDragStateStore()
 
@@ -198,7 +204,7 @@ function onDragEnd() {
 </script>
 
 <template>
-  <aside class="component-sidebar">
+  <aside :class="['component-sidebar', { 'component-sidebar--orbital': props.orbitalMode }]">
     <div class="component-sidebar__content">
       <div class="component-sidebar__header">
         <span class="component-sidebar__title">Komponenten</span>
@@ -390,5 +396,68 @@ function onDragEnd() {
 
 .component-sidebar__items::-webkit-scrollbar-thumb:hover {
   background: var(--color-iridescent-1);
+}
+
+/* === Orbital Mode: Horizontal Top-Drawer (S7) === */
+.component-sidebar--orbital {
+  position: fixed;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-modal);
+  width: auto;
+  min-width: 0;
+  max-width: calc(100vw - 2rem);
+  border-left: none;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elevation-floating);
+  backdrop-filter: blur(var(--glass-blur-l2));
+  overflow: hidden;
+  flex-shrink: initial;
+}
+
+.component-sidebar--orbital::after {
+  display: none;
+}
+
+.component-sidebar--orbital .component-sidebar__content {
+  flex-direction: row;
+  align-items: center;
+  height: auto;
+  padding: 0.375rem 0.5rem;
+  gap: 0.375rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.component-sidebar--orbital .component-sidebar__content::-webkit-scrollbar {
+  display: none;
+}
+
+.component-sidebar--orbital .component-sidebar__header {
+  flex-direction: column;
+  align-items: center;
+  padding-bottom: 0;
+  padding-right: 0.5rem;
+  border-bottom: none;
+  border-right: 1px solid var(--glass-border);
+  margin-right: 0.125rem;
+  gap: 0;
+}
+
+.component-sidebar--orbital .component-sidebar__items {
+  flex-direction: row;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+  overflow-y: visible;
+  scrollbar-width: none;
+}
+
+.component-sidebar--orbital .component-item {
+  min-width: 52px;
+  flex-shrink: 0;
+  padding: 0.375rem 0.5rem;
 }
 </style>

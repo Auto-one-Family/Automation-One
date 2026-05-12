@@ -1208,8 +1208,6 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
 
         </div>
 
-        <!-- Component Sidebar (Level 2 / Orbital only) -->
-        <ComponentSidebar v-show="currentLevel === 2" />
       </div>
 
       <!-- Hardware Side-Panel (target.view='hardware', placement='side-panel') -->
@@ -1222,6 +1220,16 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
         />
       </aside>
     </div>
+
+    <!-- Component Palette: Top-Drawer in Orbital Mode (S7) -->
+    <Teleport to="body">
+      <Transition name="palette-slide">
+        <ComponentSidebar
+          v-show="currentLevel === 2"
+          :orbital-mode="true"
+        />
+      </Transition>
+    </Teleport>
 
     <!-- L2 backdrop — dims L1 content during orbital detail view -->
     <Teleport to="body">
@@ -1902,5 +1910,23 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
   background: var(--backdrop-color);
   backdrop-filter: blur(var(--backdrop-blur));
   z-index: var(--z-modal-backdrop);
+}
+</style>
+
+<style>
+/* palette-slide: Component Palette top-drawer enter/leave animation (S7) */
+.palette-slide-enter-active {
+  animation: palette-slide-down 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.palette-slide-leave-active {
+  animation: palette-slide-up 0.3s ease-in both;
+}
+@keyframes palette-slide-down {
+  from { opacity: 0; transform: translateX(-50%) translateY(-120%); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+@keyframes palette-slide-up {
+  from { opacity: 1; transform: translateX(-50%) translateY(0); }
+  to   { opacity: 0; transform: translateX(-50%) translateY(-120%); }
 }
 </style>
