@@ -88,6 +88,10 @@ useSwipeNavigation(zoomContainerRef, {
   },
 })
 
+const centeredEspId = ref<string | null>(null)
+const centeredOriginRect = ref<DOMRect | null>(null)
+const l2ContainerRef = ref<HTMLElement | null>(null)
+
 // =============================================================================
 // Accordion State — per-zone expand/collapse with localStorage persistence (D3)
 // =============================================================================
@@ -682,8 +686,28 @@ function zoomOut() {
 // =============================================================================
 
 function onDeviceCardClick(payload: { deviceId: string; originRect: DOMRect }) {
+  centeredEspId.value = payload.deviceId
+  centeredOriginRect.value = payload.originRect
   zoomToDevice(payload.deviceId)
 }
+
+watch(currentLevel, async (level) => {
+  if (level === 2 && centeredOriginRect.value && l2ContainerRef.value) {
+    await nextTick()
+    const last = l2ContainerRef.value.getBoundingClientRect()
+    const orig = centeredOriginRect.value
+    const dx = orig.left + orig.width / 2 - (last.left + last.width / 2)
+    const dy = orig.top + orig.height / 2 - (last.top + last.height / 2)
+    const scale = Math.min(orig.width / last.width, 0.15)
+    l2ContainerRef.value.style.setProperty('--flip-start-x', `${dx}px`)
+    l2ContainerRef.value.style.setProperty('--flip-start-y', `${dy}px`)
+    l2ContainerRef.value.style.setProperty('--flip-start-scale', `${scale}`)
+  }
+  if (level === 1) {
+    centeredEspId.value = null
+    centeredOriginRect.value = null
+  }
+})
 
 function onDeviceMonitorNav(device: ESPDevice) {
   const zoneId = device.zone_id
@@ -962,7 +986,7 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
         <div ref="zoomContainerRef" class="zoom-container">
 
           <!-- LEVEL 1: Zone Accordion Overview -->
-          <div v-if="currentLevel === 1" class="zoom-level--active">
+          <div class="zoom-level--l1" :class="{ 'zoom-level--l1--hidden': currentLevel === 2 }">
             <div class="zone-accordion-list">
               <div v-if="zoneGroups.length === 0" class="no-zones-hint">
                 <p>Alle Geräte sind noch keiner Zone zugewiesen.</p>
@@ -1166,7 +1190,7 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
           </div>
 
           <!-- LEVEL 2: Device Detail (Orbital Layout) -->
-          <div v-else-if="currentLevel === 2" class="zoom-level--active">
+          <div v-if="currentLevel === 2" ref="l2ContainerRef" class="zoom-level--l2">
             <DeviceDetailView
               v-if="selectedDevice"
               :device="selectedDevice"
@@ -1198,6 +1222,11 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
         />
       </aside>
     </div>
+
+    <!-- L2 backdrop — dims L1 content during orbital detail view -->
+    <Teleport to="body">
+      <div v-if="currentLevel === 2" class="hardware-backdrop" @click="zoomOut()" />
+    </Teleport>
 
     <!-- Create Mock ESP Modal -->
     <CreateMockEspModal v-model="dashStore.showCreateMock" @created="onMockEspCreated" />
@@ -1380,7 +1409,7 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
   justify-content: stretch;
 }
 
-.hardware-main-layout--detail .zoom-level--active {
+.hardware-main-layout--detail .zoom-level--l2 {
   width: 100%;
 }
 
@@ -1834,5 +1863,44 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
   /* Keep detail view sidebar beside content even under browser zoom. */
   .hardware-main-layout:not(.hardware-main-layout--detail) { flex-direction: column; }
   .zone-create-form { flex-wrap: wrap; }
+}
+
+/* ─── FLIP Fly-In Animation (S4) ─── */
+.zoom-level--l1 {
+  display: block;
+}
+
+.zoom-level--l1--hidden {
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  visibility: hidden;
+}
+
+.zoom-level--l2 {
+  display: block;
+  animation: orbital-fly-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes orbital-fly-in {
+  from {
+    opacity: 0;
+    transform: translate(var(--flip-start-x, 0px), var(--flip-start-y, 0px)) scale(var(--flip-start-scale, 0.92));
+  }
+  to {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+}
+
+.hardware-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--backdrop-color);
+  backdrop-filter: blur(var(--backdrop-blur));
+  z-index: var(--z-modal-backdrop);
 }
 </style>
