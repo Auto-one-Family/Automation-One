@@ -15,11 +15,11 @@
  * - Chart panel expands within center card (not overlaying satellites)
  */
 
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { X, Heart, Settings2, Loader2, Pencil, Check } from 'lucide-vue-next'
 import ESPCard from './ESPCard.vue'
-import SensorColumn from './SensorColumn.vue'
-import ActuatorColumn from './ActuatorColumn.vue'
+import SensorSatellite from './SensorSatellite.vue'
+import ActuatorSatellite from './ActuatorSatellite.vue'
 import AddSensorModal from './AddSensorModal.vue'
 import AddActuatorModal from './AddActuatorModal.vue'
 import AnalysisDropZone from './AnalysisDropZone.vue'
@@ -154,14 +154,50 @@ const totalItems = computed(() => {
   return sensors.value.length + actuators.value.length
 })
 
-/**
- * Determine if sensors should use multi-row layout.
- * - <=5 sensors: single row (horizontal)
- * - >5 sensors: 2-column grid (wraps into multiple rows)
- */
-const sensorsUseMultiRow = computed(() => {
-  return sensors.value.length > 5
+/** Merged sorted satellite list: sensors (sorted) followed by actuators */
+const sortedSatellites = computed(() => {
+  const sensorItems = [...sensors.value]
+    .sort((a, b) => {
+      const typeCompare = (a.sensor_type || '').localeCompare(b.sensor_type || '')
+      if (typeCompare !== 0) return typeCompare
+      return (a.i2c_address ?? 0) - (b.i2c_address ?? 0)
+    })
+    .map(s => ({ ...s, kind: 'sensor' as const, key: s.config_id || `sensor-${s.gpio}-${s.sensor_type}` }))
+
+  const actuatorItems = [...actuators.value]
+    .map(a => ({ ...a, kind: 'actuator' as const, key: `actuator-${a.gpio}` }))
+
+  return [...sensorItems, ...actuatorItems]
 })
+
+/** Normalized (cos/sin) orbit positions per satellite — CSS handles pixel calculation via --orbit-radius */
+const orbitPositions = computed(() => {
+  const total = sortedSatellites.value.length
+  if (total === 0) return []
+  return sortedSatellites.value.map((sat, index) => {
+    const angle = (2 * Math.PI * index) / total - Math.PI / 2
+    return {
+      ...sat,
+      txNorm: Math.round(Math.cos(angle) * 10000) / 10000,
+      tyNorm: Math.round(Math.sin(angle) * 10000) / 10000,
+      transitionDelay: `${index * 0.07}s`,
+    }
+  })
+})
+
+const visibleSatellites = ref(false)
+
+onMounted(() => {
+  requestAnimationFrame(() => { visibleSatellites.value = true })
+})
+
+watch(
+  () => sortedSatellites.value.length,
+  () => {
+    visibleSatellites.value = false
+    requestAnimationFrame(() => { visibleSatellites.value = true })
+  },
+)
 
 // =============================================================================
 // Event Handlers
@@ -216,22 +252,58 @@ function handleActuatorClick(gpio: number) {
     @dragleave="onDragLeave"
     @drop="onDrop"
   >
-    <!-- Left Column: Sensors (uses extracted SensorColumn) -->
-    <SensorColumn
-      :esp-id="espId"
-      :sensors="sensors"
-      :selected-gpio="selectedGpio !== null && selectedType === 'sensor' ? selectedGpio : null"
-      :show-connections="showConnections"
-      class="esp-horizontal-layout__column esp-horizontal-layout__column--sensors"
-      :class="{
-        'esp-horizontal-layout__column--multi-row': sensorsUseMultiRow,
-        'esp-horizontal-layout__column--empty': sensors.length === 0
-      }"
-      @sensor-click="handleSensorClick"
-    />
+    <!-- Radial Satellites (Sensors + Actuators) -->
+    <div
+      v-for="sat in orbitPositions"
+      :key="sat.key"
+      class="satellite-card"
+      :class="{ 'satellite-card--visible': visibleSatellites }"
+      :style="{ '--tx-norm': sat.txNorm, '--ty-norm': sat.tyNorm, 'transition-delay': sat.transitionDelay }"
+    >
+      <SensorSatellite
+        v-if="sat.kind === 'sensor'"
+        :esp-id="espId"
+        :gpio="sat.gpio"
+        :sensor-type="sat.sensor_type"
+        :name="sat.name"
+        :value="sat.processed_value ?? sat.raw_value ?? 0"
+        :quality="sat.quality"
+        :unit="sat.unit"
+        :device-type="sat.device_type"
+        :multi-values="sat.multi_values"
+        :is-multi-value="sat.is_multi_value"
+        :i2c-address="sat.i2c_address"
+        :interface-type="sat.interface_type"
+        :device-scope="sat.device_scope"
+        :assigned-zones="sat.assigned_zones ?? undefined"
+        :selected="selectedGpio === sat.gpio && selectedType === 'sensor'"
+        :show-connections="showConnections"
+        @click="() => handleSensorClick({ configId: sat.config_id, gpio: sat.gpio, sensorType: sat.sensor_type })"
+      />
+      <ActuatorSatellite
+        v-else
+        :esp-id="espId"
+        :gpio="sat.gpio"
+        :actuator-type="sat.actuator_type"
+        :hardware-type="sat.hardware_type"
+        :name="sat.name"
+        :state="sat.state"
+        :pwm-value="sat.pwm_value"
+        :last-command-at="sat.last_command_at"
+        :last-triggered-at="actuatorRuntimeMap[sat.gpio]?.lastTriggeredAt"
+        :trigger-reason="actuatorRuntimeMap[sat.gpio]?.triggerReason"
+        :trigger-rule-name="actuatorRuntimeMap[sat.gpio]?.triggerRuleName"
+        :emergency-stopped="sat.emergency_stopped"
+        :device-scope="sat.device_scope"
+        :assigned-zones="sat.assigned_zones ?? undefined"
+        :selected="selectedGpio === sat.gpio && selectedType === 'actuator'"
+        :show-connections="showConnections"
+        @click="handleActuatorClick(sat.gpio)"
+      />
+    </div>
 
-    <!-- Center Column: ESP Card -->
-    <div ref="centerRef" class="esp-horizontal-layout__center">
+    <!-- Center: ESP Card (orbital center) -->
+    <div ref="centerRef" class="esp-orbital-center">
       <!-- Compact Mode: Simple Info Card -->
       <div
         v-if="compactMode"
@@ -389,20 +461,6 @@ function handleActuatorClick(gpio: number) {
       <!-- Full Mode: Full ESP Card (for detail view) -->
       <ESPCard v-else :esp="device" />
     </div>
-
-    <!-- Right Column: Actuators (uses extracted ActuatorColumn) -->
-    <ActuatorColumn
-      :esp-id="espId"
-      :actuators="actuators"
-      :selected-gpio="selectedGpio !== null && selectedType === 'actuator' ? selectedGpio : null"
-      :actuator-runtime-map="actuatorRuntimeMap"
-      :layout="actuatorLayout"
-      :show-rules-section="compactMode"
-      :show-connections="showConnections"
-      class="esp-horizontal-layout__column esp-horizontal-layout__column--actuators"
-      :class="{ 'esp-horizontal-layout__column--empty': actuators.length === 0 }"
-      @actuator-click="handleActuatorClick"
-    />
 
     <!-- Drop Indicator Overlay (Phase 2B: for all ESPs) -->
     <Transition name="fade">

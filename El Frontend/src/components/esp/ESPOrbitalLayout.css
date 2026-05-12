@@ -4,132 +4,69 @@
    ============================================================================= */
 
 /* =============================================================================
-   NEW: Horizontal 3-Column Layout (Sensors | ESP-Card | Actuators)
-   Replaces orbital/absolute positioning with side-by-side flexbox
+   Radial Orbital Layout (S5)
+   Satellite cards positioned absolutely around central ESP card.
+   Orbit radius controlled via --orbit-radius CSS custom property for responsive adaptation.
    ============================================================================= */
 .esp-horizontal-layout {
   position: relative;
-  display: flex;
-  flex-direction: row;
-  align-items: flex-start;
-  justify-content: center;
-  gap: clamp(0.25rem, 1.5vw, 1rem);
-  padding: 0;
-  min-height: auto;
-  width: min(100%, 1220px);
-  max-width: 100%;
+  width: min(100%, 700px);
+  aspect-ratio: 1;
   margin-inline: auto;
-  box-sizing: border-box;
+  overflow: visible;
+  --orbit-radius: 280px;
+}
+
+@media (max-width: 768px) {
+  .esp-horizontal-layout {
+    --orbit-radius: 160px;
+    width: min(100%, 400px);
+  }
 }
 
 /* =============================================================================
-   Left/Right Columns (Sensors & Actuators)
-   Dynamic sizing - columns shrink to fit content, no fixed min-width
+   Satellite Cards — absolutely positioned around orbital center
    ============================================================================= */
-.esp-horizontal-layout__column {
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-  width: clamp(130px, 16vw, 240px);
-  max-width: 240px;
-  flex-shrink: 0;
+.satellite-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform:
+    translate(-50%, -50%)
+    translate(
+      calc(var(--tx-norm) * var(--orbit-radius, 280px)),
+      calc(var(--ty-norm) * var(--orbit-radius, 280px))
+    )
+    scale(0);
+  opacity: 0;
+  transition:
+    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.5s ease;
+  z-index: 1;
+  width: 150px;
 }
 
-/* Sensors column: Default = single vertical column */
-.esp-horizontal-layout__column--sensors {
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-  align-items: stretch;
-  width: clamp(130px, 16vw, 240px);
-}
-
-/* Sensors column: Empty state - minimal footprint */
-.esp-horizontal-layout__column--sensors.esp-horizontal-layout__column--empty {
-  width: 56px;
-}
-
-/* Sensors column: Multi-column mode (>5 sensors) = 2 columns side by side */
-.esp-horizontal-layout__column--sensors.esp-horizontal-layout__column--multi-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.375rem;
-  width: clamp(220px, 24vw, 320px);
-  max-width: 100%;
-  align-content: start;
-}
-
-/* Actuators column */
-.esp-horizontal-layout__column--actuators {
-  align-items: stretch;
-  width: clamp(130px, 16vw, 240px);
-}
-
-.esp-horizontal-layout__column--actuators.esp-horizontal-layout__column--empty {
-  width: 56px;
-}
-
-/* Satellite cards in horizontal layout - fill column width */
-.esp-horizontal-layout__satellite {
-  position: relative !important;
-  transform: none !important;
-  left: auto !important;
-  top: auto !important;
-  width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
-}
-
-/* Empty column placeholder */
-.esp-horizontal-layout__empty-column {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 60px;
-  padding: 0.5rem;
-  border: 1px dashed var(--glass-border);
-  border-radius: var(--radius-sm);
-  opacity: 0.5;
-}
-
-.esp-horizontal-layout__empty-label {
-  font-size: 0.625rem;
-  color: var(--color-text-muted);
-  text-align: center;
-  white-space: nowrap;
-}
-
-/* Empty sensor/actuator slot - ghost placeholder */
-.esp-horizontal-layout__empty-slot {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.25rem;
-  padding: 0.75rem 0.5rem;
-  border: 1px dashed rgba(255, 255, 255, 0.08);
-  border-radius: var(--radius-md);
-  color: rgba(255, 255, 255, 0.2);
-  font-size: 0.5625rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  transition: all 0.2s ease;
-  cursor: default;
-}
-
-.esp-horizontal-layout__empty-slot:hover {
-  border-color: rgba(96, 165, 250, 0.2);
-  color: rgba(255, 255, 255, 0.35);
-  background: rgba(96, 165, 250, 0.03);
+.satellite-card--visible {
+  opacity: 1;
+  transform:
+    translate(-50%, -50%)
+    translate(
+      calc(var(--tx-norm) * var(--orbit-radius, 280px)),
+      calc(var(--ty-norm) * var(--orbit-radius, 280px))
+    )
+    scale(1);
 }
 
 /* =============================================================================
-   Center Column (ESP Card)
+   Orbital Center (ESP Card)
    ============================================================================= */
-.esp-horizontal-layout__center {
-  flex: 0 1 clamp(280px, 32vw, 520px);
-  min-width: 0;
+.esp-orbital-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  width: clamp(240px, 34vw, 360px);
 }
 
 /* =============================================================================

@@ -321,15 +321,15 @@ function handleDragEnd(event: DragEvent) {
   padding: 0.5625rem;
   background: rgba(30, 32, 40, 0.9);
   border: 1px solid var(--glass-border);
+  border-top: 2px solid var(--color-iridescent-2);
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  width: 100%;
+  width: 150px;
+  max-width: 150px;
   min-width: 0;
   min-height: 88px;
-  max-width: none;
   backdrop-filter: blur(10px);
-  /* Enhanced floating effect */
   box-shadow:
     0 2px 8px rgba(0, 0, 0, 0.2),
     0 4px 16px rgba(0, 0, 0, 0.1);
@@ -371,7 +371,11 @@ function handleDragEnd(event: DragEvent) {
 }
 
 .actuator-satellite--active {
-  border-color: rgba(52, 211, 153, 0.4);
+  border-color: var(--color-real);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.2),
+    0 4px 16px rgba(0, 0, 0, 0.1),
+    0 0 14px color-mix(in srgb, var(--color-real) 20%, transparent);
 }
 
 .actuator-satellite--emergency {

@@ -465,11 +465,13 @@ function handleDragEnd(event: DragEvent) {
   background: var(--color-bg-tertiary);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-left: 2px solid rgba(96, 165, 250, 0.4);
+  border-top: 2px solid var(--color-iridescent-3);
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   min-width: 0;
-  width: 100%;
+  width: 150px;
+  max-width: 150px;
   box-sizing: border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   overflow: hidden;
@@ -616,7 +618,7 @@ function handleDragEnd(event: DragEvent) {
 
 .sensor-satellite__gpio-badge {
   font-family: var(--font-mono);
-  font-size: 0.5rem;
+  font-size: 6.25px;
   font-weight: 500;
   color: rgba(255, 255, 255, 0.3);
   background: rgba(255, 255, 255, 0.04);
@@ -706,9 +708,10 @@ function handleDragEnd(event: DragEvent) {
   letter-spacing: -0.04em;
 }
 
-/* Single value: large instrument readout */
+/* Single value: instrument readout sized for 150px orbital card */
 .sensor-satellite--values-1 .sensor-satellite__value-number {
-  font-size: 1.375rem;
+  font-size: 1.0625rem;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Multi-value: balanced sizing */
