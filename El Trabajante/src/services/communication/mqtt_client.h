@@ -313,6 +313,7 @@ private:
     uint32_t tcp_transport_error_count_;
     int32_t last_transport_errno_;
     unsigned long last_disconnect_ms_;
+    bool manual_reconnect_suspended_;
     int pending_session_announce_msg_id_;
 #endif
 

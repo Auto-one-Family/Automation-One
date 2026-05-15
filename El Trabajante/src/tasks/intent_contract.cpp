@@ -30,6 +30,10 @@ static constexpr uint8_t OUTCOME_OUTBOX_CAPACITY = 48;
 static constexpr uint8_t OUTCOME_OUTBOX_RETRY_LIMIT = 5;
 static Preferences s_outcome_outbox_prefs;
 static bool s_outbox_stats_loaded = false;
+static bool s_outbox_storage_degraded = false;
+static unsigned long s_outbox_storage_backoff_until_ms = 0;
+static unsigned long s_replay_backoff_until_ms = 0;
+static const char* s_replay_backoff_reason = "none";
 static uint32_t s_outcome_retry_count = 0;
 static uint32_t s_outcome_recovered_count = 0;
 static uint32_t s_outcome_drop_count_critical = 0;
@@ -94,14 +98,6 @@ static int findFinalIntentEntry(const char* intent_id) {
         }
     }
     return -1;
-}
-
-// Arduino Preferences::remove() logs ERROR when the key is absent; eviction/clear must be idempotent.
-static void prefsRemoveIfPresent(Preferences& prefs, const char* key) {
-    if (key == nullptr || !prefs.isKey(key)) {
-        return;
-    }
-    prefs.remove(key);
 }
 
 static const char* mapLegacyStatus(const char* normalized_outcome) {
@@ -174,16 +170,42 @@ static void releaseOutboxLock() {
 
 class OutboxLockGuard {
 public:
-    explicit OutboxLockGuard(TickType_t wait_ticks = pdMS_TO_TICKS(200))
-        : locked_(acquireOutboxLock(wait_ticks)) {}
+    explicit OutboxLockGuard(const char* owner, TickType_t wait_ticks = pdMS_TO_TICKS(200))
+        : owner_(owner != nullptr ? owner : "unknown"),
+          wait_ticks_(wait_ticks),
+          acquire_started_ms_(millis()),
+          lock_acquired_ms_(0),
+          locked_(acquireOutboxLock(wait_ticks)) {
+        if (locked_) {
+            lock_acquired_ms_ = millis();
+        } else {
+            // #region agent log
+            LOG_W(IC_TAG, String("[DBG5126ae] outbox lock acquire timeout owner=") + owner_ +
+                              " wait_ms=" + String(pdTICKS_TO_MS(wait_ticks_)) +
+                              " uptime_ms=" + String(acquire_started_ms_));
+            // #endregion
+        }
+    }
     ~OutboxLockGuard() {
         if (locked_) {
+            const unsigned long held_ms = millis() - lock_acquired_ms_;
+            if (held_ms >= 80UL) {
+                // #region agent log
+                LOG_W(IC_TAG, String("[DBG5126ae] outbox lock hold owner=") + owner_ +
+                                  " held_ms=" + String(held_ms) +
+                                  " wait_ms=" + String(pdTICKS_TO_MS(wait_ticks_)));
+                // #endregion
+            }
             releaseOutboxLock();
         }
     }
     bool locked() const { return locked_; }
 
 private:
+    const char* owner_;
+    TickType_t wait_ticks_;
+    unsigned long acquire_started_ms_;
+    unsigned long lock_acquired_ms_;
     bool locked_;
 };
 
@@ -196,11 +218,80 @@ static bool beginOutcomeOutboxPrefs(bool read_only) {
     return ok;
 }
 
+static bool putOutboxUCharChecked(const char* key, uint8_t value) {
+    return key != nullptr && s_outcome_outbox_prefs.putUChar(key, value) > 0;
+}
+
+static bool putOutboxUIntChecked(const char* key, uint32_t value) {
+    return key != nullptr && s_outcome_outbox_prefs.putUInt(key, value) > 0;
+}
+
+static bool putOutboxBoolChecked(const char* key, bool value) {
+    return key != nullptr && s_outcome_outbox_prefs.putBool(key, value) > 0;
+}
+
+static bool putOutboxStringChecked(const char* key, const String& value) {
+    if (key == nullptr) {
+        return false;
+    }
+    return s_outcome_outbox_prefs.putString(key, value) > 0;
+}
+
+static void markOutboxStorageDegraded(const char* owner, const char* key) {
+    s_outbox_storage_degraded = true;
+    s_outbox_storage_backoff_until_ms = millis() + 15000UL;
+    // #region agent log
+    LOG_W(IC_TAG, String("[DBG5126ae] outbox storage degraded owner=") +
+                   String(owner != nullptr ? owner : "unknown") +
+                   " key=" + String(key != nullptr ? key : "unknown") +
+                   " backoff_until=" + String(s_outbox_storage_backoff_until_ms));
+    // #endregion
+}
+
+static bool resetOutboxStorageUnsafe(const char* owner) {
+    if (!s_outcome_outbox_prefs.clear()) {
+        markOutboxStorageDegraded(owner, "clear");
+        return false;
+    }
+    bool ok = true;
+    ok = putOutboxUCharChecked("head", 0) && ok;
+    ok = putOutboxUCharChecked("count", 0) && ok;
+    ok = putOutboxUIntChecked(kOutboxStatRetryTotalKey, s_outcome_retry_count) && ok;
+    ok = putOutboxUIntChecked(kOutboxStatRecoveredTotalKey, s_outcome_recovered_count) && ok;
+    ok = putOutboxUIntChecked(kOutboxStatDropTotalKey, s_outcome_drop_count_critical) && ok;
+    ok = putOutboxUIntChecked(kOutboxStatFinalConfirmedTotalKey, s_outcome_final_confirmed_count) && ok;
+    if (!ok) {
+        markOutboxStorageDegraded(owner, "reset_head_count");
+        return false;
+    }
+    s_outbox_storage_degraded = false;
+    s_outbox_storage_backoff_until_ms = 0;
+    // #region agent log
+    LOG_W(IC_TAG, String("[DBG5126ae] outbox storage reset owner=") +
+                   String(owner != nullptr ? owner : "unknown"));
+    // #endregion
+    return true;
+}
+
+static void scheduleReplayBackoffMs(const char* reason, unsigned long delay_ms) {
+    const unsigned long now = millis();
+    const unsigned long bounded_delay = (delay_ms > 5000UL) ? 5000UL : delay_ms;
+    s_replay_backoff_until_ms = now + bounded_delay;
+    s_replay_backoff_reason = reason != nullptr ? reason : "unknown";
+    // #region agent log
+    LOG_W(IC_TAG, String("[DBG5126ae] replay backoff scheduled reason=") +
+                   String(s_replay_backoff_reason) +
+                   " delay_ms=" + String(bounded_delay) +
+                   " until=" + String(s_replay_backoff_until_ms));
+    // #endregion
+}
+
 static String outboxKey(uint8_t idx, const char* suffix) {
     return "s" + String(idx) + "_" + String(suffix);
 }
 
 static void loadOutboxStatsLocked() {
+    const unsigned long stats_started_ms = millis();
     if (s_outbox_stats_loaded) {
         return;
     }
@@ -215,10 +306,20 @@ static void loadOutboxStatsLocked() {
         s_outcome_outbox_prefs.getUInt(kOutboxStatFinalConfirmedTotalKey, 0);
     s_outcome_outbox_prefs.end();
     s_outbox_stats_loaded = true;
+    const unsigned long stats_duration_ms = millis() - stats_started_ms;
+    if (stats_duration_ms > 50UL) {
+        // #region agent log
+        LOG_W(IC_TAG, String("[DBG5126ae] outbox stats load cost duration_ms=") +
+                       String(stats_duration_ms) +
+                       " retry_total=" + String(s_outcome_retry_count) +
+                       " recovered_total=" + String(s_outcome_recovered_count) +
+                       " drop_total=" + String(s_outcome_drop_count_critical));
+        // #endregion
+    }
 }
 
 static void loadOutboxStatsIfNeeded() {
-    OutboxLockGuard guard;
+    OutboxLockGuard guard("load_stats");
     if (!guard.locked()) {
         LOG_W(IC_TAG, "Outbox stats lock timeout (load)");
         return;
@@ -227,7 +328,7 @@ static void loadOutboxStatsIfNeeded() {
 }
 
 static void persistOutboxStats() {
-    OutboxLockGuard guard;
+    OutboxLockGuard guard("persist_stats");
     if (!guard.locked()) {
         LOG_W(IC_TAG, "Outbox stats lock timeout (persist)");
         return;
@@ -235,28 +336,80 @@ static void persistOutboxStats() {
     if (!beginOutcomeOutboxPrefs(false)) {
         return;
     }
-    s_outcome_outbox_prefs.putUInt(kOutboxStatRetryTotalKey, s_outcome_retry_count);
-    s_outcome_outbox_prefs.putUInt(kOutboxStatRecoveredTotalKey, s_outcome_recovered_count);
-    s_outcome_outbox_prefs.putUInt(kOutboxStatDropTotalKey, s_outcome_drop_count_critical);
-    s_outcome_outbox_prefs.putUInt(kOutboxStatFinalConfirmedTotalKey,
-                                   s_outcome_final_confirmed_count);
+    bool ok = true;
+    ok = putOutboxUIntChecked(kOutboxStatRetryTotalKey, s_outcome_retry_count) && ok;
+    ok = putOutboxUIntChecked(kOutboxStatRecoveredTotalKey, s_outcome_recovered_count) && ok;
+    ok = putOutboxUIntChecked(kOutboxStatDropTotalKey, s_outcome_drop_count_critical) && ok;
+    ok = putOutboxUIntChecked(kOutboxStatFinalConfirmedTotalKey,
+                              s_outcome_final_confirmed_count) && ok;
+    if (!ok) {
+        markOutboxStorageDegraded("persist_stats", "stats");
+    }
     s_outcome_outbox_prefs.end();
 }
 
-static bool saveOutboxEntryAt(uint8_t idx, const PendingOutcomeEntry& entry) {
-    s_outcome_outbox_prefs.putString(outboxKey(idx, "flow").c_str(), String(entry.flow));
-    s_outcome_outbox_prefs.putString(outboxKey(idx, "intent").c_str(), String(entry.metadata.intent_id));
-    s_outcome_outbox_prefs.putString(outboxKey(idx, "corr").c_str(), String(entry.metadata.correlation_id));
-    s_outcome_outbox_prefs.putUInt(outboxKey(idx, "gen").c_str(), entry.metadata.generation);
-    s_outcome_outbox_prefs.putUInt(outboxKey(idx, "created").c_str(), entry.metadata.created_at_ms);
-    s_outcome_outbox_prefs.putUInt(outboxKey(idx, "ttl").c_str(), entry.metadata.ttl_ms);
-    s_outcome_outbox_prefs.putUInt(outboxKey(idx, "epoch").c_str(), entry.metadata.epoch_at_accept);
-    s_outcome_outbox_prefs.putString(outboxKey(idx, "outcome").c_str(), String(entry.outcome));
-    s_outcome_outbox_prefs.putString(outboxKey(idx, "code").c_str(), String(entry.code));
-    s_outcome_outbox_prefs.putString(outboxKey(idx, "reason").c_str(), String(entry.reason));
-    s_outcome_outbox_prefs.putBool(outboxKey(idx, "retryable").c_str(), entry.retryable);
-    s_outcome_outbox_prefs.putUChar(outboxKey(idx, "attempt").c_str(), entry.attempt);
-    return true;
+static bool saveOutboxEntryAt(uint8_t idx,
+                              const PendingOutcomeEntry& entry,
+                              const char* owner = "unknown") {
+    const unsigned long save_started_ms = millis();
+    bool ok = true;
+    ok = putOutboxStringChecked(outboxKey(idx, "flow").c_str(), String(entry.flow)) && ok;
+    ok = putOutboxStringChecked(outboxKey(idx, "intent").c_str(), String(entry.metadata.intent_id)) && ok;
+    ok = putOutboxStringChecked(outboxKey(idx, "corr").c_str(), String(entry.metadata.correlation_id)) && ok;
+    ok = putOutboxUIntChecked(outboxKey(idx, "gen").c_str(), entry.metadata.generation) && ok;
+    ok = putOutboxUIntChecked(outboxKey(idx, "created").c_str(), entry.metadata.created_at_ms) && ok;
+    ok = putOutboxUIntChecked(outboxKey(idx, "ttl").c_str(), entry.metadata.ttl_ms) && ok;
+    ok = putOutboxUIntChecked(outboxKey(idx, "epoch").c_str(), entry.metadata.epoch_at_accept) && ok;
+    ok = putOutboxStringChecked(outboxKey(idx, "outcome").c_str(), String(entry.outcome)) && ok;
+    ok = putOutboxStringChecked(outboxKey(idx, "code").c_str(), String(entry.code)) && ok;
+    ok = putOutboxStringChecked(outboxKey(idx, "reason").c_str(), String(entry.reason)) && ok;
+    ok = putOutboxBoolChecked(outboxKey(idx, "retryable").c_str(), entry.retryable) && ok;
+    ok = putOutboxUCharChecked(outboxKey(idx, "attempt").c_str(), entry.attempt) && ok;
+    if (!ok) {
+        markOutboxStorageDegraded(owner, "save_entry");
+    }
+    const unsigned long save_duration_ms = millis() - save_started_ms;
+    if (save_duration_ms > 50UL) {
+        // #region agent log
+        LOG_W(IC_TAG, String("[DBG5126ae] outbox save entry cost owner=") +
+                       String(owner != nullptr ? owner : "unknown") +
+                       " idx=" + String(idx) +
+                       " attempt=" + String(entry.attempt) +
+                       " duration_ms=" + String(save_duration_ms));
+        // #endregion
+    }
+    return ok;
+}
+
+static bool isSameOutboxEntryIdentity(const PendingOutcomeEntry& lhs, const PendingOutcomeEntry& rhs) {
+    return strncmp(lhs.metadata.intent_id, rhs.metadata.intent_id, sizeof(lhs.metadata.intent_id)) == 0 &&
+           strncmp(lhs.metadata.correlation_id, rhs.metadata.correlation_id, sizeof(lhs.metadata.correlation_id)) == 0 &&
+           lhs.metadata.created_at_ms == rhs.metadata.created_at_ms &&
+           lhs.metadata.generation == rhs.metadata.generation &&
+           strncmp(lhs.code, rhs.code, sizeof(lhs.code)) == 0 &&
+           strncmp(lhs.flow, rhs.flow, sizeof(lhs.flow)) == 0;
+}
+
+static void copyStringFieldSafe(char* dest,
+                                size_t dest_len,
+                                const String& src,
+                                const char* field_name,
+                                uint8_t idx) {
+    if (dest == nullptr || dest_len == 0) {
+        return;
+    }
+    const char* src_ptr = src.c_str();
+    if (src_ptr == nullptr) {
+        dest[0] = '\0';
+        // #region agent log
+        LOG_W(IC_TAG, String("[DBG5126ae] outbox null string field field=") +
+                       String(field_name != nullptr ? field_name : "unknown") +
+                       " idx=" + String(idx));
+        // #endregion
+        return;
+    }
+    strncpy(dest, src_ptr, dest_len - 1);
+    dest[dest_len - 1] = '\0';
 }
 
 static bool loadOutboxEntryAt(uint8_t idx, PendingOutcomeEntry* entry_out) {
@@ -274,44 +427,78 @@ static bool loadOutboxEntryAt(uint8_t idx, PendingOutcomeEntry* entry_out) {
     String code = s_outcome_outbox_prefs.getString(outboxKey(idx, "code").c_str(), "EXECUTE_FAIL");
     String reason = s_outcome_outbox_prefs.getString(outboxKey(idx, "reason").c_str(), "Pending outcome replay");
 
-    strncpy(entry_out->flow, flow.c_str(), sizeof(entry_out->flow) - 1);
-    strncpy(entry_out->metadata.intent_id, intent.c_str(), sizeof(entry_out->metadata.intent_id) - 1);
-    strncpy(entry_out->metadata.correlation_id, corr.c_str(), sizeof(entry_out->metadata.correlation_id) - 1);
+    copyStringFieldSafe(entry_out->flow, sizeof(entry_out->flow), flow, "flow", idx);
+    copyStringFieldSafe(entry_out->metadata.intent_id,
+                        sizeof(entry_out->metadata.intent_id),
+                        intent,
+                        "intent",
+                        idx);
+    copyStringFieldSafe(entry_out->metadata.correlation_id,
+                        sizeof(entry_out->metadata.correlation_id),
+                        corr,
+                        "corr",
+                        idx);
     entry_out->metadata.generation = s_outcome_outbox_prefs.getUInt(outboxKey(idx, "gen").c_str(), 0);
     entry_out->metadata.created_at_ms = s_outcome_outbox_prefs.getUInt(outboxKey(idx, "created").c_str(), millis());
     entry_out->metadata.ttl_ms = s_outcome_outbox_prefs.getUInt(outboxKey(idx, "ttl").c_str(), 0);
     entry_out->metadata.epoch_at_accept = s_outcome_outbox_prefs.getUInt(outboxKey(idx, "epoch").c_str(), 0);
-    strncpy(entry_out->outcome, outcome.c_str(), sizeof(entry_out->outcome) - 1);
-    strncpy(entry_out->code, code.c_str(), sizeof(entry_out->code) - 1);
-    strncpy(entry_out->reason, reason.c_str(), sizeof(entry_out->reason) - 1);
+    copyStringFieldSafe(entry_out->outcome, sizeof(entry_out->outcome), outcome, "outcome", idx);
+    copyStringFieldSafe(entry_out->code, sizeof(entry_out->code), code, "code", idx);
+    copyStringFieldSafe(entry_out->reason, sizeof(entry_out->reason), reason, "reason", idx);
     entry_out->retryable = s_outcome_outbox_prefs.getBool(outboxKey(idx, "retryable").c_str(), true);
     entry_out->attempt = s_outcome_outbox_prefs.getUChar(outboxKey(idx, "attempt").c_str(), 1);
     return true;
 }
 
-static void clearOutboxEntryAt(uint8_t idx) {
-    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "flow").c_str());
-    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "intent").c_str());
-    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "corr").c_str());
-    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "gen").c_str());
-    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "created").c_str());
-    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "ttl").c_str());
-    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "epoch").c_str());
-    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "outcome").c_str());
-    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "code").c_str());
-    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "reason").c_str());
-    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "retryable").c_str());
-    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "attempt").c_str());
+static bool clearOutboxEntryAt(uint8_t idx, const char* owner = "unknown") {
+    const unsigned long clear_started_ms = millis();
+    // Soft-clear for NVS cost control:
+    // loadOutboxEntryAt() treats empty "intent" as empty slot and returns false early.
+    // Keeping other keys avoids expensive remove/isKey scans (12 keys) in lock scope.
+    // Next saveOutboxEntryAt() overwrite fully replaces stale fields at this index.
+    bool ok = true;
+    ok = putOutboxStringChecked(outboxKey(idx, "intent").c_str(), "") && ok;
+    ok = putOutboxUCharChecked(outboxKey(idx, "attempt").c_str(), 0) && ok;
+    if (!ok) {
+        markOutboxStorageDegraded(owner, "clear_entry");
+    }
+    const unsigned long clear_duration_ms = millis() - clear_started_ms;
+    if (clear_duration_ms > 50UL) {
+        // #region agent log
+        LOG_W(IC_TAG, String("[DBG5126ae] outbox clear entry cost owner=") +
+                       String(owner != nullptr ? owner : "unknown") +
+                       " idx=" + String(idx) +
+                       " duration_ms=" + String(clear_duration_ms));
+        // #endregion
+    }
+    return ok;
 }
 
 static bool enqueueCriticalOutcome(const PendingOutcomeEntry& entry) {
-    OutboxLockGuard guard;
+    const unsigned long enqueue_started_ms = millis();
+    uint8_t enqueue_write_ops = 0;
+    const char* enqueue_action = "enqueue_ok";
+    OutboxLockGuard guard("enqueue_critical");
     if (!guard.locked()) {
+        enqueue_action = "lock_timeout";
+        // #region agent log
+        LOG_W(IC_TAG, String("[DBG5126ae] enqueue critical cost action=") +
+                       String(enqueue_action) +
+                       " write_ops=" + String(enqueue_write_ops) +
+                       " duration_ms=" + String(millis() - enqueue_started_ms));
+        // #endregion
         LOG_E(IC_TAG, "Outbox lock timeout while enqueueing critical outcome");
         return false;
     }
     loadOutboxStatsLocked();
     if (!beginOutcomeOutboxPrefs(false)) {
+        enqueue_action = "prefs_begin_fail";
+        // #region agent log
+        LOG_W(IC_TAG, String("[DBG5126ae] enqueue critical cost action=") +
+                       String(enqueue_action) +
+                       " write_ops=" + String(enqueue_write_ops) +
+                       " duration_ms=" + String(millis() - enqueue_started_ms));
+        // #endregion
         return false;
     }
     uint8_t head = s_outcome_outbox_prefs.getUChar("head", 0);
@@ -321,20 +508,55 @@ static bool enqueueCriticalOutcome(const PendingOutcomeEntry& entry) {
     // critical outcome is never silently dropped. Superseded entry is counted in
     // outcome_drop_count_critical (heartbeat + outcome payload telemetry).
     if (count >= OUTCOME_OUTBOX_CAPACITY) {
-        clearOutboxEntryAt(head);
+        enqueue_action = "evict_oldest";
+        if (!clearOutboxEntryAt(head, "enqueue_evict_oldest")) {
+            enqueue_action = "evict_clear_fail";
+            resetOutboxStorageUnsafe("enqueue_evict_oldest");
+            s_outcome_outbox_prefs.end();
+            return false;
+        }
+        enqueue_write_ops++;
         head = static_cast<uint8_t>((head + 1) % OUTCOME_OUTBOX_CAPACITY);
         count--;
         s_outcome_drop_count_critical++;
         LOG_W(IC_TAG,
               "Critical outcome outbox full — evicted oldest NVS slot to enqueue new critical");
-        s_outcome_outbox_prefs.putUInt(kOutboxStatDropTotalKey, s_outcome_drop_count_critical);
+        if (!putOutboxUIntChecked(kOutboxStatDropTotalKey, s_outcome_drop_count_critical)) {
+            markOutboxStorageDegraded("enqueue_critical", kOutboxStatDropTotalKey);
+        }
+        enqueue_write_ops++;
     }
 
     uint8_t idx = static_cast<uint8_t>((head + count) % OUTCOME_OUTBOX_CAPACITY);
-    saveOutboxEntryAt(idx, entry);
-    s_outcome_outbox_prefs.putUChar("head", head);
-    s_outcome_outbox_prefs.putUChar("count", static_cast<uint8_t>(count + 1));
+    if (!saveOutboxEntryAt(idx, entry, "enqueue_critical")) {
+        enqueue_action = "save_entry_fail";
+        resetOutboxStorageUnsafe("enqueue_critical");
+        s_outcome_outbox_prefs.end();
+        return false;
+    }
+    enqueue_write_ops++;
+    if (!putOutboxUCharChecked("head", head)) {
+        enqueue_action = "head_write_fail";
+        resetOutboxStorageUnsafe("enqueue_critical");
+        s_outcome_outbox_prefs.end();
+        return false;
+    }
+    enqueue_write_ops++;
+    if (!putOutboxUCharChecked("count", static_cast<uint8_t>(count + 1))) {
+        enqueue_action = "count_write_fail";
+        resetOutboxStorageUnsafe("enqueue_critical");
+        s_outcome_outbox_prefs.end();
+        return false;
+    }
+    enqueue_write_ops++;
     s_outcome_outbox_prefs.end();
+    // #region agent log
+    LOG_W(IC_TAG, String("[DBG5126ae] enqueue critical cost action=") +
+                   String(enqueue_action) +
+                   " write_ops=" + String(enqueue_write_ops) +
+                   " duration_ms=" + String(millis() - enqueue_started_ms) +
+                   " count_before=" + String(count));
+    // #endregion
     return true;
 }
 
@@ -388,103 +610,348 @@ static bool buildOutcomePayload(const char* flow,
 }
 
 void processIntentOutcomeOutbox() {
-    OutboxLockGuard guard;
+    PendingOutcomeEntry candidate{};
+    String replay_payload;
+    String topic = TopicBuilder::buildIntentOutcomeTopic();
+    bool has_candidate = false;
+
+    {
+        OutboxLockGuard guard("replay_prepare");
+        if (!guard.locked()) {
+            LOG_W(IC_TAG, "Outbox lock timeout during replay");
+            return;
+        }
+        loadOutboxStatsLocked();
+        if (!mqttClient.isConnected()) {
+            return;
+        }
+        if (s_replay_backoff_until_ms > 0 && millis() < s_replay_backoff_until_ms) {
+            static unsigned long s_last_replay_backoff_active_log_ms = 0;
+            const unsigned long now = millis();
+            if (s_last_replay_backoff_active_log_ms == 0UL ||
+                (now - s_last_replay_backoff_active_log_ms) >= 1000UL) {
+                s_last_replay_backoff_active_log_ms = now;
+                // #region agent log
+                LOG_W(IC_TAG, String("[DBG5126ae] replay backoff active reason=") +
+                               String(s_replay_backoff_reason != nullptr ? s_replay_backoff_reason : "unknown") +
+                               " now=" + String(now) +
+                               " until=" + String(s_replay_backoff_until_ms));
+                // #endregion
+            }
+            return;
+        }
+        if (s_outbox_storage_degraded && millis() < s_outbox_storage_backoff_until_ms) {
+            return;
+        }
+        // AUT-56 hardening: do not consume replay attempts while registration gate is closed.
+        if (!mqttClient.isRegistrationConfirmed()) {
+            return;
+        }
+        if (!beginOutcomeOutboxPrefs(false)) {
+            return;
+        }
+
+        uint8_t head = s_outcome_outbox_prefs.getUChar("head", 0);
+        uint8_t count = s_outcome_outbox_prefs.getUChar("count", 0);
+        if (count == 0) {
+            s_outcome_outbox_prefs.end();
+            return;
+        }
+
+        if (!loadOutboxEntryAt(head, &candidate)) {
+            if (!clearOutboxEntryAt(head, "drain_replay_corrupt_drop")) {
+                resetOutboxStorageUnsafe("drain_replay_corrupt_drop");
+                s_outcome_outbox_prefs.end();
+                return;
+            }
+            head = static_cast<uint8_t>((head + 1) % OUTCOME_OUTBOX_CAPACITY);
+            count--;
+            if (!putOutboxUCharChecked("head", head) ||
+                !putOutboxUCharChecked("count", count)) {
+                resetOutboxStorageUnsafe("drain_replay_corrupt_drop");
+                s_outcome_outbox_prefs.end();
+                return;
+            }
+            s_outcome_outbox_prefs.end();
+            return;
+        }
+
+        static unsigned long s_last_replay_prepare_log_ms = 0;
+        const unsigned long now_prepare_ms = millis();
+        if (s_last_replay_prepare_log_ms == 0UL ||
+            (now_prepare_ms - s_last_replay_prepare_log_ms) >= 2000UL) {
+            s_last_replay_prepare_log_ms = now_prepare_ms;
+            // #region agent log
+            LOG_W(IC_TAG, String("[DBG5126ae] replay prepare state head=") +
+                           String(head) +
+                           " count=" + String(count) +
+                           " attempt=" + String(candidate.attempt) +
+                           " mqtt_connected=" + String(mqttClient.isConnected() ? 1 : 0) +
+                           " reg_confirmed=" + String(mqttClient.isRegistrationConfirmed() ? 1 : 0));
+            // #endregion
+        }
+
+        if (!buildOutcomePayload(candidate.flow,
+                                 candidate.metadata,
+                                 candidate.outcome,
+                                 candidate.code,
+                                 String(candidate.reason),
+                                 candidate.retryable,
+                                 true,
+                                 candidate.attempt,
+                                 true,
+                                 &replay_payload)) {
+            if (!clearOutboxEntryAt(head, "drain_replay_stale_drop")) {
+                resetOutboxStorageUnsafe("drain_replay_stale_drop");
+                s_outcome_outbox_prefs.end();
+                return;
+            }
+            head = static_cast<uint8_t>((head + 1) % OUTCOME_OUTBOX_CAPACITY);
+            count--;
+            if (!putOutboxUCharChecked("head", head) ||
+                !putOutboxUCharChecked("count", count)) {
+                resetOutboxStorageUnsafe("drain_replay_stale_drop");
+                s_outcome_outbox_prefs.end();
+                return;
+            }
+            s_outcome_outbox_prefs.end();
+            return;
+        }
+
+        has_candidate = true;
+        s_outcome_outbox_prefs.end();
+    }
+
+    if (!has_candidate) {
+        return;
+    }
+
+    const unsigned long replay_publish_started_ms = millis();
+    const bool publish_ok = mqttClient.safePublish(topic, replay_payload, 0, 0);
+    const unsigned long replay_publish_duration_ms = millis() - replay_publish_started_ms;
+    // #region agent log
+    LOG_W(IC_TAG, String("[DBG5126ae] replay publish result ok=") +
+                   String(publish_ok ? 1 : 0) +
+                   " duration_ms=" + String(replay_publish_duration_ms) +
+                   " attempt=" + String(candidate.attempt) +
+                   " mqtt_connected_after=" + String(mqttClient.isConnected() ? 1 : 0));
+    // #endregion
+
+    const unsigned long commit_started_ms = millis();
+    uint8_t commit_write_ops = 0;
+    const char* commit_action = "noop";
+    OutboxLockGuard guard("replay_commit");
     if (!guard.locked()) {
+        commit_action = "lock_timeout";
+        // #region agent log
+        LOG_W(IC_TAG, String("[DBG5126ae] replay commit cost action=") +
+                       String(commit_action) +
+                       " write_ops=" + String(commit_write_ops) +
+                       " duration_ms=" + String(millis() - commit_started_ms));
+        // #endregion
         LOG_W(IC_TAG, "Outbox lock timeout during replay");
         return;
     }
     loadOutboxStatsLocked();
-    if (!mqttClient.isConnected()) {
-        return;
-    }
-    // AUT-56 hardening: do not consume replay attempts while registration gate is closed.
-    // During reconnect windows safePublish() would fail with REGISTRATION_PENDING/timeout,
-    // which previously increased attempt counters and could evict critical outcomes before
-    // the first valid heartbeat ACK reopened the gate.
-    if (!mqttClient.isRegistrationConfirmed()) {
-        return;
-    }
     if (!beginOutcomeOutboxPrefs(false)) {
+        commit_action = "prefs_begin_fail";
+        // #region agent log
+        LOG_W(IC_TAG, String("[DBG5126ae] replay commit cost action=") +
+                       String(commit_action) +
+                       " write_ops=" + String(commit_write_ops) +
+                       " duration_ms=" + String(millis() - commit_started_ms));
+        // #endregion
         return;
     }
 
     uint8_t head = s_outcome_outbox_prefs.getUChar("head", 0);
     uint8_t count = s_outcome_outbox_prefs.getUChar("count", 0);
     bool changed = false;
-    uint8_t processed = 0;
-    String topic = TopicBuilder::buildIntentOutcomeTopic();
+    bool head_count_changed = false;
+    bool retry_total_changed = false;
+    bool recovered_total_changed = false;
+    bool drop_total_changed = false;
+    bool final_confirmed_total_changed = false;
+    unsigned long phase_clear_ms = 0;
+    unsigned long phase_head_count_ms = 0;
+    unsigned long phase_retry_total_ms = 0;
+    unsigned long phase_recovered_total_ms = 0;
+    unsigned long phase_drop_total_ms = 0;
+    unsigned long phase_final_confirmed_total_ms = 0;
+    if (count == 0) {
+        commit_action = "count_zero";
+        s_outcome_outbox_prefs.end();
+        // #region agent log
+        LOG_W(IC_TAG, String("[DBG5126ae] replay commit cost action=") +
+                       String(commit_action) +
+                       " write_ops=" + String(commit_write_ops) +
+                       " duration_ms=" + String(millis() - commit_started_ms));
+        // #endregion
+        return;
+    }
 
-    while (count > 0 && processed < 2) {
-        PendingOutcomeEntry entry;
-        if (!loadOutboxEntryAt(head, &entry)) {
-            clearOutboxEntryAt(head);
-            head = static_cast<uint8_t>((head + 1) % OUTCOME_OUTBOX_CAPACITY);
-            count--;
-            changed = true;
-            processed++;
-            continue;
+    PendingOutcomeEntry current_head{};
+    if (!loadOutboxEntryAt(head, &current_head)) {
+        commit_action = "head_corrupt_drop";
+        if (!clearOutboxEntryAt(head, "replay_commit_corrupt_drop")) {
+            resetOutboxStorageUnsafe("replay_commit_corrupt_drop");
+            s_outcome_outbox_prefs.end();
+            return;
         }
-
-        String replay_payload;
-        if (!buildOutcomePayload(entry.flow,
-                                 entry.metadata,
-                                 entry.outcome,
-                                 entry.code,
-                                 String(entry.reason),
-                                 entry.retryable,
-                                 true,
-                                 entry.attempt,
-                                 true,
-                                 &replay_payload)) {
-            clearOutboxEntryAt(head);
-            head = static_cast<uint8_t>((head + 1) % OUTCOME_OUTBOX_CAPACITY);
-            count--;
-            changed = true;
-            processed++;
-            continue;
-        }
-
-        if (mqttClient.safePublish(topic, replay_payload, 0, 1)) {
-            recordIntentChainStage(entry.metadata,
+        commit_write_ops++;
+        head = static_cast<uint8_t>((head + 1) % OUTCOME_OUTBOX_CAPACITY);
+        count--;
+        changed = true;
+        head_count_changed = true;
+    } else if (isSameOutboxEntryIdentity(candidate, current_head)) {
+        if (publish_ok) {
+            commit_action = "publish_ok_clear";
+            recordIntentChainStage(candidate.metadata,
                                    "outcome_publish_ok",
-                                   entry.flow,
-                                   entry.code,
+                                   candidate.flow,
+                                   candidate.code,
                                    "[INC-EA5484] critical outcome replay delivered");
-            clearOutboxEntryAt(head);
+            const unsigned long clear_started_ms = millis();
+            if (!clearOutboxEntryAt(head, "replay_publish_ok_clear")) {
+                resetOutboxStorageUnsafe("replay_publish_ok_clear");
+                s_outcome_outbox_prefs.end();
+                return;
+            }
+            phase_clear_ms += millis() - clear_started_ms;
+            commit_write_ops++;
             head = static_cast<uint8_t>((head + 1) % OUTCOME_OUTBOX_CAPACITY);
             count--;
             s_outcome_recovered_count++;
             s_outcome_final_confirmed_count++;
             changed = true;
-            processed++;
-            continue;
+            head_count_changed = true;
+            recovered_total_changed = true;
+            final_confirmed_total_changed = true;
+        } else {
+            commit_action = "publish_fail_retry";
+            s_outcome_retry_count++;
+            retry_total_changed = true;
+            if (current_head.attempt >= OUTCOME_OUTBOX_RETRY_LIMIT) {
+                commit_action = "publish_fail_drop";
+                s_outcome_drop_count_critical++;
+                drop_total_changed = true;
+                const unsigned long clear_started_ms = millis();
+                if (!clearOutboxEntryAt(head, "replay_publish_fail_drop")) {
+                    resetOutboxStorageUnsafe("replay_publish_fail_drop");
+                    s_outcome_outbox_prefs.end();
+                    return;
+                }
+                phase_clear_ms += millis() - clear_started_ms;
+                commit_write_ops++;
+                head = static_cast<uint8_t>((head + 1) % OUTCOME_OUTBOX_CAPACITY);
+                count--;
+                changed = true;
+                head_count_changed = true;
+            } else {
+                current_head.attempt++;
+                const unsigned long save_started_ms = millis();
+                if (!saveOutboxEntryAt(head, current_head, "replay_publish_fail_retry")) {
+                    resetOutboxStorageUnsafe("replay_publish_fail_retry");
+                    s_outcome_outbox_prefs.end();
+                    return;
+                }
+                phase_clear_ms += millis() - save_started_ms;
+                commit_write_ops++;
+                changed = true;
+                scheduleReplayBackoffMs("publish_fail_retry", 250UL);
+            }
         }
-
-        s_outcome_retry_count++;
-        if (entry.attempt >= OUTCOME_OUTBOX_RETRY_LIMIT) {
-            s_outcome_drop_count_critical++;
-            clearOutboxEntryAt(head);
-            head = static_cast<uint8_t>((head + 1) % OUTCOME_OUTBOX_CAPACITY);
-            count--;
-            changed = true;
-            processed++;
-            continue;
-        }
-        entry.attempt++;
-        saveOutboxEntryAt(head, entry);
-        changed = true;
-        break;
+    } else {
+        commit_action = "identity_mismatch";
+        scheduleReplayBackoffMs("identity_mismatch", 300UL);
     }
 
     if (changed) {
-        s_outcome_outbox_prefs.putUChar("head", head);
-        s_outcome_outbox_prefs.putUChar("count", count);
-        s_outcome_outbox_prefs.putUInt(kOutboxStatRetryTotalKey, s_outcome_retry_count);
-        s_outcome_outbox_prefs.putUInt(kOutboxStatRecoveredTotalKey, s_outcome_recovered_count);
-        s_outcome_outbox_prefs.putUInt(kOutboxStatDropTotalKey, s_outcome_drop_count_critical);
-        s_outcome_outbox_prefs.putUInt(kOutboxStatFinalConfirmedTotalKey,
-                                       s_outcome_final_confirmed_count);
+        if (head_count_changed) {
+            const unsigned long head_count_started_ms = millis();
+            if (!putOutboxUCharChecked("head", head)) {
+                resetOutboxStorageUnsafe("replay_commit_head");
+                s_outcome_outbox_prefs.end();
+                return;
+            }
+            commit_write_ops++;
+            if (!putOutboxUCharChecked("count", count)) {
+                resetOutboxStorageUnsafe("replay_commit_count");
+                s_outcome_outbox_prefs.end();
+                return;
+            }
+            commit_write_ops++;
+            phase_head_count_ms = millis() - head_count_started_ms;
+        }
+        if (retry_total_changed) {
+            const unsigned long retry_started_ms = millis();
+            if (!putOutboxUIntChecked(kOutboxStatRetryTotalKey, s_outcome_retry_count)) {
+                resetOutboxStorageUnsafe("replay_commit_retry_total");
+                s_outcome_outbox_prefs.end();
+                return;
+            }
+            commit_write_ops++;
+            phase_retry_total_ms = millis() - retry_started_ms;
+        }
+        if (recovered_total_changed) {
+            const unsigned long recovered_started_ms = millis();
+            if (!putOutboxUIntChecked(kOutboxStatRecoveredTotalKey, s_outcome_recovered_count)) {
+                resetOutboxStorageUnsafe("replay_commit_recovered_total");
+                s_outcome_outbox_prefs.end();
+                return;
+            }
+            commit_write_ops++;
+            phase_recovered_total_ms = millis() - recovered_started_ms;
+        }
+        if (drop_total_changed) {
+            const unsigned long drop_started_ms = millis();
+            if (!putOutboxUIntChecked(kOutboxStatDropTotalKey, s_outcome_drop_count_critical)) {
+                resetOutboxStorageUnsafe("replay_commit_drop_total");
+                s_outcome_outbox_prefs.end();
+                return;
+            }
+            commit_write_ops++;
+            phase_drop_total_ms = millis() - drop_started_ms;
+        }
+        if (final_confirmed_total_changed) {
+            const unsigned long final_started_ms = millis();
+            if (!putOutboxUIntChecked(kOutboxStatFinalConfirmedTotalKey,
+                                      s_outcome_final_confirmed_count)) {
+                resetOutboxStorageUnsafe("replay_commit_final_total");
+                s_outcome_outbox_prefs.end();
+                return;
+            }
+            commit_write_ops++;
+            phase_final_confirmed_total_ms = millis() - final_started_ms;
+        }
     }
+    // #region agent log
+    LOG_W(IC_TAG, String("[DBG5126ae] replay commit cost action=") +
+                   String(commit_action) +
+                   " write_ops=" + String(commit_write_ops) +
+                   " duration_ms=" + String(millis() - commit_started_ms) +
+                   " changed=" + String(changed ? 1 : 0) +
+                   " publish_ok=" + String(publish_ok ? 1 : 0));
+    // #endregion
+    if ((phase_clear_ms + phase_head_count_ms + phase_retry_total_ms + phase_recovered_total_ms +
+         phase_drop_total_ms + phase_final_confirmed_total_ms) > 80UL) {
+        // #region agent log
+        LOG_W(IC_TAG, String("[DBG5126ae] replay commit phase cost action=") +
+                       String(commit_action) +
+                       " clear_or_save_ms=" + String(phase_clear_ms) +
+                       " head_count_ms=" + String(phase_head_count_ms) +
+                       " retry_total_ms=" + String(phase_retry_total_ms) +
+                       " recovered_total_ms=" + String(phase_recovered_total_ms) +
+                       " drop_total_ms=" + String(phase_drop_total_ms) +
+                       " final_confirmed_total_ms=" + String(phase_final_confirmed_total_ms));
+        // #endregion
+    }
+    // #region agent log
+    LOG_W(IC_TAG, String("[DBG5126ae] replay commit state changed=") +
+                   String(changed ? 1 : 0) +
+                   " publish_ok=" + String(publish_ok ? 1 : 0) +
+                   " count_after=" + String(count));
+    // #endregion
     s_outcome_outbox_prefs.end();
 }
 
@@ -799,7 +1266,13 @@ bool publishIntentOutcome(const char* flow,
     // slow PUBACK + OUTBOX-expiry housekeeping caused write-timeout disconnects (AAAAA.md).
     // Critical outcomes still persist to NVS and replay when publish fails.
     const uint8_t outcome_qos = 0;
-    bool ok = mqttClient.safePublish(topic, payload, outcome_qos);
+    uint8_t outcome_retries = 3;
+    const PublishQueuePressureStats pq_stats = getPublishQueuePressureStats();
+    if (pq_stats.fill_level >= PUBLISH_QUEUE_SHED_WATERMARK) {
+        // Under queue pressure, avoid retry storms and hand over to NVS replay path.
+        outcome_retries = 0;
+    }
+    bool ok = mqttClient.safePublish(topic, payload, outcome_qos, outcome_retries);
     bool persisted_for_replay = false;
     if (ok) {
         if (command_flow) {

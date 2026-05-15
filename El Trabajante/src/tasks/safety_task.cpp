@@ -57,8 +57,27 @@ void safetyTaskFunction(void* param) {
     LOG_I(SAFETY_TAG, "[SAFETY] Safety task running on core " + String(xPortGetCoreID()));
 
     static uint32_t stack_log_counter = 0;
+    unsigned long last_loop_ms = millis();
+    static unsigned long s_last_safety_gap_log_ms = 0;
+    static unsigned long s_last_safety_cycle_slow_log_ms = 0;
 
     for (;;) {
+        const unsigned long safety_now_ms = millis();
+        const unsigned long safety_loop_gap_ms = safety_now_ms - last_loop_ms;
+        last_loop_ms = safety_now_ms;
+        if (safety_loop_gap_ms > 250UL) {
+            if (s_last_safety_gap_log_ms == 0UL ||
+                (safety_now_ms - s_last_safety_gap_log_ms) >= 2000UL) {
+                s_last_safety_gap_log_ms = safety_now_ms;
+                // #region agent log
+                LOG_W(SAFETY_TAG, String("[DBG5126ae] safety loop gap gap_ms=") +
+                                  String(safety_loop_gap_ms) +
+                                  " heap=" + String(ESP.getFreeHeap()));
+                // #endregion
+            }
+        }
+        const unsigned long safety_cycle_start_ms = millis();
+
         // ============================================
         // M2: Cross-Core Notification Handler
         // ============================================
@@ -134,6 +153,19 @@ void safetyTaskFunction(void* param) {
             UBaseType_t hwm = uxTaskGetStackHighWaterMark(g_safety_task_handle);
             LOG_D(SAFETY_TAG, "[SAFETY] Stack HWM: " +
                   String((uint32_t)(hwm * (uint32_t)sizeof(StackType_t))) + " bytes free");
+        }
+
+        const unsigned long safety_cycle_duration_ms = millis() - safety_cycle_start_ms;
+        if (safety_cycle_duration_ms > 250UL) {
+            if (s_last_safety_cycle_slow_log_ms == 0UL ||
+                (millis() - s_last_safety_cycle_slow_log_ms) >= 2000UL) {
+                s_last_safety_cycle_slow_log_ms = millis();
+                // #region agent log
+                LOG_W(SAFETY_TAG, String("[DBG5126ae] safety op cycle slow duration_ms=") +
+                                  String(safety_cycle_duration_ms) +
+                                  " heap=" + String(ESP.getFreeHeap()));
+                // #endregion
+            }
         }
 
         vTaskDelay(pdMS_TO_TICKS(10));
