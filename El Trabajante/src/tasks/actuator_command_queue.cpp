@@ -33,6 +33,7 @@ bool queueActuatorCommand(const char* topic, const char* payload, const IntentMe
     if (metadata != nullptr) {
         cmd.metadata = *metadata;
     }
+    cmd.enqueued_ms = millis();
     bool recovery_intent = isRecoveryIntentAllowed(topic, payload);
     BaseType_t queued = recovery_intent
                         ? xQueueSendToFront(g_actuator_cmd_queue, &cmd, pdMS_TO_TICKS(20))
@@ -44,6 +45,19 @@ bool queueActuatorCommand(const char* topic, const char* payload, const IntentMe
     }
     if (recovery_intent) {
         LOG_I(ACT_Q_TAG, "[SYNC] Recovery actuator intent prioritized to queue front");
+    }
+    static unsigned long s_last_enqueue_dbg_ms = 0;
+    const unsigned long now_ms = millis();
+    if (s_last_enqueue_dbg_ms == 0UL || (now_ms - s_last_enqueue_dbg_ms) >= 250UL) {
+        s_last_enqueue_dbg_ms = now_ms;
+        const UBaseType_t depth_now = uxQueueMessagesWaiting(g_actuator_cmd_queue);
+        // #region agent log
+        LOG_W(ACT_Q_TAG, String("[DBG5126ae] actuator queue enqueue ") +
+                         "depth=" + String((uint32_t)depth_now) +
+                         " payload_len=" + String((uint32_t)strlen(cmd.payload)) +
+                         " mqtt_connected=" + String(mqttClient.isConnected() ? 1 : 0) +
+                         " reg_confirmed=" + String(mqttClient.isRegistrationConfirmed() ? 1 : 0));
+        // #endregion
     }
     return true;
 }
@@ -112,7 +126,28 @@ void processActuatorCommandQueue(uint8_t max_items) {
             processed++;
             continue;
         }
+        const unsigned long dequeue_ms = millis();
+        const unsigned long queue_age_ms = (cmd.enqueued_ms > 0UL && dequeue_ms >= cmd.enqueued_ms)
+                                               ? (dequeue_ms - cmd.enqueued_ms)
+                                               : 0UL;
+        const UBaseType_t depth_after_pop = uxQueueMessagesWaiting(g_actuator_cmd_queue);
+        // #region agent log
+        LOG_W(ACT_Q_TAG, String("[DBG5126ae] actuator queue dequeue ") +
+                         "queue_age_ms=" + String(queue_age_ms) +
+                         " depth_after_pop=" + String((uint32_t)depth_after_pop) +
+                         " mqtt_connected=" + String(mqttClient.isConnected() ? 1 : 0) +
+                         " reg_confirmed=" + String(mqttClient.isRegistrationConfirmed() ? 1 : 0));
+        // #endregion
+        const unsigned long exec_started_ms = millis();
         bool ok = actuatorManager.handleActuatorCommand(String(cmd.topic), String(cmd.payload));
+        const unsigned long exec_duration_ms = millis() - exec_started_ms;
+        // #region agent log
+        LOG_W(ACT_Q_TAG, String("[DBG5126ae] actuator execute result ") +
+                         "ok=" + String(ok ? 1 : 0) +
+                         " exec_ms=" + String(exec_duration_ms) +
+                         " queue_age_ms=" + String(queue_age_ms) +
+                         " mqtt_connected=" + String(mqttClient.isConnected() ? 1 : 0));
+        // #endregion
         publishIntentOutcome("command",
                              cmd.metadata,
                              ok ? "applied" : "failed",

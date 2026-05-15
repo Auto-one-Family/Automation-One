@@ -2375,17 +2375,26 @@ void routeIncomingMessage(const char* t, const char* p) {
         DeserializationError error = deserializeJson(doc, payload);
 
         if (error) {
+            // #region agent log
+            LOG_W(TAG, String("[DBG5126ae] heartbeat ack rejected code=PARSE_ERROR err=") + String(error.c_str()));
+            // #endregion
             LOG_W(TAG, "Heartbeat ACK parse error: " + String(error.c_str()));
             return;
         }
 
         if (!doc.containsKey("status")) {
+            // #region agent log
+            LOG_W(TAG, "[DBG5126ae] heartbeat ack rejected code=MISSING_ACK_STATUS");
+            // #endregion
             offlineModeManager.onServerAckContractMismatch("MISSING_ACK_STATUS");
             LOG_W(TAG, "[SAFETY-P4] Heartbeat ACK missing status — reject (fail-closed)");
             return;
         }
 
         if (!doc.containsKey("handover_epoch")) {
+            // #region agent log
+            LOG_W(TAG, "[DBG5126ae] heartbeat ack rejected code=MISSING_HANDOVER_EPOCH");
+            // #endregion
             offlineModeManager.onServerAckContractMismatch("MISSING_HANDOVER_EPOCH");
             LOG_W(TAG, "[SAFETY-P4] Heartbeat ACK missing handover_epoch — reject (fail-closed)");
             return;
@@ -2393,6 +2402,9 @@ void routeIncomingMessage(const char* t, const char* p) {
 
         JsonVariant epoch_variant = doc["handover_epoch"];
         if (!epoch_variant.is<uint32_t>()) {
+            // #region agent log
+            LOG_W(TAG, "[DBG5126ae] heartbeat ack rejected code=INVALID_HANDOVER_EPOCH_TYPE");
+            // #endregion
             offlineModeManager.onServerAckContractMismatch("INVALID_HANDOVER_EPOCH_TYPE");
             LOG_W(TAG, "[SAFETY-P4] Heartbeat ACK with non-numeric handover_epoch — reject (fail-closed)");
             return;
@@ -2400,6 +2412,9 @@ void routeIncomingMessage(const char* t, const char* p) {
 
         uint32_t handover_epoch = epoch_variant.as<uint32_t>();
         if (handover_epoch == 0) {
+            // #region agent log
+            LOG_W(TAG, "[DBG5126ae] heartbeat ack rejected code=INVALID_HANDOVER_EPOCH");
+            // #endregion
             offlineModeManager.onServerAckContractMismatch("INVALID_HANDOVER_EPOCH");
             LOG_W(TAG, "[SAFETY-P4] Heartbeat ACK with invalid handover_epoch=0 — reject (fail-closed)");
             return;
@@ -2407,6 +2422,10 @@ void routeIncomingMessage(const char* t, const char* p) {
 
         const char* reject_code = nullptr;
         if (!offlineModeManager.validateServerAckContract(handover_epoch, &reject_code)) {
+            // #region agent log
+            LOG_W(TAG, String("[DBG5126ae] heartbeat ack rejected code=") +
+                       String(reject_code != nullptr ? reject_code : "ACK_CONTRACT_MISMATCH"));
+            // #endregion
             offlineModeManager.onServerAckContractMismatch(reject_code != nullptr ? reject_code : "ACK_CONTRACT_MISMATCH");
             LOG_W(TAG, String("[SAFETY-P4] Heartbeat ACK contract mismatch — reject code=") +
                        String(reject_code != nullptr ? reject_code : "ACK_CONTRACT_MISMATCH"));
@@ -2415,6 +2434,13 @@ void routeIncomingMessage(const char* t, const char* p) {
 
         // Registration Gate: confirm only after full ACK contract validation.
         mqttClient.confirmRegistration();
+        // #region agent log
+        LOG_W(TAG, String("[DBG5126ae] heartbeat ack accepted epoch=") + String(handover_epoch) +
+                   " ack_age_before_ms=" + String(
+                       g_last_server_ack_ms.load() > 0
+                           ? (millis() - g_last_server_ack_ms.load())
+                           : 0UL));
+        // #endregion
         // SAFETY-P1 Mechanism D: Track server ACK timestamp only for valid contract ACK.
         g_last_server_ack_ms.store(millis());
         offlineModeManager.onServerAckReceived(handover_epoch);  // SAFETY-P4

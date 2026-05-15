@@ -11,6 +11,7 @@ struct ActuatorMqttQueueItem {
     char topic[128];
     char payload[512];
     IntentMetadata metadata;
+    unsigned long enqueued_ms;
 };
 
 extern QueueHandle_t g_actuator_cmd_queue;

@@ -335,8 +335,25 @@ static void handleBootCounterReset() {
 void communicationTaskFunction(void* param) {
     (void)param;
     LOG_I(COMM_TAG, "[COMM] Communication task running on core " + String(xPortGetCoreID()));
+    unsigned long last_loop_ms = millis();
+    static unsigned long s_last_comm_gap_log_ms = 0;
+    static unsigned long s_last_mqtt_loop_slow_log_ms = 0;
 
     for (;;) {
+        const unsigned long loop_now_ms = millis();
+        const unsigned long loop_gap_ms = loop_now_ms - last_loop_ms;
+        last_loop_ms = loop_now_ms;
+        if (loop_gap_ms > 250UL) {
+            if (s_last_comm_gap_log_ms == 0UL || (loop_now_ms - s_last_comm_gap_log_ms) >= 2000UL) {
+                s_last_comm_gap_log_ms = loop_now_ms;
+                // #region agent log
+                LOG_W(COMM_TAG, String("[DBG5126ae] comm loop gap gap_ms=") + String(loop_gap_ms) +
+                                " state=" + String(g_system_config.current_state) +
+                                " heap=" + String(ESP.getFreeHeap()));
+                // #endregion
+            }
+        }
+
         // One-shot: finalise watchdog boot record after stable uptime
         watchdogStorageTryFinalizeBootRecord();
 
@@ -368,13 +385,56 @@ void communicationTaskFunction(void* param) {
         }
 
         // ── Operational Mode ───────────────────────────────────────────
+        const unsigned long op_cycle_start_ms = millis();
         wifiManager.loop();
+        const unsigned long wifi_loop_duration_ms = millis() - op_cycle_start_ms;
+        static unsigned long s_last_wifi_loop_slow_log_ms = 0;
+        if (wifi_loop_duration_ms > 120UL) {
+            if (s_last_wifi_loop_slow_log_ms == 0UL ||
+                (millis() - s_last_wifi_loop_slow_log_ms) >= 2000UL) {
+                s_last_wifi_loop_slow_log_ms = millis();
+                // #region agent log
+                LOG_W(COMM_TAG, String("[DBG5126ae] comm wifi loop slow duration_ms=") +
+                                String(wifi_loop_duration_ms) +
+                                " heap=" + String(ESP.getFreeHeap()));
+                // #endregion
+            }
+        }
+
+        const unsigned long mqtt_loop_start_ms = millis();
         mqttClient.loop();  // ESP-IDF path: handles timeManager (NTP) + heartbeat publish
+        const unsigned long mqtt_loop_duration_ms = millis() - mqtt_loop_start_ms;
+        if (mqtt_loop_duration_ms > 120UL) {
+            if (s_last_mqtt_loop_slow_log_ms == 0UL ||
+                (millis() - s_last_mqtt_loop_slow_log_ms) >= 2000UL) {
+                s_last_mqtt_loop_slow_log_ms = millis();
+                // #region agent log
+                LOG_W(COMM_TAG, String("[DBG5126ae] comm mqtt loop slow duration_ms=") +
+                                String(mqtt_loop_duration_ms) +
+                                " heap=" + String(ESP.getFreeHeap()) +
+                                " wifi_connected=" + String(WiFi.isConnected() ? "true" : "false"));
+                // #endregion
+            }
+        }
 #ifndef MQTT_USE_PUBSUBCLIENT
         // Check registration gate timeout independently — fallback if no non-heartbeat
         // publish() call has been made yet (e.g. no sensor data during first 10 s).
         mqttClient.checkRegistrationTimeout();
+        const unsigned long process_queue_start_ms = millis();
         mqttClient.processPublishQueue();  // Drain Core 1 → Core 0 publish queue
+        const unsigned long process_queue_duration_ms = millis() - process_queue_start_ms;
+        static unsigned long s_last_process_queue_slow_log_ms = 0;
+        if (process_queue_duration_ms > 120UL) {
+            if (s_last_process_queue_slow_log_ms == 0UL ||
+                (millis() - s_last_process_queue_slow_log_ms) >= 2000UL) {
+                s_last_process_queue_slow_log_ms = millis();
+                // #region agent log
+                LOG_W(COMM_TAG, String("[DBG5126ae] comm processPublishQueue slow duration_ms=") +
+                                String(process_queue_duration_ms) +
+                                " heap=" + String(ESP.getFreeHeap()));
+                // #endregion
+            }
+        }
         processDeferredPostReconnectActuatorStatusSync();
 #endif
 
@@ -383,9 +443,38 @@ void communicationTaskFunction(void* param) {
         handleMqttPersistentFailure();
         handleActuatorStatusPublish();
 #ifndef MQTT_USE_PUBSUBCLIENT
+        const unsigned long queue_hyst_start_ms = millis();
         handleQueuePressureHysteresis();  // PKG-01a: backpressure ENTER/RECOVERED events
+        const unsigned long queue_hyst_duration_ms = millis() - queue_hyst_start_ms;
+        static unsigned long s_last_queue_hyst_slow_log_ms = 0;
+        if (queue_hyst_duration_ms > 120UL) {
+            if (s_last_queue_hyst_slow_log_ms == 0UL ||
+                (millis() - s_last_queue_hyst_slow_log_ms) >= 2000UL) {
+                s_last_queue_hyst_slow_log_ms = millis();
+                // #region agent log
+                LOG_W(COMM_TAG, String("[DBG5126ae] comm queuePressureHysteresis slow duration_ms=") +
+                                String(queue_hyst_duration_ms) +
+                                " heap=" + String(ESP.getFreeHeap()));
+                // #endregion
+            }
+        }
 #endif
         handleHeapMonitoring();
+        const unsigned long op_cycle_duration_ms = millis() - op_cycle_start_ms;
+        static unsigned long s_last_op_cycle_slow_log_ms = 0;
+        if (op_cycle_duration_ms > 250UL) {
+            if (s_last_op_cycle_slow_log_ms == 0UL ||
+                (millis() - s_last_op_cycle_slow_log_ms) >= 2000UL) {
+                s_last_op_cycle_slow_log_ms = millis();
+                // #region agent log
+                LOG_W(COMM_TAG, String("[DBG5126ae] comm op cycle slow duration_ms=") +
+                                String(op_cycle_duration_ms) +
+                                " wifi_ms=" + String(wifi_loop_duration_ms) +
+                                " mqtt_ms=" + String(mqtt_loop_duration_ms) +
+                                " heap=" + String(ESP.getFreeHeap()));
+                // #endregion
+            }
+        }
 
         vTaskDelay(pdMS_TO_TICKS(50));
     }

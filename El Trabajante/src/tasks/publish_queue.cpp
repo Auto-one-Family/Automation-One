@@ -95,26 +95,33 @@ void pauseForAnnounceAck(uint32_t guard_timeout_ms) {
 
 void resumeAfterAnnounceAck(const char* reason) {
     const bool was_paused = g_pq_paused_for_announce_ack.exchange(false);
-    g_pq_resume_guard_deadline_ms.store(0);
+    // AUT-117-fix: PKG-18 settle deadline stays active after early ACK.
+    // isPublishQueuePaused() enforces the deadline independently of this flag.
+    // Evidence (run 20260515_143149): ACK at ~1021ms on a 2000ms guard caused
+    // immediate drain resume → 2729ms blocking stall on the fresh TCP socket.
     if (was_paused) {
-        LOG_I(PQ_TAG, String("[INC-EA5484] queue resumed (reason=") +
-              String(reason != nullptr ? reason : "unknown") + ")");
+        const uint32_t deadline_ms = g_pq_resume_guard_deadline_ms.load();
+        const uint32_t now_ms = millis();
+        const int32_t remaining_ms = static_cast<int32_t>(deadline_ms - now_ms);
+        LOG_I(PQ_TAG, String("[INC-EA5484] queue ack received (reason=") +
+              String(reason != nullptr ? reason : "unknown") +
+              ") settle_remaining_ms=" + String(remaining_ms > 0 ? remaining_ms : 0));
     }
 }
 
 bool isPublishQueuePaused() {
-    if (!g_pq_paused_for_announce_ack.load()) {
-        return false;
-    }
-
     const uint32_t deadline_ms = g_pq_resume_guard_deadline_ms.load();
-    const uint32_t now_ms = millis();
-    if (deadline_ms != 0 && static_cast<int32_t>(now_ms - deadline_ms) >= 0) {
-        resumeAfterAnnounceAck("guard_timeout");
+    if (deadline_ms != 0) {
+        const uint32_t now_ms = millis();
+        if (static_cast<int32_t>(now_ms - deadline_ms) < 0) {
+            return true;
+        }
+        g_pq_resume_guard_deadline_ms.store(0);
+        g_pq_paused_for_announce_ack.store(false);
+        LOG_I(PQ_TAG, "[INC-EA5484] queue resumed (settle guard expired)");
         return false;
     }
-
-    return true;
+    return g_pq_paused_for_announce_ack.load();
 }
 
 // Helper: update high-watermark atomically (lock-free CAS loop)
@@ -191,10 +198,10 @@ PublishQueueEnqueueResult tryQueuePublish(const char* topic,
     req.critical = critical;
     req.attempt = 0;
     req.next_retry_ms = 0;
-    IntentMetadata fallback_meta = extractIntentMetadataFromPayload(payload, "pub");
-    req.metadata = fallback_meta;
     if (metadata != nullptr) {
         req.metadata = *metadata;
+    } else {
+        req.metadata = extractIntentMetadataFromPayload(payload, "pub");
     }
 
     TickType_t wait_ticks = critical ? pdMS_TO_TICKS(20) : 0;
@@ -204,20 +211,29 @@ PublishQueueEnqueueResult tryQueuePublish(const char* topic,
         }
 
         g_pq_drop_count.fetch_add(1);
-        LOG_W(PQ_TAG, "[SYNC] Publish queue full — dropping: " + String(topic));
-        errorTracker.logApplicationError(ERROR_TASK_QUEUE_FULL, "Publish queue full");
+        const bool in_safety_context = xPortGetCoreID() == 1;
+        if (!in_safety_context) {
+            LOG_W(PQ_TAG, "[SYNC] Publish queue full — dropping");
+        }
+        const bool is_intent_outcome_topic = strstr(req.topic, "/system/intent_outcome") != nullptr;
+        const bool is_system_error_topic = strstr(req.topic, "/system/error") != nullptr;
+        // Prevent recursive error-on-error publish storms when ERRTRAK itself cannot enqueue.
+        if (!is_system_error_topic) {
+            errorTracker.logApplicationError(ERROR_TASK_QUEUE_FULL, "Publish queue full");
+        } else if (!in_safety_context) {
+            LOG_W(PQ_TAG, "[SYNC] queue-full on /system/error — suppressing recursive ErrorTracker MQTT publish");
+        }
         if (critical) {
-            bool is_intent_outcome_topic = strstr(req.topic, "/system/intent_outcome") != nullptr;
-            if (!is_intent_outcome_topic) {
+            if (!in_safety_context && !is_intent_outcome_topic && !is_system_error_topic) {
                 publishIntentOutcome("publish",
                                      req.metadata,
                                      "failed",
                                      "QUEUE_FULL",
                                      "Critical publish queue full",
                                      true);
-            } else {
+            } else if (!in_safety_context) {
                 LOG_W(PQ_TAG,
-                      "[SYNC] intent_outcome queue-full drop — skipping recursive failure outcome");
+                      "[SYNC] recursive-critical queue-full drop — skipping recursive failure outcome");
             }
         }
         return PublishQueueEnqueueResult::Failed;

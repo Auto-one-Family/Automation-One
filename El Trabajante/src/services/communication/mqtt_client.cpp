@@ -54,6 +54,8 @@ static std::atomic<uint32_t> g_publish_outbox_full_count{0};
 // Counts QoS-1 PUBACK events (MQTT_EVENT_PUBLISHED). Pairing [OUTBOX+1] enqueue
 // count against [OUTBOX-1] PUBACK count reveals OUTBOX accumulation rate.
 static std::atomic<uint32_t> g_puback_count{0};
+static std::atomic<uint32_t> g_qos1_enqueue_count{0};
+static std::atomic<uint32_t> g_safe_publish_backpressure_abort_count{0};
 // True while routeIncomingMessage() executes inside MQTT_EVENT_DATA callback.
 // Publishing directly from this context can re-enter MQTT internals on Core 0.
 static std::atomic<bool> g_in_mqtt_event_callback{false};
@@ -66,16 +68,22 @@ static constexpr unsigned long MANAGED_RECONNECT_AUTO_GRACE_MS = 15000;
 // PKG-18 (INC-2026-04-11-ea5484): Standby-resume disconnect loop hardening.
 // After this many write timeouts without intervening connect-success,
 // boost reconnect delay and extend post-reconnect queue stabilization.
-static constexpr uint32_t WRITE_TIMEOUT_ESCALATION_THRESHOLD = 3;
+// Runtime evidence (H45/H46): a single write-timeout can already trigger
+// reconnect churn; threshold=3 delayed mitigation too long.
+static constexpr uint32_t WRITE_TIMEOUT_ESCALATION_THRESHOLD = 1;
 // Boosted reconnect base delay after write-timeout episodes (vs 1500ms default).
 static constexpr unsigned long MANAGED_RECONNECT_WRITE_TIMEOUT_BOOST_MS = 5000;
 // Post-reconnect queue hold after write-timeout history — lets TCP/TLS
 // handshake and first keepalive round-trip complete before queue drain.
 static constexpr uint32_t POST_RECONNECT_TRANSPORT_SETTLE_MS = 2000;
 
-// AUT-54 / ESP-IDF default: network_timeout_ms = 10000 — transport aborts with
-// "Writing didn't complete in specified timeout" when TCP is slow under publish bursts.
-static constexpr int MQTT_CLIENT_NETWORK_TIMEOUT_MS = 45000;
+// ESP-IDF default network_timeout_ms = 10000 keeps transport write stalls bounded.
+// Longer values (45s) can block comm-task publish paths for almost a full minute.
+// AUT-117-fix: Reduced 3000→1500ms. Under TCP-send-buffer exhaustion (fast flood),
+// esp_mqtt_client_publish() blocks for network_timeout_ms, stalling the comm task.
+// Evidence (run 20260515_141510): 3229ms stall = exactly 3000ms timeout + overhead.
+// 1500ms is still generous for local Pi network (<1ms RTT) and halves the max stall.
+static constexpr int MQTT_CLIENT_NETWORK_TIMEOUT_MS = 1500;
 
 static bool shouldLogAdmissionCorrelation(const String& topic) {
     return topic.indexOf("/command") != -1 ||
@@ -264,6 +272,7 @@ MQTTClient::MQTTClient()
       tcp_transport_error_count_(0),
       last_transport_errno_(0),
       last_disconnect_ms_(0),
+      manual_reconnect_suspended_(false),
       pending_session_announce_msg_id_(-1),
 #endif
       publish_seq_(0),
@@ -699,8 +708,9 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
             LOG_W(TAG, "Publish queue enqueue failed (non-critical): " + topic);
             return false;
         }
-        LOG_W(TAG, "Publish queue full — dropping: " + topic);
-        circuit_breaker_.recordFailure();
+        // Queue enqueue failures are local backpressure (Core handoff), not transport proof.
+        // Do not open MQTT circuit breaker here; reserve CB failures for real MQTT transport errors.
+        LOG_W(TAG, "Publish queue enqueue failed (critical, no CB failure): " + topic);
         return false;
     }
 
@@ -708,6 +718,7 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
     // Returns msg_id > 0 (QoS 1 queued), 0 (QoS 0 sent), -1 (error), -2 (outbox full).
     // PKG-16: pass explicit payload length so IDF skips its internal strlen()
     // on a possibly-NULL c_str() buffer (observed failure mode under OOM).
+    const unsigned long direct_publish_started_ms = millis();
     int msg_id = esp_mqtt_client_publish(
         mqtt_client_,
         topic.c_str(),
@@ -716,10 +727,25 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
         qos,
         0        // retain = false (avoid stale state on broker)
     );
+    const unsigned long direct_publish_duration_ms = millis() - direct_publish_started_ms;
+    if (direct_publish_duration_ms > 200UL) {
+        // #region agent log
+        LOG_W(TAG, String("[DBG5126ae] direct publish call slow duration_ms=") +
+                        String(direct_publish_duration_ms) +
+                        " msg_id=" + String(msg_id) +
+                        " qos=" + String(qos) +
+                        " core=" + String(xPortGetCoreID()) +
+                        " in_callback=" + String(g_in_mqtt_event_callback.load() ? 1 : 0) +
+                        " mqtt_connected=" + String(g_mqtt_connected.load() ? 1 : 0) +
+                        " wifi_connected=" + String(WiFi.isConnected() ? 1 : 0) +
+                        " topic=" + topic);
+        // #endregion
+    }
 
     if (msg_id >= 0) {
         circuit_breaker_.recordSuccess();
         if (qos > 0) {
+            g_qos1_enqueue_count.fetch_add(1);
             // [OUTBOX+1]: QoS-1 message entered IDF OUTBOX — stays there until PUBACK.
             // Counting these vs [OUTBOX-1] PUBACK events reveals accumulation rate.
             char pub_log[128];
@@ -838,6 +864,27 @@ bool MQTTClient::safePublish(const String& topic, const String& payload, uint8_t
             }
             return true;
         }
+
+#ifndef MQTT_USE_PUBSUBCLIENT
+        // Queue handoff failures (Core1 or MQTT callback context) are local backpressure.
+        // Retrying immediately amplifies queue pressure and log storms without transport gain.
+        if (xPortGetCoreID() == 1 || g_in_mqtt_event_callback.load()) {
+            const PublishQueuePressureStats pq_stats = getPublishQueuePressureStats();
+            if (pq_stats.fill_level >= PUBLISH_QUEUE_SIZE) {
+                uint32_t abort_count = g_safe_publish_backpressure_abort_count.fetch_add(1) + 1;
+                static unsigned long s_last_backpressure_abort_log_ms = 0;
+                const unsigned long now_ms = millis();
+                if (s_last_backpressure_abort_log_ms == 0UL ||
+                    (now_ms - s_last_backpressure_abort_log_ms) >= 2000UL) {
+                    s_last_backpressure_abort_log_ms = now_ms;
+                    LOG_W(TAG, "SafePublish: abort retries due local queue backpressure fill=" +
+                               String(pq_stats.fill_level) + "/" + String(PUBLISH_QUEUE_SIZE) +
+                               " abort_count=" + String(abort_count));
+                }
+                break;
+            }
+        }
+#endif
 
         if (attempt + 1 >= max_attempts) {
             break;
@@ -1074,6 +1121,9 @@ void MQTTClient::scheduleManagedReconnect_(const char* reason, unsigned long bas
         managed_reconnect_attempts_ = 0;
         return;
     }
+    if (manual_reconnect_suspended_) {
+        return;
+    }
 
     const unsigned long now = millis();
     const unsigned long minimum_delay = (base_delay_ms > MANAGED_RECONNECT_MAX_DELAY_MS)
@@ -1083,6 +1133,17 @@ void MQTTClient::scheduleManagedReconnect_(const char* reason, unsigned long bas
         computeReconnectJitterMs_(managed_reconnect_attempts_ > 0 ? managed_reconnect_attempts_ : 1);
     const unsigned long delay_ms = (computed_delay < minimum_delay) ? minimum_delay : computed_delay;
     next_managed_reconnect_ms_ = now + delay_ms;
+
+    // #region agent log
+    LOG_W(TAG, String("[DBG5126ae] reconnect schedule request now=") + String(now) +
+                   " next=" + String(next_managed_reconnect_ms_) +
+                   " reason=" + String(reason != nullptr ? reason : "unknown") +
+                   " base_delay=" + String(base_delay_ms) +
+                   " computed_delay=" + String(computed_delay) +
+                   " attempts=" + String(managed_reconnect_attempts_) +
+                   " last_disconnect=" + String(last_disconnect_ms_) +
+                   " last_errno=" + String(last_transport_errno_));
+    // #endregion
 
     LOG_W(TAG, String("[INC-EA5484] managed reconnect scheduled in ") + String(delay_ms) +
                    "ms (attempt=" + String(managed_reconnect_attempts_) +
@@ -1098,6 +1159,10 @@ void MQTTClient::processManagedReconnect_() {
         next_managed_reconnect_ms_ = 0;
         managed_reconnect_attempts_ = 0;
         last_disconnect_ms_ = 0;
+        manual_reconnect_suspended_ = false;
+        return;
+    }
+    if (manual_reconnect_suspended_) {
         return;
     }
 
@@ -1118,10 +1183,26 @@ void MQTTClient::processManagedReconnect_() {
     }
 
     ++managed_reconnect_attempts_;
+    // #region agent log
+    LOG_W(TAG, String("[DBG5126ae] reconnect attempt gate now=") + String(millis()) +
+                   " next=" + String(next_managed_reconnect_ms_) +
+                   " last_disconnect=" + String(last_disconnect_ms_) +
+                   " attempts=" + String(managed_reconnect_attempts_) +
+                   " write_timeouts=" + String(transport_write_timeout_count_) +
+                   " tls_timeouts=" + String(tls_connect_timeout_count_) +
+                   " tcp_errors_other=" + String(tcp_transport_error_count_) +
+                   " last_errno=" + String(last_transport_errno_));
+    // #endregion
+
     esp_err_t err = esp_mqtt_client_reconnect(mqtt_client_);
     if (err != ESP_OK) {
         LOG_W(TAG, String("[INC-EA5484] managed reconnect request failed: ") + esp_err_to_name(err));
-        scheduleManagedReconnect_("esp_mqtt_client_reconnect_failed");
+        // Runtime evidence (H10/H12): repeated ESP_FAIL loops create reconnect churn.
+        // Suspend manual reconnect until the next real MQTT_EVENT_CONNECTED and rely on
+        // ESP-IDF auto-reconnect only.
+        manual_reconnect_suspended_ = true;
+        next_managed_reconnect_ms_ = 0;
+        LOG_W(TAG, "[INC-EA5484] reconnect failed -> suspend manual reconnect, rely on IDF auto-reconnect");
         return;
     }
 
@@ -1226,7 +1307,20 @@ void MQTTClient::processPublishQueue() {
     if (mqtt_client_ == nullptr) return;
     if (g_publish_queue == NULL) return;
     if (isPublishQueuePaused()) return;
-    processIntentOutcomeOutbox();
+    if (!g_mqtt_connected.load() || !WiFi.isConnected()) {
+        static unsigned long s_last_drain_skip_disconnected_log_ms = 0;
+        const unsigned long now = millis();
+        if (s_last_drain_skip_disconnected_log_ms == 0UL ||
+            (now - s_last_drain_skip_disconnected_log_ms) >= 5000UL) {
+            s_last_drain_skip_disconnected_log_ms = now;
+            // #region agent log
+            LOG_W(TAG, String("[DBG5126ae] processPublishQueue skipped disconnected mqtt_connected=") +
+                            String(g_mqtt_connected.load() ? 1 : 0) +
+                            " wifi_connected=" + String(WiFi.isConnected() ? 1 : 0));
+            // #endregion
+        }
+        return;
+    }
 
     // AUT-359: Drain-Admission-Symmetrie zur publish()-Pfad-Logik.
     //
@@ -1253,6 +1347,26 @@ void MQTTClient::processPublishQueue() {
         }
         return;
     }
+    processIntentOutcomeOutbox();
+
+    // AUT-117-fix: Write-timeout drain guard.
+    // After a write timeout on this connection, esp_mqtt_client_publish() would
+    // block for network_timeout_ms on the already-degraded TCP socket. Skip drain
+    // and let the pending reconnect cycle complete before resuming. Counter is
+    // reset to 0 in MQTT_EVENT_CONNECTED so drain resumes after reconnect.
+    if (transport_write_timeout_count_ > 0) {
+        static unsigned long s_drain_wt_guard_log_ms = 0;
+        const unsigned long drain_guard_now_ms = millis();
+        if (s_drain_wt_guard_log_ms == 0UL ||
+            (drain_guard_now_ms - s_drain_wt_guard_log_ms) >= 5000UL) {
+            s_drain_wt_guard_log_ms = drain_guard_now_ms;
+            // #region agent log
+            LOG_W(TAG, String("[DBG5126ae] drain skipped write timeout degraded wt_count=") +
+                           String(transport_write_timeout_count_));
+            // #endregion
+        }
+        return;
+    }
 
     static PublishRequest req;
     unsigned long now_ms = millis();
@@ -1268,6 +1382,51 @@ void MQTTClient::processPublishQueue() {
             break;
         }
 
+        // AUT-368: registration-gated queue drain
+        // Runtime evidence (run 20260515_142347, H93/H22) shows a 4.1s blocking
+        // esp_mqtt_client_publish call in queue-drain while registration was not
+        // yet confirmed (reg_confirmed=0), immediately followed by transport timeout
+        // and MQTT disconnect. Mirror the direct publish() admission rule here.
+        if (!registration_confirmed_) {
+            req.next_retry_ms = now_ms + 1000UL;
+            if (xQueueSend(g_publish_queue, &req, 0) != pdTRUE) {
+                LOG_W(TAG, "Publish defer queue full while registration pending, dropping: " + String(req.topic));
+                g_publish_outbox_noncritical_drops.fetch_add(1);
+            } else {
+                // #region agent log
+                LOG_W(TAG, String("[DBG5126ae] queue drain deferred registration pending next_retry_ms=") +
+                                String(req.next_retry_ms) +
+                                " topic=" + String(req.topic) +
+                                " mqtt_connected=" + String(g_mqtt_connected.load() ? 1 : 0));
+                // #endregion
+            }
+            break;
+        }
+
+        const bool mqtt_connected_before_call = g_mqtt_connected.load();
+        const bool wifi_connected_before_call = WiFi.isConnected();
+        if (!mqtt_connected_before_call || !wifi_connected_before_call) {
+            // #region agent log
+            LOG_W(TAG, String("[DBG5126ae] queue drain publish invoked disconnected mqtt_before=") +
+                            String(mqtt_connected_before_call ? 1 : 0) +
+                            " wifi_before=" + String(wifi_connected_before_call ? 1 : 0) +
+                            " qos=" + String(req.qos) +
+                            " topic=" + String(req.topic));
+            // #endregion
+            req.next_retry_ms = now_ms + 1000UL;
+            if (xQueueSend(g_publish_queue, &req, 0) != pdTRUE) {
+                LOG_W(TAG, "Publish defer queue full while disconnected, dropping: " + String(req.topic));
+                g_publish_outbox_noncritical_drops.fetch_add(1);
+            } else {
+                // #region agent log
+                LOG_W(TAG, String("[DBG5126ae] queue drain deferred disconnected next_retry_ms=") +
+                                String(req.next_retry_ms) +
+                                " topic=" + String(req.topic));
+                // #endregion
+            }
+            break;
+        }
+        const unsigned long drain_publish_started_ms = millis();
         int msg_id = esp_mqtt_client_publish(
             mqtt_client_,
             req.topic,
@@ -1276,6 +1435,27 @@ void MQTTClient::processPublishQueue() {
             req.qos,
             req.retain ? 1 : 0
         );
+        const unsigned long drain_publish_duration_ms = millis() - drain_publish_started_ms;
+        const bool mqtt_connected_after_call = g_mqtt_connected.load();
+        const bool wifi_connected_after_call = WiFi.isConnected();
+        if (drain_publish_duration_ms > 200UL) {
+            const unsigned long registration_age_ms =
+                (registration_start_ms_ > 0) ? (millis() - registration_start_ms_) : 0UL;
+            // #region agent log
+            LOG_W(TAG, String("[DBG5126ae] queue drain publish call slow duration_ms=") +
+                            String(drain_publish_duration_ms) +
+                            " msg_id=" + String(msg_id) +
+                            " qos=" + String(req.qos) +
+                            " core=" + String(xPortGetCoreID()) +
+                            " mqtt_before=" + String(mqtt_connected_before_call ? 1 : 0) +
+                            " wifi_before=" + String(wifi_connected_before_call ? 1 : 0) +
+                            " mqtt_after=" + String(mqtt_connected_after_call ? 1 : 0) +
+                            " wifi_after=" + String(wifi_connected_after_call ? 1 : 0) +
+                            " reg_confirmed=" + String(registration_confirmed_ ? 1 : 0) +
+                            " registration_age_ms=" + String(registration_age_ms) +
+                            " topic=" + String(req.topic));
+            // #endregion
+        }
         drained_this_tick++;
         if (msg_id >= 0) {
             // AUT-359: Drain-Feedback-Symmetrie zu publish() Z. 708:
@@ -1372,6 +1552,7 @@ void MQTTClient::processPublishQueue() {
         }
     }
 }
+
 #endif
 
 #ifndef MQTT_USE_PUBSUBCLIENT
@@ -1626,7 +1807,19 @@ void MQTTClient::publishHeartbeat(bool force) {
     payload += configManager.getDiagnosticsJSON();
     payload += "}";
 
-    if (!publish(heartbeat_topic, payload, 0)) {
+    bool hb_ok = publish(heartbeat_topic, payload, 0);
+    // #region agent log
+    LOG_W(TAG, String("[DBG5126ae] heartbeat publish state ok=") +
+                   String(hb_ok ? 1 : 0) +
+                   " reg_confirmed=" + String(registration_confirmed_ ? 1 : 0) +
+                   " wifi_connected=" + String(WiFi.isConnected() ? 1 : 0) +
+                   " rssi=" + String(WiFi.RSSI()) +
+                   " ack_age_ms=" + String(
+                       g_last_server_ack_ms.load() > 0
+                           ? (millis() - g_last_server_ack_ms.load())
+                           : 0UL));
+    // #endregion
+    if (!hb_ok) {
         LOG_W(TAG, "Heartbeat publish failed (topic=" + heartbeat_topic + ")");
     }
 
@@ -1820,6 +2013,7 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             self->bootstrap_heartbeat_send_pending_ = false;
             self->next_managed_reconnect_ms_ = 0;
             self->managed_reconnect_attempts_ = 0;
+            self->manual_reconnect_suspended_ = false;
 
             // PKG-18: Capture write-timeout history before counter reset.
             // Used below to decide post-reconnect queue stabilization duration.
@@ -1847,6 +2041,12 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
                                String(announce_guard_ms) + "ms (prior_write_timeouts=" +
                                String(prior_write_timeouts) + ")");
                 }
+                // #region agent log
+                LOG_W(TAG, String("[DBG5126ae] reconnect hold decision prior_write_timeouts=") +
+                               String(prior_write_timeouts) +
+                               " threshold=" + String(WRITE_TIMEOUT_ESCALATION_THRESHOLD) +
+                               " guard_ms=" + String(announce_guard_ms));
+                // #endregion
                 pauseForAnnounceAck(announce_guard_ms);
             }
             uint32_t announce_epoch = offlineModeManager.getActiveHandoverEpoch();
@@ -1905,6 +2105,16 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             self->pending_session_announce_msg_id_ = -1;
             resumeAfterAnnounceAck("guard_timeout");
             self->last_disconnect_ms_ = millis();
+            // #region agent log
+            LOG_W(TAG, String("[DBG5126ae] disconnect event context uptime_ms=") +
+                       String(self->last_disconnect_ms_) +
+                       " next_reconnect=" + String(self->next_managed_reconnect_ms_) +
+                       " write_timeouts=" + String(self->transport_write_timeout_count_) +
+                       " tls_timeouts=" + String(self->tls_connect_timeout_count_) +
+                       " tcp_errors_other=" + String(self->tcp_transport_error_count_) +
+                       " last_errno=" + String(self->last_transport_errno_) +
+                       " wifi_connected=" + String(WiFi.isConnected() ? "true" : "false"));
+            // #endregion
 
             // Circuit Breaker: disconnect counts as failure
             self->circuit_breaker_.recordFailure();
@@ -1927,7 +2137,7 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             // Managed reconnect with jitter to reduce reconnect herding when multiple
             // devices drop within the same transport instability window.
             // Avoid duplicate scheduling when MQTT_EVENT_ERROR already queued a reconnect.
-            if (self->next_managed_reconnect_ms_ == 0) {
+            if (!self->manual_reconnect_suspended_ && self->next_managed_reconnect_ms_ == 0) {
                 // PKG-18: Boost reconnect delay when write timeouts preceded the disconnect.
                 // Breaks the tight reconnect-flap cycle after standby/resume by giving
                 // the TCP/TLS stack more time to stabilize before the next attempt.
@@ -1938,7 +2148,16 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
                                String(reconnect_base) + "ms (write_timeouts=" +
                                String(self->transport_write_timeout_count_) + ")");
                 }
+                // #region agent log
+                LOG_W(TAG, String("[DBG5126ae] reconnect base decision write_timeouts=") +
+                               String(self->transport_write_timeout_count_) +
+                               " threshold=" + String(WRITE_TIMEOUT_ESCALATION_THRESHOLD) +
+                               " base_ms=" + String(reconnect_base) +
+                               " manual_suspended=" + String(self->manual_reconnect_suspended_ ? 1 : 0));
+                // #endregion
                 self->scheduleManagedReconnect_("mqtt_disconnected", reconnect_base);
+            } else if (self->manual_reconnect_suspended_) {
+                LOG_W(TAG, "[INC-EA5484] manual reconnect suspended (waiting for IDF auto-reconnect)");
             } else {
                 LOG_D(TAG, "[INC-EA5484] reconnect already scheduled (skip duplicate in DISCONNECTED)");
             }
@@ -1985,6 +2204,22 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
                                   : sizeof(topic_buf) - 1;
                 memcpy(topic_buf, event->topic, tlen);
                 topic_buf[tlen] = '\0';
+                const bool command_topic = shouldLogAdmissionCorrelation(String(topic_buf));
+                static unsigned long s_last_mqtt_data_ingress_dbg_ms = 0;
+                const unsigned long ingress_now_ms = millis();
+                if (command_topic &&
+                    (s_last_mqtt_data_ingress_dbg_ms == 0UL ||
+                     (ingress_now_ms - s_last_mqtt_data_ingress_dbg_ms) >= 100UL)) {
+                    s_last_mqtt_data_ingress_dbg_ms = ingress_now_ms;
+                    // #region agent log
+                    LOG_W(TAG, String("[DBG5126ae] mqtt data ingress command ") +
+                                   "topic=" + String(topic_buf) +
+                                   " total_len=" + String((uint32_t)total_len) +
+                                   " chunk_len=" + String((uint32_t)event->data_len) +
+                                   " offset=" + String((uint32_t)offset) +
+                                   " mqtt_connected=" + String(g_mqtt_connected.load() ? 1 : 0));
+                    // #endregion
+                }
 
                 expected_len = total_len;
                 received_len = 0;
@@ -2037,9 +2272,23 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             }
 
             data_buf[expected_len] = '\0';
+            const bool command_topic = shouldLogAdmissionCorrelation(String(topic_buf));
+            const unsigned long route_started_ms = millis();
+            const bool mqtt_connected_before_route = g_mqtt_connected.load();
             g_in_mqtt_event_callback.store(true);
             routeIncomingMessage(topic_buf, data_buf);
             g_in_mqtt_event_callback.store(false);
+            const unsigned long route_duration_ms = millis() - route_started_ms;
+            if (command_topic || route_duration_ms > 40UL) {
+                // #region agent log
+                LOG_W(TAG, String("[DBG5126ae] mqtt data route duration ") +
+                               "topic=" + String(topic_buf) +
+                               " duration_ms=" + String(route_duration_ms) +
+                               " payload_len=" + String((uint32_t)expected_len) +
+                               " mqtt_before=" + String(mqtt_connected_before_route ? 1 : 0) +
+                               " mqtt_after=" + String(g_mqtt_connected.load() ? 1 : 0));
+                // #endregion
+            }
 
             assembling = false;
             expected_len = 0;
@@ -2138,6 +2387,28 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
                                                   : write_timeout_explicit ? "write_timeout"
                                                   : tls_timeout ? "tls_timeout"
                                                   : "tcp_other");
+                    // #region agent log
+                    LOG_W(TAG, String("[DBG5126ae] transport error context type=tcp_transport") +
+                                   " sock_errno=" + String(sock_errno) +
+                                   " tls_stack=" + String(tls_stack) +
+                                   " tls_last=" + String(esp_err_to_name(tls_last)) +
+                                   " write_timeout_explicit=" + String(write_timeout_explicit ? 1 : 0) +
+                                   " write_timeout_silent=" + String(write_timeout_silent ? 1 : 0) +
+                                   " tls_timeout=" + String(tls_timeout ? 1 : 0) +
+                                   " last_errno_before=" + String(self->last_transport_errno_) +
+                                   " next_reconnect_before=" + String(self->next_managed_reconnect_ms_) +
+                                   " qos1_enqueued=" + String(g_qos1_enqueue_count.load()) +
+                                   " puback_count=" + String(g_puback_count.load()) +
+                                   " outbox_full_count=" + String(g_publish_outbox_full_count.load()) +
+                                   " outbox_inflight=" + String(
+                                       g_qos1_enqueue_count.load() >= g_puback_count.load()
+                                           ? (g_qos1_enqueue_count.load() - g_puback_count.load())
+                                           : 0U) +
+                                   " ack_age_ms=" + String(
+                                       g_last_server_ack_ms.load() > 0
+                                           ? (millis() - g_last_server_ack_ms.load())
+                                           : 0UL));
+                    // #endregion
 
                     // Preserve meaningful marker for SafePublish retry/backpressure
                     // heuristic: 119 = IDF write-path timeout (EWOULDBLOCK-ish).
@@ -2162,11 +2433,15 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
                         self->tcp_transport_error_count_++;
                     }
 
-                    // Write-path EAGAIN/EWOULDBLOCK errors often precede DISCONNECTED and
-                    // represent temporary send-buffer pressure. Let DISCONNECTED own the
-                    // reconnect scheduling to avoid duplicate backoff state transitions.
+                    // Let MQTT_EVENT_DISCONNECTED own reconnect scheduling.
+                    // Runtime evidence (H7/H11/H14) shows tls_timeout-triggered scheduling
+                    // from MQTT_EVENT_ERROR can amplify reconnect churn with duplicate plans.
                     if (tls_timeout) {
-                        self->scheduleManagedReconnect_("mqtt_transport_error");
+                        // #region agent log
+                        LOG_W(TAG, String("[DBG5126ae] tls timeout defer reconnect to disconnected next_before=") +
+                                       String(self->next_managed_reconnect_ms_) +
+                                       " last_disconnect=" + String(self->last_disconnect_ms_));
+                        // #endregion
                     }
                 } else if (event->error_handle->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED) {
                     ESP_LOGE(TAG, "  Connection refused, reason=%d",
