@@ -600,7 +600,9 @@ static void publishConfigPendingTransitionEvent(const char* event_type,
     // [INC-EA5484] AUT-56: Route lifecycle through publish queue for retry resilience.
     const char* lifecycle_topic = TopicBuilder::buildIntentOutcomeLifecycleTopic();
     // AUT-344: lifecycle is observability-only; must not consume critical publish-queue slots.
-    if (!queuePublish(lifecycle_topic, payload.c_str(), 0, false, false, nullptr)) {
+    IntentMetadata lifecycle_meta = {};
+    initIntentMetadata(&lifecycle_meta);
+    if (!queuePublish(lifecycle_topic, payload.c_str(), 0, false, false, &lifecycle_meta)) {
       LOG_W(TAG, "[INC-EA5484] Lifecycle transition enqueue failed: " + String(event_type));
     }
 #else

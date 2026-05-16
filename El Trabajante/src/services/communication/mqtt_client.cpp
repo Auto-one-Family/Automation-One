@@ -2066,15 +2066,18 @@ void MQTTClient::publishHeartbeat(bool force) {
 
     bool hb_ok = publish(heartbeat_topic, payload, 0);
     // #region agent log
+    unsigned long ack_age_ms = 0;
+#ifndef MQTT_USE_PUBSUBCLIENT
+    if (g_last_server_ack_ms.load() > 0) {
+        ack_age_ms = millis() - g_last_server_ack_ms.load();
+    }
+#endif
     LOG_W(TAG, String("[DBG5126ae] heartbeat publish state ok=") +
                    String(hb_ok ? 1 : 0) +
                    " reg_confirmed=" + String(registration_confirmed_ ? 1 : 0) +
                    " wifi_connected=" + String(WiFi.isConnected() ? 1 : 0) +
                    " rssi=" + String(WiFi.RSSI()) +
-                   " ack_age_ms=" + String(
-                       g_last_server_ack_ms.load() > 0
-                           ? (millis() - g_last_server_ack_ms.load())
-                           : 0UL));
+                   " ack_age_ms=" + String(ack_age_ms));
     // #endregion
     if (!hb_ok) {
         LOG_W(TAG, "Heartbeat publish failed (topic=" + heartbeat_topic + ")");

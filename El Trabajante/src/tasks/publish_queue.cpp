@@ -231,8 +231,10 @@ PublishQueueEnqueueResult tryQueuePublish(const char* topic,
     uint8_t fill = static_cast<uint8_t>(uxQueueMessagesWaiting(g_publish_queue));
     updateHighWatermark(fill);
 
+    // FP1 tuning (2026-05-15): shed observability earlier at 60% fill so
+    // queue pressure telemetry does not compete with command/response traffic.
     const uint8_t observability_shed_watermark =
-        static_cast<uint8_t>((PUBLISH_QUEUE_SIZE * 80U) / 100U);
+        static_cast<uint8_t>((PUBLISH_QUEUE_SIZE * 60U) / 100U);
     if (fill >= observability_shed_watermark && isObservabilityOnlyTopic(topic)) {
         g_pq_observability_shed_count.fetch_add(1);
         g_pq_shed_count.fetch_add(1);
