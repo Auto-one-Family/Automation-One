@@ -21,6 +21,7 @@ References:
 - El Trabajante/docs/Mqtt_Protocoll.md
 """
 
+import asyncio
 import hashlib
 import json
 import time
@@ -42,6 +43,18 @@ logger = get_logger(__name__)
 
 # El Trabajante: CONFIG_PAYLOAD_MAX_LEN in config_update_queue.h (ingress rejects if >=)
 ESP_COMBINED_CONFIG_MQTT_MAX_BYTES = 4352
+CONFIG_PUSH_COALESCE_SECONDS = 5.0
+
+# CRUD-initiated config pushes are coalesced per device to avoid burst floods.
+# Heartbeat-triggered pushes intentionally bypass this state machine.
+_pending_config_pushes: Dict[str, asyncio.Task] = {}
+_pending_config_push_handles: Dict[str, str] = {}
+_pending_config_payloads: Dict[str, Dict[str, Any]] = {}
+_pending_config_reasons: Dict[str, str] = {}
+_pending_config_generations: Dict[str, Optional[int]] = {}
+_pending_config_fingerprints: Dict[str, Optional[str]] = {}
+_pending_config_handles: Dict[str, str] = {}
+_pending_config_lock = asyncio.Lock()
 
 # =============================================================================
 # Discovery Rate Limiter
@@ -822,6 +835,119 @@ class ESPService:
                 logger.warning(f"WebSocket broadcast config_failed failed for {device_id}: {e}")
 
         return result
+
+    async def send_config_coalesced(
+        self,
+        device_id: str,
+        config: Dict[str, Any],
+        offline_behavior: str = "warn",
+        require_online: bool = False,
+        reason_code: str = "manual_config_sync",
+        generation: Optional[int] = None,
+        config_fingerprint: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Coalesce CRUD config pushes per ESP into one publish per 5s window.
+
+        Heartbeat code path must keep using send_config() directly so both
+        push mechanisms remain independent.
+        """
+        async with _pending_config_lock:
+            existing_task = _pending_config_pushes.get(device_id)
+            if existing_task is not None and existing_task.done():
+                _pending_config_pushes.pop(device_id, None)
+                existing_task = None
+
+            if existing_task is not None:
+                _pending_config_payloads[device_id] = config
+                _pending_config_reasons[device_id] = reason_code
+                _pending_config_generations[device_id] = generation
+                _pending_config_fingerprints[device_id] = config_fingerprint
+                handle = _pending_config_handles.get(device_id)
+                if not handle:
+                    handle = str(uuid.uuid4())
+                    _pending_config_handles[device_id] = handle
+                logger.debug(
+                    "config_push_coalesce esp_id=%s reason=%s (merged)",
+                    device_id,
+                    reason_code,
+                )
+                return {
+                    "success": True,
+                    "sent": False,
+                    "scheduled": True,
+                    "merged": True,
+                    "device_status": "coalesced",
+                    "message": f"Config push merged for {device_id}",
+                    "correlation_id": handle,
+                    "request_id": handle,
+                }
+
+            _pending_config_payloads[device_id] = config
+            _pending_config_reasons[device_id] = reason_code
+            _pending_config_generations[device_id] = generation
+            _pending_config_fingerprints[device_id] = config_fingerprint
+            reserved_handle = str(uuid.uuid4())
+            _pending_config_handles[device_id] = reserved_handle
+
+            async def _delayed_push() -> None:
+                await asyncio.sleep(CONFIG_PUSH_COALESCE_SECONDS)
+                async with _pending_config_lock:
+                    payload = _pending_config_payloads.pop(device_id, config)
+                    merged_reason = _pending_config_reasons.pop(device_id, reason_code)
+                    merged_generation = _pending_config_generations.pop(device_id, generation)
+                    merged_fingerprint = _pending_config_fingerprints.pop(
+                        device_id, config_fingerprint
+                    )
+                    merged_handle = _pending_config_handles.pop(device_id, reserved_handle)
+                session_maker = get_session_maker()
+                async with session_maker() as session:
+                    coalesced_service = ESPService(
+                        esp_repo=ESPRepository(session),
+                        publisher=self.publisher,
+                    )
+                    coalesced_reason = (
+                        f"coalesced:{merged_reason}" if merged_reason else "coalesced"
+                    )
+                    await coalesced_service.send_config(
+                        device_id=device_id,
+                        config=payload,
+                        offline_behavior=offline_behavior,
+                        require_online=require_online,
+                        reason_code=coalesced_reason,
+                        generation=merged_generation,
+                        config_fingerprint=merged_fingerprint,
+                        forced_correlation_id=merged_handle,
+                    )
+
+            task = asyncio.create_task(_delayed_push())
+            _pending_config_pushes[device_id] = task
+
+            def _cleanup_done_task(done_task: asyncio.Task, esp_id: str = device_id) -> None:
+                _pending_config_pushes.pop(esp_id, None)
+                _pending_config_handles.pop(esp_id, None)
+                try:
+                    done_task.result()
+                except Exception as exc:
+                    logger.error("coalesced config push failed for %s: %s", esp_id, exc)
+
+            task.add_done_callback(_cleanup_done_task)
+            logger.debug(
+                "config_push_scheduled esp_id=%s reason=%s delay=%.1fs",
+                device_id,
+                reason_code,
+                CONFIG_PUSH_COALESCE_SECONDS,
+            )
+            return {
+                "success": True,
+                "sent": False,
+                "scheduled": True,
+                "merged": False,
+                "device_status": "scheduled",
+                "message": f"Config push scheduled for {device_id}",
+                "correlation_id": reserved_handle,
+                "request_id": reserved_handle,
+            }
 
     async def send_restart(
         self,

@@ -199,6 +199,25 @@ PublishQueueEnqueueResult tryQueuePublish(const char* topic,
     uint8_t fill = static_cast<uint8_t>(uxQueueMessagesWaiting(g_publish_queue));
     updateHighWatermark(fill);
 
+    // FP1 tuning (2026-05-15): shed observability earlier at 60% fill so
+    // queue pressure telemetry does not compete with command/response traffic.
+    const uint8_t observability_shed_watermark =
+        static_cast<uint8_t>((PUBLISH_QUEUE_SIZE * 60U) / 100U);
+    if (fill >= observability_shed_watermark && isObservabilityOnlyTopic(topic)) {
+        g_pq_observability_shed_count.fetch_add(1);
+        g_pq_shed_count.fetch_add(1);
+        static unsigned long s_last_observability_shed_log_ms = 0UL;
+        const unsigned long now_ms = millis();
+        if (s_last_observability_shed_log_ms == 0UL ||
+            (now_ms - s_last_observability_shed_log_ms) >= 2000UL) {
+            s_last_observability_shed_log_ms = now_ms;
+            LOG_W(PQ_TAG, String("[PQ] shed observability payload reason=queue_pressure ") +
+                          "fill=" + String(fill) +
+                          " shed_obs_total=" + String(g_pq_observability_shed_count.load()) +
+                          " topic=" + String(topic));
+        }
+        return PublishQueueEnqueueResult::ShedBackpressure;
+    }
     if (!critical && fill >= PUBLISH_QUEUE_SHED_WATERMARK) {
         g_pq_shed_count.fetch_add(1);
         LOG_D(PQ_TAG, "[SYNC] Backpressure shed (fill=" + String(fill) +
