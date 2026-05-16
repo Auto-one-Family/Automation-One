@@ -29,14 +29,10 @@ static bool isRealtimeResponseTopic(const char* topic) {
            strstr(topic, "/system/command/response") != nullptr;
 }
 
-// Intent outcome messages are replayable from NVS and can be delayed briefly.
-// Realtime response lanes must not be dropped when queue is saturated.
 static bool isReplayableCriticalTopic(const char* topic) {
     return topic != nullptr && strstr(topic, "/system/intent_outcome") != nullptr;
 }
 
-// Topics that are useful for diagnostics but must never saturate
-// the only publish lane under pressure.
 static bool isObservabilityOnlyTopic(const char* topic) {
     if (topic == nullptr) {
         return false;
@@ -69,8 +65,6 @@ static bool reserveSlotForCriticalPublish(PublishRequest* critical_req) {
         const bool queued_realtime = isRealtimeResponseTopic(item.topic);
         const bool preempt_replayable_critical =
             incoming_realtime && !queued_realtime && isReplayableCriticalTopic(item.topic);
-        // Under command bursts, many actuator responses target the same topic.
-        // Keep the freshest response by replacing older same-topic realtime entries.
         const bool preempt_same_realtime_topic =
             incoming_realtime && queued_realtime &&
             strncmp(item.topic, critical_req->topic, sizeof(item.topic)) == 0;
@@ -294,28 +288,13 @@ PublishQueueEnqueueResult tryQueuePublish(const char* topic,
             LOG_W(PQ_TAG, "[SYNC] queue-full on /system/error — suppressing recursive ErrorTracker MQTT publish");
         }
         if (critical) {
-            const bool is_realtime_response_topic = isRealtimeResponseTopic(req.topic);
             if (!in_safety_context && !is_intent_outcome_topic && !is_system_error_topic) {
-                // Avoid recursive outbox pressure when realtime responses are dropped
-                // during short queue-full spikes. These topics are high-frequency and
-                // can otherwise amplify lock contention in replay/outbox paths.
-                if (!is_realtime_response_topic) {
-                    publishIntentOutcome("publish",
-                                         req.metadata,
-                                         "failed",
-                                         "QUEUE_FULL",
-                                         "Critical publish queue full",
-                                         true);
-                } else if (!in_safety_context) {
-                    static unsigned long s_last_realtime_drop_log_ms = 0UL;
-                    const unsigned long now_ms = millis();
-                    if (s_last_realtime_drop_log_ms == 0UL ||
-                        (now_ms - s_last_realtime_drop_log_ms) >= 2000UL) {
-                        s_last_realtime_drop_log_ms = now_ms;
-                        LOG_W(PQ_TAG, String("[PQ] queue-full realtime drop suppressed outcome topic=") +
-                                      String(req.topic));
-                    }
-                }
+                publishIntentOutcome("publish",
+                                     req.metadata,
+                                     "failed",
+                                     "QUEUE_FULL",
+                                     "Critical publish queue full",
+                                     true);
             } else if (!in_safety_context) {
                 LOG_W(PQ_TAG,
                       "[SYNC] recursive-critical queue-full drop — skipping recursive failure outcome");

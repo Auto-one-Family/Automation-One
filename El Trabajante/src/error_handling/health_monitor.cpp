@@ -12,7 +12,6 @@
 #include "../models/error_codes.h"
 #include "../models/watchdog_types.h"
 #include "../utils/watchdog_storage.h"
-#include "../tasks/publish_queue.h"
 #include <esp_system.h>
 
 // ESP-IDF TAG convention for structured logging
@@ -343,60 +342,17 @@ void HealthMonitor::publishSnapshot() {
         LOG_D(TAG, "HealthMonitor: MQTT not connected, skipping publish");
         return;
     }
-
-    // Registration gate mirrors other telemetry publishers: while ACK is pending
-    // or reconnect is in progress, avoid generating follow-up publish failures.
-    if (!mqttClient.isRegistrationConfirmed()) {
-        LOG_D(TAG, "HealthMonitor: Registration pending, skipping diagnostics publish");
-        return;
-    }
     
     String topic = buildDiagnosticsTopic();
     String payload = getSnapshotJSON();
-    const bool mqtt_connected_before = mqttClient.isConnected();
-    const bool reg_confirmed_before = mqttClient.isRegistrationConfirmed();
-    const PublishQueuePressureStats pq_before = getPublishQueuePressureStats();
-    const uint32_t outbox_full_before = mqttClient.getPublishOutboxFullCount();
     
     if (mqttClient.publish(topic, payload, 0)) {  // QoS 0
         LOG_D(TAG, "HealthMonitor: Published diagnostics snapshot");
         last_published_snapshot_ = getCurrentSnapshot();
     } else {
-        const PublishQueuePressureStats pq_after = getPublishQueuePressureStats();
-        const uint32_t outbox_full_after = mqttClient.getPublishOutboxFullCount();
-        // #region agent log
-        LOG_W(TAG, "HealthMonitor: [DBG-a57651][H201] publish failed state " +
-                       String("mqtt_connected_before=") + String(mqtt_connected_before ? 1 : 0) +
-                       " reg_confirmed_before=" + String(reg_confirmed_before ? 1 : 0) +
-                       " mqtt_connected_after=" + String(mqttClient.isConnected() ? 1 : 0) +
-                       " reg_confirmed_after=" + String(mqttClient.isRegistrationConfirmed() ? 1 : 0) +
-                       " pq_fill_before=" + String(pq_before.fill_level) +
-                       " pq_fill_after=" + String(pq_after.fill_level) +
-                       " pq_drop_before=" + String(pq_before.drop_count) +
-                       " pq_drop_after=" + String(pq_after.drop_count) +
-                       " pq_shed_before=" + String(pq_before.shed_count) +
-                       " pq_shed_after=" + String(pq_after.shed_count) +
-                       " outbox_full_before=" + String(outbox_full_before) +
-                       " outbox_full_after=" + String(outbox_full_after));
-        // #endregion
         LOG_W(TAG, "HealthMonitor: Failed to publish diagnostics snapshot");
-        // Runtime evidence (a57651) shows this path can be triggered while queue
-        // pressure/disconnect is already active (4062 first). In that case, avoid
-        // emitting an extra 3012 that obscures root-cause ordering.
-        if (!mqttClient.isConnected() || !mqttClient.isRegistrationConfirmed()) {
-            LOG_W(TAG, "HealthMonitor: Suppressing 3012 due to transient MQTT state");
-            return;
-        }
-        const bool local_queue_backpressure =
-            (pq_after.fill_level >= PUBLISH_QUEUE_SIZE) ||
-            (pq_after.drop_count > pq_before.drop_count) ||
-            (pq_after.shed_count > pq_before.shed_count);
-        if (local_queue_backpressure && outbox_full_after == outbox_full_before) {
-            LOG_W(TAG, "HealthMonitor: Suppressing 3012 due to local publish queue backpressure");
-            return;
-        }
         errorTracker.trackError(ERROR_MQTT_PUBLISH_FAILED, ERROR_SEVERITY_WARNING,
-                                "HealthMonitor publish failed");
+                               "HealthMonitor publish failed");
     }
 }
 

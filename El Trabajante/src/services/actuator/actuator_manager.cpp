@@ -1059,12 +1059,12 @@ void ActuatorManager::publishActuatorStatus(uint8_t gpio) {
   ActuatorStatus status = actuator->driver->getStatus();
   actuator->config = actuator->driver->getConfig();
   String payload = buildStatusPayload(status, actuator->config);
-  String topic = String(TopicBuilder::buildActuatorStatusTopic(gpio));
+  const char* topic = TopicBuilder::buildActuatorStatusTopic(gpio);
   // AUT-326: QoS 0 — actuator status is supplementary telemetry, not a safety signal.
   // AUT-54: Command execution is acknowledged on actuator/response + system/intent_outcome
   // at QoS 0 (best-effort); critical failures still use NVS-backed intent_outcome replay.
   // QoS 0 keeps status + outcome traffic out of the IDF QoS-1 OUTBOX (PUBACK expiry path).
-  mqttClient.publish(topic, payload, 0);
+  mqttClient.publish(String(topic), payload, 0);
 }
 
 void ActuatorManager::publishAllActuatorStatus() {
@@ -1114,11 +1114,11 @@ String ActuatorManager::buildResponsePayload(const ActuatorCommand& command,
 void ActuatorManager::publishActuatorResponse(const ActuatorCommand& command,
                                               bool success,
                                               const String& message) {
-  String topic = String(TopicBuilder::buildActuatorResponseTopic(command.gpio));
+  const char* topic = TopicBuilder::buildActuatorResponseTopic(command.gpio);
   String payload = buildResponsePayload(command, success, message);
   // AUT-54: QoS 0 — response is telemetry; QoS-1 OUTBOX + OUTBOX-expiry caused transport
   // disconnects under slow PUBACK (field: ~11s after last command, AAAAA.md).
-  mqttClient.safePublish(topic, payload, 0);
+  mqttClient.safePublish(String(topic), payload, 0);
 }
 
 void ActuatorManager::publishActuatorAlert(uint8_t gpio,
@@ -1131,7 +1131,7 @@ void ActuatorManager::publishActuatorAlert(uint8_t gpio,
   extern KaiserZone g_kaiser;
   extern SystemConfig g_system_config;
   
-  String topic = String(TopicBuilder::buildActuatorAlertTopic(gpio));
+  const char* topic = TopicBuilder::buildActuatorAlertTopic(gpio);
   String payload = "{";
   payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
   payload += "\"seq\":" + String(mqttClient.getNextSeq()) + ",";
@@ -1142,7 +1142,7 @@ void ActuatorManager::publishActuatorAlert(uint8_t gpio,
   payload += "\"message\":\"" + message + "\"";
   payload += "}";
   // AUT-54: QoS 0 — same OUTBOX/backpressure rationale as actuator/response.
-  mqttClient.safePublish(topic, payload, 0);
+  mqttClient.safePublish(String(topic), payload, 0);
 }
 
 // QoS 0 — telemetry is best-effort: actuator state authority remains
@@ -1158,8 +1158,8 @@ void ActuatorManager::publishLatchedOffline(uint8_t gpio,
   time_t unix_ts = timeManager.getUnixTimestamp();
   uint8_t offline_rule_count = offlineModeManager.getOfflineRuleCount();
 
-  String topic = String(TopicBuilder::buildActuatorLatchedOfflineTopic(gpio));
-  if (topic.length() == 0) {
+  const char* topic = TopicBuilder::buildActuatorLatchedOfflineTopic(gpio);
+  if (topic == nullptr || topic[0] == '\0') {
     return;
   }
 
@@ -1172,5 +1172,5 @@ void ActuatorManager::publishLatchedOffline(uint8_t gpio,
   payload += "\"offline_rule_count\":" + String(offline_rule_count);
   payload += "}";
 
-  mqttClient.safePublish(topic, payload, 0);
+  mqttClient.safePublish(String(topic), payload, 0);
 }

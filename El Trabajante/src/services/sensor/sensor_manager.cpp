@@ -18,7 +18,6 @@
 #include "../../models/watchdog_types.h"
 #include "../../models/sensor_types.h"
 #include "../../models/sensor_registry.h"
-#include "../../tasks/publish_queue.h"
 
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "SENSOR";
@@ -1839,43 +1838,11 @@ bool SensorManager::publishSensorReading(const SensorReading& reading) {
 
     // Build payload
     String payload = buildMQTTPayload(reading);
-    const bool mqtt_connected_before = mqtt_client_->isConnected();
-    const bool reg_confirmed_before = mqtt_client_->isRegistrationConfirmed();
-    const PublishQueuePressureStats pq_before = getPublishQueuePressureStats();
-    const uint32_t outbox_full_before = mqtt_client_->getPublishOutboxFullCount();
 
     // AUT-54: QoS 0 — raw sensor stream is high-frequency telemetry; QoS-1 filled the IDF
     // OUTBOX alongside other traffic and contributed to write-timeout disconnects.
     if (!mqtt_client_->publish(topic, payload, 0)) {
-        const PublishQueuePressureStats pq_after = getPublishQueuePressureStats();
-        const uint32_t outbox_full_after = mqtt_client_->getPublishOutboxFullCount();
-        // #region agent log
-        LOG_W(TAG, "Sensor Manager: [DBG-a57651][H202] publish failed state " +
-                       String("gpio=") + String(reading.gpio) +
-                       " mqtt_connected_before=" + String(mqtt_connected_before ? 1 : 0) +
-                       " reg_confirmed_before=" + String(reg_confirmed_before ? 1 : 0) +
-                       " mqtt_connected_after=" + String(mqtt_client_->isConnected() ? 1 : 0) +
-                       " reg_confirmed_after=" + String(mqtt_client_->isRegistrationConfirmed() ? 1 : 0) +
-                       " pq_fill_before=" + String(pq_before.fill_level) +
-                       " pq_fill_after=" + String(pq_after.fill_level) +
-                       " pq_drop_before=" + String(pq_before.drop_count) +
-                       " pq_drop_after=" + String(pq_after.drop_count) +
-                       " pq_shed_before=" + String(pq_before.shed_count) +
-                       " pq_shed_after=" + String(pq_after.shed_count) +
-                       " outbox_full_before=" + String(outbox_full_before) +
-                       " outbox_full_after=" + String(outbox_full_after));
-        // #endregion
         LOG_E(TAG, "Sensor Manager: Failed to publish sensor data for GPIO " + String(reading.gpio));
-        const bool mqtt_connected_after = mqtt_client_->isConnected();
-        const bool reg_confirmed_after = mqtt_client_->isRegistrationConfirmed();
-        const bool local_queue_backpressure =
-            (pq_after.fill_level >= PUBLISH_QUEUE_SIZE) ||
-            (pq_after.drop_count > pq_before.drop_count) ||
-            (pq_after.shed_count > pq_before.shed_count);
-        if (local_queue_backpressure && mqtt_connected_after && reg_confirmed_after) {
-            LOG_W(TAG, "Sensor Manager: Suppressing 3012 due to local publish queue backpressure");
-            return false;
-        }
         errorTracker.trackError(ERROR_MQTT_PUBLISH_FAILED, ERROR_SEVERITY_ERROR,
                                "Failed to publish sensor data");
         return false;

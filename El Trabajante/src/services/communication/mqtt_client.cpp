@@ -14,7 +14,6 @@
 #include <esp_system.h>
 #include <atomic>
 #include <errno.h>
-#include <cstring>
 
 #include "../../tasks/intent_contract.h"
 #include "../../tasks/sensor_command_queue.h"   // For queue overflow telemetry (AUT-5)
@@ -31,36 +30,19 @@
 static const char* TAG = "MQTT";
 
 // Shared by safePublish (both backends) and processPublishQueue (ESP-IDF only).
-static bool topicContains(const char* topic, const char* needle) {
-    return topic != nullptr && needle != nullptr && strstr(topic, needle) != nullptr;
-}
-
 static bool isCriticalPublishTopic(const String& topic) {
-    const char* topic_cstr = topic.c_str();
-    if (topic_cstr == nullptr || topic_cstr[0] == '\0') {
-        return false;
-    }
     // AUT-344 / AUT-331: lifecycle is QoS-0 observability; substring "/system/intent_outcome"
     // would incorrectly mark it critical and disable publish-queue shed for chain-stage bursts.
-    if (topicContains(topic_cstr, "/system/intent_outcome/lifecycle")) {
+    if (topic.indexOf("/system/intent_outcome/lifecycle") >= 0) {
         return false;
     }
-    return topicContains(topic_cstr, "/alert") ||
-           topicContains(topic_cstr, "/response") ||
-           topicContains(topic_cstr, "/config_response") ||
-           topicContains(topic_cstr, "/zone/ack") ||
-           topicContains(topic_cstr, "/subzone/ack") ||
-           topicContains(topic_cstr, "/system/error") ||
-           topicContains(topic_cstr, "/system/intent_outcome");
-}
-
-static bool isObservabilityOnlyTopic(const String& topic) {
-    const char* topic_cstr = topic.c_str();
-    if (topic_cstr == nullptr || topic_cstr[0] == '\0') {
-        return false;
-    }
-    return topicContains(topic_cstr, "/system/queue_pressure") ||
-           topicContains(topic_cstr, "/system/diagnostics");
+    return topic.indexOf("/alert") != -1 ||
+           topic.indexOf("/response") != -1 ||
+           topic.indexOf("/config_response") != -1 ||
+           topic.indexOf("/zone/ack") != -1 ||
+           topic.indexOf("/subzone/ack") != -1 ||
+           topic.indexOf("/system/error") != -1 ||
+           topic.indexOf("/system/intent_outcome") != -1;
 }
 
 #ifndef MQTT_USE_PUBSUBCLIENT
@@ -94,18 +76,6 @@ static constexpr unsigned long MANAGED_RECONNECT_WRITE_TIMEOUT_BOOST_MS = 5000;
 // Post-reconnect queue hold after write-timeout history — lets TCP/TLS
 // handshake and first keepalive round-trip complete before queue drain.
 static constexpr uint32_t POST_RECONNECT_TRANSPORT_SETTLE_MS = 2000;
-// If broker ACKs are stale, additional direct publishes on Core 0 tend to
-// convert into long blocking writes and write-timeout disconnects under burst.
-// Runtime evidence (run 20260515_154723) shows queue-drain calls already
-// turning slow before 15s ACK age; lowering this makes deferral kick in earlier.
-static constexpr unsigned long QUEUE_DRAIN_ACK_STALE_MS = 10000UL;
-// ACK age alone is not enough to infer degraded transport because heartbeat ACK
-// cadence is 60s in normal operation. Only apply ACK-stale deferral when local
-// publish queue pressure is high so interactive responses stay real-time.
-static constexpr uint8_t QUEUE_DRAIN_ACK_STALE_PRESSURE_WATERMARK = PUBLISH_QUEUE_SHED_WATERMARK;
-// If heartbeat publish fails while ACK age is already this stale, treat the
-// connection as effectively dead and proactively trigger reconnect.
-static constexpr unsigned long HEARTBEAT_RECONNECT_ACK_STALE_MS = 30000UL;
 
 // ESP-IDF default network_timeout_ms = 10000 keeps transport write stalls bounded.
 // Longer values (45s) can block comm-task publish paths for almost a full minute.
@@ -121,8 +91,6 @@ static bool shouldLogAdmissionCorrelation(const String& topic) {
            topic.indexOf("/zone/") != -1 ||
            topic.indexOf("/subzone/") != -1;
 }
-
-static bool isRealtimeResponseTopic(const String& topic);
 
 static void logAdmissionCorrelationBlockedPublish(const String& topic,
                                                   const String& payload,
@@ -503,12 +471,6 @@ bool MQTTClient::connect(const MQTTConfig& config) {
                  mqtt_cfg.network_timeout_ms);
         LOG_I(TAG, cfg_log);
     }
-    // #region agent log
-    LOG_W(TAG, String("[DBG5126ae][H106] mqtt setup build signature ") +
-                   "queue_drain_mode=enqueue " +
-                   "ack_stale_ms=" + String(QUEUE_DRAIN_ACK_STALE_MS) +
-                   " net_timeout_ms=" + String(MQTT_CLIENT_NETWORK_TIMEOUT_MS));
-    // #endregion
     return true;
 
 #else
@@ -752,64 +714,6 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
         return false;
     }
 
-    // AUT-117 follow-up: apply the same ACK-stale protection to Core-0 direct publish.
-    // processPublishQueue() already defers while ACK age is stale, but direct publish
-    // previously bypassed that guard and could still hit TCP write timeouts.
-    const unsigned long ack_now_ms = millis();
-    const unsigned long last_ack_ms = g_last_server_ack_ms.load();
-    const bool ack_stale =
-        (last_ack_ms > 0UL && ack_now_ms > last_ack_ms &&
-         (ack_now_ms - last_ack_ms) > QUEUE_DRAIN_ACK_STALE_MS);
-    const PublishQueuePressureStats publish_stats = getPublishQueuePressureStats();
-    const bool queue_pressure_high =
-        publish_stats.fill_level >= QUEUE_DRAIN_ACK_STALE_PRESSURE_WATERMARK;
-    const bool realtime_response = isRealtimeResponseTopic(topic);
-    if (ack_stale && queue_pressure_high && !is_heartbeat) {
-        const bool critical = isCriticalPublishTopic(topic);
-        IntentMetadata metadata = extractIntentMetadataFromPayload(payload.c_str(),
-                                                                   critical ? "critical_pub" : "pub");
-        PublishQueueEnqueueResult pq = tryQueuePublish(topic.c_str(),
-                                                       payload.c_str(),
-                                                       qos,
-                                                       false,
-                                                       critical,
-                                                       &metadata);
-        if (pq == PublishQueueEnqueueResult::Enqueued) {
-            static unsigned long s_last_direct_ack_stale_defer_log_ms = 0UL;
-            if (s_last_direct_ack_stale_defer_log_ms == 0UL ||
-                (ack_now_ms - s_last_direct_ack_stale_defer_log_ms) >= 2000UL) {
-                s_last_direct_ack_stale_defer_log_ms = ack_now_ms;
-                LOG_W(TAG, String("[DBG5126ae] direct publish deferred ack stale ") +
-                               "ack_age_ms=" + String(ack_now_ms - last_ack_ms) +
-                               " qos=" + String(qos) +
-                               " critical=" + String(critical ? 1 : 0) +
-                               " topic=" + topic);
-            }
-            return true;
-        }
-        if (pq == PublishQueueEnqueueResult::ShedBackpressure) {
-            return false;
-        }
-        if (!critical) {
-            return false;
-        }
-        LOG_W(TAG, "Publish queue enqueue failed (critical, ack stale defer): " + topic);
-        return false;
-    }
-    if (ack_stale && queue_pressure_high && is_heartbeat) {
-        static unsigned long s_last_heartbeat_ack_stale_log_ms = 0UL;
-        if (s_last_heartbeat_ack_stale_log_ms == 0UL ||
-            (ack_now_ms - s_last_heartbeat_ack_stale_log_ms) >= 2000UL) {
-            s_last_heartbeat_ack_stale_log_ms = ack_now_ms;
-            // #region agent log
-            LOG_W(TAG, String("[DBG5126ae][H106] heartbeat publish while ack stale ") +
-                           "ack_age_ms=" + String(ack_now_ms - last_ack_ms) +
-                           " reg_confirmed=" + String(registration_confirmed_ ? 1 : 0) +
-                           " topic=" + topic);
-            // #endregion
-        }
-    }
-
     // Core 0: direct publish via ESP-IDF (thread-safe internally).
     // Returns msg_id > 0 (QoS 1 queued), 0 (QoS 0 sent), -1 (error), -2 (outbox full).
     // PKG-16: pass explicit payload length so IDF skips its internal strlen()
@@ -939,23 +843,6 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
 }
 
 bool MQTTClient::safePublish(const String& topic, const String& payload, uint8_t qos, uint8_t retries) {
-    if (topic.length() == 0) {
-        LOG_W(TAG, "SafePublish: empty topic, dropping publish");
-        return false;
-    }
-#ifndef MQTT_USE_PUBSUBCLIENT
-    // Bundle B: observability payloads are optional and must not increase queue
-    // pressure when the publish lane is already near saturation.
-    if (isObservabilityOnlyTopic(topic)) {
-        const PublishQueuePressureStats pq_stats = getPublishQueuePressureStats();
-        const uint8_t observability_shed_watermark =
-            static_cast<uint8_t>((PUBLISH_QUEUE_SIZE * 80U) / 100U);
-        if (pq_stats.fill_level >= observability_shed_watermark) {
-            return false;
-        }
-    }
-#endif
-
     const uint8_t max_attempts = static_cast<uint8_t>(retries) + 1;
     const bool critical = isCriticalPublishTopic(topic);
 
@@ -976,18 +863,6 @@ bool MQTTClient::safePublish(const String& topic, const String& payload, uint8_t
                            String(attempt + 1) + "/" + String(max_attempts));
             }
             return true;
-        }
-
-        if (!isConnected() || !WiFi.isConnected()) {
-            // #region agent log
-            LOG_W(TAG, String("[DBG-a57651][H204] safePublish abort retries disconnected ") +
-                           "attempt=" + String(attempt + 1) +
-                           " max_attempts=" + String(max_attempts) +
-                           " mqtt_connected=" + String(isConnected() ? 1 : 0) +
-                           " wifi_connected=" + String(WiFi.isConnected() ? 1 : 0) +
-                           " topic=" + topic);
-            // #endregion
-            break;
         }
 
 #ifndef MQTT_USE_PUBSUBCLIENT
@@ -1411,25 +1286,6 @@ static bool isSensorDataTopic(const String& topic) {
     return topic.indexOf("/sensor_data/") != -1 || topic.indexOf("/sensor/") != -1;
 }
 
-// Frontend/API command flow depends on fast response topics.
-// Do not starve these under ACK-stale pressure defers.
-static bool isRealtimeResponseTopic(const String& topic) {
-    bool is_actuator_response = topic.indexOf("/actuator/") != -1 &&
-                                topic.indexOf("/response") != -1;
-    bool is_sensor_response = topic.indexOf("/sensor/") != -1 &&
-                              topic.indexOf("/response") != -1;
-    return is_actuator_response ||
-           is_sensor_response ||
-           topic.indexOf("/config_response") != -1 ||
-           topic.indexOf("/zone/ack") != -1 ||
-           topic.indexOf("/subzone/ack") != -1 ||
-           topic.indexOf("/system/command/response") != -1;
-}
-
-static bool isReplayableCriticalTopic(const String& topic) {
-    return topic.indexOf("/system/intent_outcome") != -1;
-}
-
 // Helper: Get backoff delay in ms for retry attempt (100ms → 500ms → 1000ms)
 static uint32_t getRetryBackoffMs(uint8_t attempt) {
     static const uint32_t backoff_delays[] = { 100, 500, 1000 };
@@ -1491,6 +1347,8 @@ void MQTTClient::processPublishQueue() {
         }
         return;
     }
+    processIntentOutcomeOutbox();
+
     // AUT-117-fix: Write-timeout drain guard.
     // After a write timeout on this connection, esp_mqtt_client_publish() would
     // block for network_timeout_ms on the already-degraded TCP socket. Skip drain
@@ -1510,24 +1368,12 @@ void MQTTClient::processPublishQueue() {
         return;
     }
 
-    // Replay only after transport is considered stable for this cycle.
-    // Calling this before the write-timeout guard can re-trigger blocking
-    // publish attempts on a degraded socket and destabilize reconnect recovery.
-    processIntentOutcomeOutbox();
-
     static PublishRequest req;
     unsigned long now_ms = millis();
     uint8_t drained_this_tick = 0;
-    uint8_t scanned_this_tick = 0;
-    uint8_t stale_pressure_shed_this_tick = 0;
-    uint8_t stale_pressure_defer_this_tick = 0;
-    const uint8_t max_scan_per_tick = static_cast<uint8_t>(PUBLISH_QUEUE_SIZE);
 
     while (drained_this_tick < PUBLISH_DRAIN_BUDGET_PER_TICK &&
-           scanned_this_tick < max_scan_per_tick &&
            xQueueReceive(g_publish_queue, &req, 0) == pdTRUE) {
-        scanned_this_tick++;
-        now_ms = millis();
         if (now_ms < req.next_retry_ms) {
             if (xQueueSend(g_publish_queue, &req, 0) != pdTRUE) {
                 LOG_W(TAG, "Publish retry queue full during backoff, dropping: " + String(req.topic));
@@ -1556,89 +1402,9 @@ void MQTTClient::processPublishQueue() {
             }
             break;
         }
-        const unsigned long last_ack_ms = g_last_server_ack_ms.load();
-        const bool ack_stale =
-            (last_ack_ms > 0UL && now_ms > last_ack_ms &&
-             (now_ms - last_ack_ms) > QUEUE_DRAIN_ACK_STALE_MS);
-        const uint8_t queue_fill_after_pop = static_cast<uint8_t>(uxQueueMessagesWaiting(g_publish_queue));
-        const uint8_t queue_fill_before_pop = static_cast<uint8_t>(queue_fill_after_pop + 1U);
-        const bool queue_pressure_high =
-            queue_fill_before_pop >= QUEUE_DRAIN_ACK_STALE_PRESSURE_WATERMARK;
-        const bool realtime_response = isRealtimeResponseTopic(String(req.topic));
-        const bool replayable_critical =
-            req.critical && isReplayableCriticalTopic(String(req.topic));
-        if (ack_stale && queue_pressure_high) {
-            const unsigned long ack_age_ms = now_ms - last_ack_ms;
-            if (ack_age_ms >= HEARTBEAT_RECONNECT_ACK_STALE_MS &&
-                g_mqtt_connected.load()) {
-                static unsigned long s_last_ack_stale_reconnect_schedule_ms = 0UL;
-                if (s_last_ack_stale_reconnect_schedule_ms == 0UL ||
-                    (now_ms - s_last_ack_stale_reconnect_schedule_ms) >= 5000UL) {
-                    s_last_ack_stale_reconnect_schedule_ms = now_ms;
-                    unsigned long reconnect_base = MANAGED_RECONNECT_BASE_DELAY_MS;
-                    if (transport_write_timeout_count_ >= WRITE_TIMEOUT_ESCALATION_THRESHOLD) {
-                        reconnect_base = MANAGED_RECONNECT_WRITE_TIMEOUT_BOOST_MS;
-                    }
-                    scheduleManagedReconnect_("ack_stale_pressure", reconnect_base);
-                    // #region agent log
-                    LOG_W(TAG, String("[DBG5126ae][H108] ack stale pressure reconnect scheduled ") +
-                                   "ack_age_ms=" + String(ack_age_ms) +
-                                   " queue_fill=" + String(queue_fill_before_pop) +
-                                   " reconnect_base_ms=" + String(reconnect_base) +
-                                   " write_timeouts=" + String(transport_write_timeout_count_));
-                    // #endregion
-                }
-            }
-
-            if (!req.critical) {
-                g_publish_outbox_noncritical_drops.fetch_add(1);
-                stale_pressure_shed_this_tick++;
-                static unsigned long s_last_ack_stale_shed_log_ms = 0UL;
-                if (s_last_ack_stale_shed_log_ms == 0UL ||
-                    (now_ms - s_last_ack_stale_shed_log_ms) >= 2000UL) {
-                    s_last_ack_stale_shed_log_ms = now_ms;
-                    LOG_W(TAG, String("[DBG5126ae] queue drain shed non-critical under ack/pressure ") +
-                                   "ack_age_ms=" + String(ack_age_ms) +
-                                   " queue_fill=" + String(queue_fill_before_pop) +
-                                   " topic=" + String(req.topic));
-                }
-                continue;
-            }
-
-            req.next_retry_ms = now_ms + (realtime_response ? 250UL : (replayable_critical ? 1250UL : 1000UL));
-            if (xQueueSend(g_publish_queue, &req, 0) != pdTRUE) {
-                LOG_W(TAG, "Publish defer queue full while ACK stale, dropping: " + String(req.topic));
-                g_publish_outbox_noncritical_drops.fetch_add(1);
-                stale_pressure_shed_this_tick++;
-            } else {
-                stale_pressure_defer_this_tick++;
-                static unsigned long s_last_ack_stale_defer_log_ms = 0UL;
-                if (s_last_ack_stale_defer_log_ms == 0UL ||
-                    (now_ms - s_last_ack_stale_defer_log_ms) >= 2000UL) {
-                    s_last_ack_stale_defer_log_ms = now_ms;
-                    // #region agent log
-                    LOG_W(TAG, String("[DBG5126ae] queue drain deferred ack stale ") +
-                                    "ack_age_ms=" + String(ack_age_ms) +
-                                    " queue_fill=" + String(queue_fill_before_pop) +
-                                    " realtime=" + String(realtime_response ? 1 : 0) +
-                                    " replayable_critical=" + String(replayable_critical ? 1 : 0) +
-                                    " next_retry_ms=" + String(req.next_retry_ms) +
-                                    " topic=" + String(req.topic));
-                    // #endregion
-                }
-            }
-            continue;
-        }
 
         const bool mqtt_connected_before_call = g_mqtt_connected.load();
         const bool wifi_connected_before_call = WiFi.isConnected();
-        const uint32_t queue_fill_before_publish =
-            static_cast<uint32_t>(uxQueueMessagesWaiting(g_publish_queue));
-        const unsigned long last_ack_before_publish_ms = g_last_server_ack_ms.load();
-        const unsigned long ack_age_before_publish_ms =
-            (last_ack_before_publish_ms > 0UL && now_ms > last_ack_before_publish_ms)
-                ? (now_ms - last_ack_before_publish_ms)
-                : 0UL;
         if (!mqtt_connected_before_call || !wifi_connected_before_call) {
             // #region agent log
             LOG_W(TAG, String("[DBG5126ae] queue drain publish invoked disconnected mqtt_before=") +
@@ -1661,17 +1427,13 @@ void MQTTClient::processPublishQueue() {
             break;
         }
         const unsigned long drain_publish_started_ms = millis();
-        // H105: queue-drain path should avoid blocking transport writes.
-        // esp_mqtt_client_enqueue() is non-blocking and keeps backpressure explicit
-        // via return codes instead of stalling comm-task for ~network_timeout_ms.
-        int msg_id = esp_mqtt_client_enqueue(
+        int msg_id = esp_mqtt_client_publish(
             mqtt_client_,
             req.topic,
             req.payload,
             0,
             req.qos,
-            req.retain ? 1 : 0,
-            true
+            req.retain ? 1 : 0
         );
         const unsigned long drain_publish_duration_ms = millis() - drain_publish_started_ms;
         const bool mqtt_connected_after_call = g_mqtt_connected.load();
@@ -1683,7 +1445,6 @@ void MQTTClient::processPublishQueue() {
             LOG_W(TAG, String("[DBG5126ae] queue drain publish call slow duration_ms=") +
                             String(drain_publish_duration_ms) +
                             " msg_id=" + String(msg_id) +
-                            " op=enqueue" +
                             " qos=" + String(req.qos) +
                             " core=" + String(xPortGetCoreID()) +
                             " mqtt_before=" + String(mqtt_connected_before_call ? 1 : 0) +
@@ -1691,8 +1452,6 @@ void MQTTClient::processPublishQueue() {
                             " mqtt_after=" + String(mqtt_connected_after_call ? 1 : 0) +
                             " wifi_after=" + String(wifi_connected_after_call ? 1 : 0) +
                             " reg_confirmed=" + String(registration_confirmed_ ? 1 : 0) +
-                            " queue_fill_before=" + String(queue_fill_before_publish) +
-                            " ack_age_before_ms=" + String(ack_age_before_publish_ms) +
                             " registration_age_ms=" + String(registration_age_ms) +
                             " topic=" + String(req.topic));
             // #endregion
@@ -1790,22 +1549,6 @@ void MQTTClient::processPublishQueue() {
                                  drop_code,
                                  drop_reason,
                                  true);
-        }
-    }
-    if ((stale_pressure_shed_this_tick > 0 || stale_pressure_defer_this_tick > 0) &&
-        scanned_this_tick >= max_scan_per_tick) {
-        static unsigned long s_last_stale_pressure_scan_cap_log_ms = 0UL;
-        const unsigned long cap_now_ms = millis();
-        if (s_last_stale_pressure_scan_cap_log_ms == 0UL ||
-            (cap_now_ms - s_last_stale_pressure_scan_cap_log_ms) >= 2000UL) {
-            s_last_stale_pressure_scan_cap_log_ms = cap_now_ms;
-            // #region agent log
-            LOG_W(TAG, String("[DBG5126ae][H112] queue drain stale-pressure scan cap reached ") +
-                           "scanned=" + String(scanned_this_tick) +
-                           " shed=" + String(stale_pressure_shed_this_tick) +
-                           " deferred=" + String(stale_pressure_defer_this_tick) +
-                           " queue_fill_after=" + String((uint32_t)uxQueueMessagesWaiting(g_publish_queue)));
-            // #endregion
         }
     }
 }
@@ -2081,26 +1824,6 @@ void MQTTClient::publishHeartbeat(bool force) {
     // #endregion
     if (!hb_ok) {
         LOG_W(TAG, "Heartbeat publish failed (topic=" + heartbeat_topic + ")");
-        const unsigned long last_ack_ms = g_last_server_ack_ms.load();
-        const unsigned long now_ms = millis();
-        const unsigned long ack_age_ms =
-            (last_ack_ms > 0UL && now_ms > last_ack_ms) ? (now_ms - last_ack_ms) : 0UL;
-        const bool reconnect_schedule_needed =
-            (ack_age_ms >= HEARTBEAT_RECONNECT_ACK_STALE_MS) &&
-            g_mqtt_connected.load();
-        if (reconnect_schedule_needed) {
-            // #region agent log
-            LOG_W(TAG, String("[DBG5126ae][H107] heartbeat fail triggers managed reconnect schedule ") +
-                           "ack_age_ms=" + String(ack_age_ms) +
-                           " threshold_ms=" + String(HEARTBEAT_RECONNECT_ACK_STALE_MS) +
-                           " reg_confirmed=" + String(registration_confirmed_ ? 1 : 0));
-            // #endregion
-            unsigned long reconnect_base = MANAGED_RECONNECT_BASE_DELAY_MS;
-            if (transport_write_timeout_count_ >= WRITE_TIMEOUT_ESCALATION_THRESHOLD) {
-                reconnect_base = MANAGED_RECONNECT_WRITE_TIMEOUT_BOOST_MS;
-            }
-            scheduleManagedReconnect_("heartbeat_ack_stale", reconnect_base);
-        }
     }
 
 #ifdef ENABLE_METRICS_SPLIT
@@ -2353,7 +2076,7 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             break;
         }
 
-        case MQTT_EVENT_DISCONNECTED: {
+        case MQTT_EVENT_DISCONNECTED:
             LOG_W(TAG, "╔════════════════════════════════════════╗");
             LOG_W(TAG, "║  MQTT_EVENT_DISCONNECTED              ║");
             LOG_W(TAG, "╚════════════════════════════════════════╝");
@@ -2442,7 +2165,6 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
                 LOG_D(TAG, "[INC-EA5484] reconnect already scheduled (skip duplicate in DISCONNECTED)");
             }
             break;
-        }
 
         case MQTT_EVENT_DATA: {
             // KRITISCH: event->topic and event->data are NOT null-terminated!
