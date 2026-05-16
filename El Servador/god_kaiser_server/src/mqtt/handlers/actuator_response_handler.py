@@ -25,6 +25,8 @@ Expected Payload:
 """
 
 from datetime import datetime, timezone
+import json
+import time
 from typing import Optional
 
 from ...core.metrics import (
@@ -43,6 +45,40 @@ logger = get_logger(__name__)
 # Timestamp validation constants
 MIN_VALID_TIMESTAMP = 1700000000  # ~2023-11-14
 MAX_VALID_TIMESTAMP = 2500000000  # ~2049-03-22
+
+
+def _agent_debug_log(
+    *,
+    run_id: str,
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    data: dict,
+) -> None:
+    try:
+        entry = {
+            "sessionId": "eea42f",
+            "id": f"log_{time.time_ns()}",
+            "runId": run_id,
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        line = json.dumps(entry, ensure_ascii=True) + "\n"
+        for candidate_path in (
+            "/home/robin/.cursor/debug-eea42f.log",
+            "/app/logs/debug-eea42f.log",
+        ):
+            try:
+                with open(candidate_path, "a", encoding="utf-8") as fh:
+                    fh.write(line)
+                break
+            except Exception:
+                continue
+    except Exception:
+        pass
 
 
 class ActuatorResponseHandler:
@@ -110,6 +146,23 @@ class ActuatorResponseHandler:
                 f"Processing actuator response: esp_id={esp_id_str}, gpio={gpio}, "
                 f"command={command}, success={success}"
             )
+            is_off_response = str(command).upper() == "OFF"
+            # #region agent log
+            if is_off_response:
+                _agent_debug_log(
+                    run_id="off-latency-r1",
+                    hypothesis_id="H3_HANDLER_DB_WS",
+                    location="actuator_response_handler.py:handle:start",
+                    message="OFF response entered actuator response handler",
+                    data={
+                        "topic": topic,
+                        "esp_id": esp_id_str,
+                        "gpio": gpio,
+                        "correlation_id": correlation_id,
+                        "payload_ts": canonical.ts,
+                    },
+                )
+            # #endregion
 
             # Step 3: Convert ESP32 timestamp
             esp32_timestamp = self._convert_timestamp(canonical.ts)
@@ -211,6 +264,20 @@ class ActuatorResponseHandler:
 
                 # Commit transaction
                 await session.commit()
+                # #region agent log
+                if is_off_response:
+                    _agent_debug_log(
+                        run_id="off-latency-r1",
+                        hypothesis_id="H3_HANDLER_DB_WS",
+                        location="actuator_response_handler.py:handle:post_commit",
+                        message="OFF response DB transaction committed",
+                        data={
+                            "esp_id": esp_id_str,
+                            "gpio": gpio,
+                            "correlation_id": correlation_id,
+                        },
+                    )
+                # #endregion
 
                 # Step 7: Log result
                 if success:
@@ -259,6 +326,20 @@ class ActuatorResponseHandler:
                         broadcast_data,
                         correlation_id=correlation_id,
                     )
+                    # #region agent log
+                    if is_off_response:
+                        _agent_debug_log(
+                            run_id="off-latency-r1",
+                            hypothesis_id="H3_HANDLER_DB_WS",
+                            location="actuator_response_handler.py:handle:post_ws_broadcast",
+                            message="OFF response websocket broadcast sent",
+                            data={
+                                "esp_id": esp_id_str,
+                                "gpio": gpio,
+                                "correlation_id": correlation_id,
+                            },
+                        )
+                    # #endregion
                 except Exception as e:
                     logger.debug(f"WebSocket broadcast skipped: {e}")
 

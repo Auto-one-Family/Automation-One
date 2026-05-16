@@ -26,8 +26,12 @@ static std::atomic<uint32_t> s_chain_stage_enqueue_fail_count{0};
 static constexpr uint8_t INTENT_FINAL_STORE_CAPACITY = 32;
 // Queue-pressure can generate >30 terminal outcomes in short bursts.
 // Keep enough NVS replay slots so critical terminals are not evicted immediately.
-static constexpr uint8_t OUTCOME_OUTBOX_CAPACITY = 48;
+// Runtime evidence (runs 20260515_152324 / 20260515_150821) shows NVS
+// NOT_ENOUGH_SPACE already around s33_* keys. Keep replay durable but cap
+// slot count lower so writes stay within io_outbox namespace budget.
+static constexpr uint8_t OUTCOME_OUTBOX_CAPACITY = 24;
 static constexpr uint8_t OUTCOME_OUTBOX_RETRY_LIMIT = 5;
+static constexpr unsigned long OUTCOME_ACK_STALE_MS = 10000UL;
 static Preferences s_outcome_outbox_prefs;
 static bool s_outbox_stats_loaded = false;
 static bool s_outbox_storage_degraded = false;
@@ -219,22 +223,98 @@ static bool beginOutcomeOutboxPrefs(bool read_only) {
 }
 
 static bool putOutboxUCharChecked(const char* key, uint8_t value) {
-    return key != nullptr && s_outcome_outbox_prefs.putUChar(key, value) > 0;
+    if (key == nullptr) {
+        return false;
+    }
+    const size_t written = s_outcome_outbox_prefs.putUChar(key, value);
+    if (written == 0) {
+        // #region agent log
+        LOG_W(IC_TAG, String("[DBG5126ae] outbox write fail type=uchar key=") +
+                       String(key) +
+                       " value=" + String(value) +
+                       " storage_degraded=" + String(s_outbox_storage_degraded ? 1 : 0) +
+                       " backoff_until=" + String(s_outbox_storage_backoff_until_ms));
+        // #endregion
+        return false;
+    }
+    return true;
 }
 
 static bool putOutboxUIntChecked(const char* key, uint32_t value) {
-    return key != nullptr && s_outcome_outbox_prefs.putUInt(key, value) > 0;
+    if (key == nullptr) {
+        return false;
+    }
+    const size_t written = s_outcome_outbox_prefs.putUInt(key, value);
+    if (written == 0) {
+        // #region agent log
+        LOG_W(IC_TAG, String("[DBG5126ae] outbox write fail type=uint key=") +
+                       String(key) +
+                       " value=" + String(value) +
+                       " storage_degraded=" + String(s_outbox_storage_degraded ? 1 : 0) +
+                       " backoff_until=" + String(s_outbox_storage_backoff_until_ms));
+        // #endregion
+        return false;
+    }
+    return true;
 }
 
 static bool putOutboxBoolChecked(const char* key, bool value) {
-    return key != nullptr && s_outcome_outbox_prefs.putBool(key, value) > 0;
+    if (key == nullptr) {
+        return false;
+    }
+    const size_t written = s_outcome_outbox_prefs.putBool(key, value);
+    if (written == 0) {
+        // #region agent log
+        LOG_W(IC_TAG, String("[DBG5126ae] outbox write fail type=bool key=") +
+                       String(key) +
+                       " value=" + String(value ? 1 : 0) +
+                       " storage_degraded=" + String(s_outbox_storage_degraded ? 1 : 0) +
+                       " backoff_until=" + String(s_outbox_storage_backoff_until_ms));
+        // #endregion
+        return false;
+    }
+    return true;
 }
 
 static bool putOutboxStringChecked(const char* key, const String& value) {
     if (key == nullptr) {
         return false;
     }
-    return s_outcome_outbox_prefs.putString(key, value) > 0;
+    const size_t written = s_outcome_outbox_prefs.putString(key, value);
+    if (written > 0) {
+        return true;
+    }
+
+    // Preferences::putString returns written length. For empty strings this is 0
+    // even when write succeeded. We use readback verification to avoid false
+    // storage degradation on valid soft-clear operations.
+    if (value.length() == 0) {
+        const String sentinel = "__OUTBOX_MISSING__";
+        const String readback = s_outcome_outbox_prefs.getString(key, sentinel);
+        const bool empty_write_ok = (readback.length() == 0);
+        if (!empty_write_ok) {
+            // #region agent log
+            LOG_W(IC_TAG, String("[DBG5126ae] outbox empty write verify fail key=") +
+                           String(key) +
+                           " readback_len=" + String(readback.length()) +
+                           " storage_degraded=" + String(s_outbox_storage_degraded ? 1 : 0) +
+                           " backoff_until=" + String(s_outbox_storage_backoff_until_ms));
+            // #endregion
+        }
+        return empty_write_ok;
+    }
+
+    if (written == 0) {
+        // #region agent log
+        LOG_W(IC_TAG, String("[DBG5126ae] outbox write fail type=string key=") +
+                       String(key) +
+                       " value_len=" + String(value.length()) +
+                       " storage_degraded=" + String(s_outbox_storage_degraded ? 1 : 0) +
+                       " backoff_until=" + String(s_outbox_storage_backoff_until_ms));
+        // #endregion
+        return false;
+    }
+    return false;
 }
 
 static void markOutboxStorageDegraded(const char* owner, const char* key) {
@@ -478,6 +558,13 @@ static bool enqueueCriticalOutcome(const PendingOutcomeEntry& entry) {
     const unsigned long enqueue_started_ms = millis();
     uint8_t enqueue_write_ops = 0;
     const char* enqueue_action = "enqueue_ok";
+    // #region agent log
+    LOG_W(IC_TAG, String("[DBG5126ae] enqueue critical begin storage_degraded=") +
+                   String(s_outbox_storage_degraded ? 1 : 0) +
+                   " backoff_until=" + String(s_outbox_storage_backoff_until_ms) +
+                   " now_ms=" + String(millis()) +
+                   " attempt=" + String(entry.attempt));
+    // #endregion
     OutboxLockGuard guard("enqueue_critical");
     if (!guard.locked()) {
         enqueue_action = "lock_timeout";
@@ -643,6 +730,18 @@ void processIntentOutcomeOutbox() {
         if (s_outbox_storage_degraded && millis() < s_outbox_storage_backoff_until_ms) {
             return;
         }
+        const PublishQueuePressureStats pressure_stats = getPublishQueuePressureStats();
+        static uint8_t s_sustained_pressure_hits = 0;
+        if (pressure_stats.fill_level >= PUBLISH_QUEUE_SHED_WATERMARK) {
+            if (s_sustained_pressure_hits < 12) {
+                s_sustained_pressure_hits++;
+            }
+            const unsigned long sustained_backoff_ms =
+                500UL + static_cast<unsigned long>(s_sustained_pressure_hits) * 250UL;
+            scheduleReplayBackoffMs("queue_pressure", sustained_backoff_ms);
+            return;
+        }
+        s_sustained_pressure_hits = 0;
         // AUT-56 hardening: do not consume replay attempts while registration gate is closed.
         if (!mqttClient.isRegistrationConfirmed()) {
             return;
@@ -723,6 +822,13 @@ void processIntentOutcomeOutbox() {
     }
 
     if (!has_candidate) {
+        return;
+    }
+
+    // Re-check transport state after leaving the outbox lock.
+    // We may have been disconnected between candidate selection and publish.
+    if (!mqttClient.isConnected() || !mqttClient.isRegistrationConfirmed()) {
+        scheduleReplayBackoffMs("reconnect_race", 250UL);
         return;
     }
 
@@ -1252,8 +1358,27 @@ bool publishIntentOutcome(const char* flow,
         return false;
     }
 
-    // Replay pending critical outcomes first when broker is reachable.
-    processIntentOutcomeOutbox();
+    // Opportunistic inline replay is throttled to keep command-path latency low.
+    // Primary replay drain still runs in MQTTClient::processPublishQueue() on Core 0.
+    static unsigned long s_last_inline_replay_ms = 0UL;
+    static constexpr unsigned long INLINE_REPLAY_INTERVAL_NORMAL_MS = 1000UL;
+    static constexpr unsigned long INLINE_REPLAY_INTERVAL_STALE_MS = 5000UL;
+    const unsigned long inline_replay_now_ms = millis();
+    const PublishQueuePressureStats inline_pq_stats = getPublishQueuePressureStats();
+    const uint32_t last_ack_inline_ms = g_last_server_ack_ms.load();
+    const bool inline_ack_stale =
+        (last_ack_inline_ms > 0UL &&
+         inline_replay_now_ms > last_ack_inline_ms &&
+         (inline_replay_now_ms - last_ack_inline_ms) > OUTCOME_ACK_STALE_MS);
+    const unsigned long inline_replay_interval_ms =
+        inline_ack_stale ? INLINE_REPLAY_INTERVAL_STALE_MS : INLINE_REPLAY_INTERVAL_NORMAL_MS;
+    if (mqttClient.isConnected() &&
+        inline_pq_stats.fill_level < PUBLISH_QUEUE_SHED_WATERMARK &&
+        (s_last_inline_replay_ms == 0UL ||
+         (inline_replay_now_ms - s_last_inline_replay_ms) >= inline_replay_interval_ms)) {
+        s_last_inline_replay_ms = inline_replay_now_ms;
+        processIntentOutcomeOutbox();
+    }
 
     String topic = TopicBuilder::buildIntentOutcomeTopic();
     // AUT-54: All intent_outcome publishes at QoS 0. Terminal QoS-1 filled the IDF OUTBOX;
@@ -1261,12 +1386,32 @@ bool publishIntentOutcome(const char* flow,
     // Critical outcomes still persist to NVS and replay when publish fails.
     const uint8_t outcome_qos = 0;
     uint8_t outcome_retries = 3;
+    const unsigned long publish_now_ms = millis();
+    const uint32_t last_ack_ms = g_last_server_ack_ms.load();
+    const bool ack_stale = (last_ack_ms > 0UL &&
+                            publish_now_ms > last_ack_ms &&
+                            (publish_now_ms - last_ack_ms) > OUTCOME_ACK_STALE_MS);
     const PublishQueuePressureStats pq_stats = getPublishQueuePressureStats();
     if (pq_stats.fill_level >= PUBLISH_QUEUE_SHED_WATERMARK) {
         // Under queue pressure, avoid retry storms and hand over to NVS replay path.
         outcome_retries = 0;
     }
-    bool ok = mqttClient.safePublish(topic, payload, outcome_qos, outcome_retries);
+    const bool force_replay_only =
+        critical &&
+        ack_stale &&
+        (pq_stats.fill_level >= PUBLISH_QUEUE_SHED_WATERMARK);
+    bool ok = false;
+    if (!force_replay_only) {
+        ok = mqttClient.safePublish(topic, payload, outcome_qos, outcome_retries);
+    } else {
+        // #region agent log
+        LOG_W(IC_TAG, String("[DBG5126ae][H109] outcome publish deferred to replay ") +
+                       "ack_age_ms=" + String(publish_now_ms - last_ack_ms) +
+                       " queue_fill=" + String((uint32_t)pq_stats.fill_level) +
+                       " intent_id=" + String(active_metadata.intent_id) +
+                       " code=" + String(code != nullptr ? code : "UNKNOWN_ERROR"));
+        // #endregion
+    }
     bool persisted_for_replay = false;
     if (ok) {
         if (command_flow) {

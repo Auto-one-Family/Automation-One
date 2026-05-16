@@ -12,6 +12,10 @@
 #   docker-compose down           # Stop all services
 #   docker-compose down -v        # Stop and remove volumes
 
+# Fix: Pin project name to avoid cross-directory container name conflicts
+# (e.g. when the repo exists in multiple folders on the same host).
+name: auto-one
+
 services:
   # ============================================
   # PostgreSQL Database

@@ -13,6 +13,7 @@ import os
 import tempfile
 import uuid
 from datetime import datetime, timezone
+from enum import IntEnum
 from pathlib import Path
 from typing import Any, Optional
 
@@ -27,6 +28,12 @@ _MAX_REPLAY_ATTEMPTS = 20
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+class InboundPriority(IntEnum):
+    CRITICAL = 0
+    HIGH = 1
+    NORMAL = 2
 
 
 class InboundInboxService:
@@ -78,6 +85,7 @@ class InboundInboxService:
         payload: dict[str, Any],
         correlation_id: Optional[str] = None,
         source: str = "live",
+        priority: InboundPriority = InboundPriority.NORMAL,
     ) -> str:
         await self._ensure_loaded()
         event_id = str(uuid.uuid4())
@@ -92,6 +100,7 @@ class InboundInboxService:
             "correlation_id": correlation_id,
             "source": source,
             "status": "pending",
+            "priority": int(priority),
             "created_at": _utc_now_iso(),
             "updated_at": _utc_now_iso(),
             "attempts": 0,
@@ -99,22 +108,101 @@ class InboundInboxService:
 
         async with self._lock:
             if len(self._events) >= self._capacity:
-                # Drop oldest acked item first, otherwise oldest pending item.
-                acked_idx = next(
-                    (i for i, item in enumerate(self._events) if item.get("status") == "acked"),
-                    None,
-                )
-                drop_idx = acked_idx if acked_idx is not None else 0
-                dropped = self._events.pop(drop_idx)
-                logger.warning(
-                    "Inbound inbox capacity reached, dropping oldest event id=%s status=%s",
-                    dropped.get("id"),
-                    dropped.get("status"),
-                )
+                created_space = self._evict_for_capacity_locked()
+                if not created_space:
+                    pending_by_prio = self._pending_by_priority_locked()
+                    logger.error(
+                        "inbound_inbox_capacity_critical topic=%s priority=%s pending=%s capacity=%s pending_critical=%s pending_high=%s pending_normal=%s",
+                        topic,
+                        priority.name,
+                        len(self._events),
+                        self._capacity,
+                        pending_by_prio["critical"],
+                        pending_by_prio["high"],
+                        pending_by_prio["normal"],
+                    )
+                    return ""
 
             self._events.append(event)
             await self._persist_locked()
         return event_id
+
+    def _priority_of(self, event: dict[str, Any]) -> InboundPriority:
+        raw = event.get("priority")
+        try:
+            return InboundPriority(int(raw))
+        except (TypeError, ValueError):
+            return InboundPriority.NORMAL
+
+    def _pending_by_priority_locked(self) -> dict[str, int]:
+        pending = [event for event in self._events if event.get("status") != "acked"]
+        return {
+            "critical": sum(
+                1 for event in pending if self._priority_of(event) == InboundPriority.CRITICAL
+            ),
+            "high": sum(
+                1 for event in pending if self._priority_of(event) == InboundPriority.HIGH
+            ),
+            "normal": sum(
+                1 for event in pending if self._priority_of(event) == InboundPriority.NORMAL
+            ),
+        }
+
+    def _evict_for_capacity_locked(self) -> bool:
+        """
+        Create one free slot under capacity pressure.
+
+        Order:
+        1) Drop oldest acked event (always safe).
+        2) Drop oldest pending NORMAL.
+        3) Drop oldest pending HIGH.
+        4) If only CRITICAL pending remain -> refuse drop and escalate.
+        """
+        acked_events = [event for event in self._events if event.get("status") == "acked"]
+        if acked_events:
+            oldest_acked = min(acked_events, key=lambda item: item.get("updated_at", ""))
+            self._events.remove(oldest_acked)
+            pending_by_prio = self._pending_by_priority_locked()
+            logger.warning(
+                "inbound_inbox_evict priority=ACKED topic=%s id=%s pending_critical=%s pending_high=%s pending_normal=%s",
+                oldest_acked.get("topic"),
+                oldest_acked.get("id"),
+                pending_by_prio["critical"],
+                pending_by_prio["high"],
+                pending_by_prio["normal"],
+            )
+            return True
+
+        for priority in (InboundPriority.NORMAL, InboundPriority.HIGH):
+            candidates = [
+                event
+                for event in self._events
+                if event.get("status") != "acked" and self._priority_of(event) == priority
+            ]
+            if not candidates:
+                continue
+            oldest = min(candidates, key=lambda item: item.get("created_at", ""))
+            self._events.remove(oldest)
+            pending_by_prio = self._pending_by_priority_locked()
+            logger.warning(
+                "inbound_inbox_evict priority=%s topic=%s id=%s pending_critical=%s pending_high=%s pending_normal=%s",
+                priority.name,
+                oldest.get("topic"),
+                oldest.get("id"),
+                pending_by_prio["critical"],
+                pending_by_prio["high"],
+                pending_by_prio["normal"],
+            )
+            return True
+
+        pending_by_prio = self._pending_by_priority_locked()
+        logger.error(
+            "inbound_inbox_evict_blocked reason=only_critical_pending pending_critical=%s pending_high=%s pending_normal=%s",
+            pending_by_prio["critical"],
+            pending_by_prio["high"],
+            pending_by_prio["normal"],
+        )
+        return False
 
     async def mark_delivered(self, event_id: str) -> None:
         await self._ensure_loaded()

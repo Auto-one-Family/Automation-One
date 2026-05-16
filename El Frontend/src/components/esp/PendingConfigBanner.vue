@@ -52,6 +52,18 @@ const isVisible = computed(() => {
 
 const isTimeout = computed(() => intent.value?.state === 'terminal_timeout')
 const isPending = computed(() => !isTimeout.value)
+const queueHint = computed(() => {
+  const hints = intent.value?.nonTerminalHints
+  if (!hints || hints.length === 0) return null
+  // Last hint is the freshest signal from config_published handling.
+  const latest = hints[hints.length - 1]?.trim()
+  return latest || null
+})
+const isQueuedOffline = computed(() => {
+  const hint = queueHint.value?.toLowerCase()
+  if (!hint) return false
+  return hint.includes('gequeued') || hint.includes('offline')
+})
 
 const displayCorrelationId = computed(() => {
   const cid = intent.value?.correlationId
@@ -113,8 +125,15 @@ function handleDismiss() {
         {{ isTimeout ? 'Konfigurationsauftrag ausstehend' : 'Konfigurationsauftrag läuft' }}
       </span>
       <span class="pending-config-banner__detail">
-        {{ isPending ? 'Warte auf Geräte-Rückmeldung' : 'Gerät hat nicht innerhalb der Frist geantwortet' }}
+        {{
+          isPending
+            ? (isQueuedOffline ? 'Auftrag gequeued (Gerät offline) — warte auf Reconnect' : 'Warte auf Geräte-Rückmeldung')
+            : 'Gerät hat nicht innerhalb der Frist geantwortet'
+        }}
         <template v-if="elapsedLabel"> · {{ elapsedLabel }}</template>
+      </span>
+      <span v-if="isPending && queueHint" class="pending-config-banner__hint">
+        {{ queueHint }}
       </span>
       <span v-if="displayCorrelationId" class="pending-config-banner__correlation">
         Korrelation: {{ displayCorrelationId }}
@@ -213,6 +232,11 @@ function handleDismiss() {
 
 .pending-config-banner__detail {
   color: var(--color-text-secondary);
+}
+
+.pending-config-banner__hint {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xxs);
 }
 
 .pending-config-banner__correlation {

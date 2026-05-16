@@ -16,7 +16,7 @@
 | 3 | **JWT & DB-Passwort** | `JWT_SECRET_KEY` und `POSTGRES_PASSWORD` neu generieren, nicht aus `.env.example` übernehmen |
 | 4 | **Docker-Architektur** | Images sind multi-arch (postgres, mosquitto, node, python, nginx) — lokaler Build auf Pi für `el-servador` und `el-frontend` nötig |
 | 5 | **host.docker.internal** | ESP32-Serial-Logger nutzt `host.docker.internal` — auf Linux Pi: `network_mode: host` oder Host-IP setzen |
-| 6 | **Alloy/Loki** | In `docker/alloy/config.alloy` filtert die Discovery auf `com.docker.compose.project=auto-one`. Der effektive Compose-Name folgt dem **Projektordner** (z.B. Clone nach `autoone` → Label **`autoone`**). Entweder **`COMPOSE_PROJECT_NAME=auto-one`** in `.env` setzen **oder** den Alloy-Filter auf den tatsächlichen Namen anpassen — sonst **keine** Container-Logs in Loki. |
+| 6 | **Alloy/Loki** | In `docker/alloy/config.alloy` filtert die Discovery auf `com.docker.compose.project=auto-one`. Der Compose-Projektname ist im Basis-Compose über `name: auto-one` fest verdrahtet. Nur bei bewusstem Override (`-p` oder `COMPOSE_PROJECT_NAME`) muss der Alloy-Filter angepasst werden — sonst **keine** Container-Logs in Loki. |
 | 7 | **shared-infra-net** | `docker network create shared-infra-net` vor dem ersten Start ausführen |
 | 8 | **Zeilenenden** | `.gitattributes` erzwingt LF für Shell-Skripte — bei CRLF unter Windows: `git config core.autocrlf input` |
 | 9 | **Makefile** | E2E/Wokwi-Ziele nutzen Windows-Pfade (`.venv/Scripts/pytest.exe`) — auf Pi: `python -m pytest` bzw. `poetry run pytest` |
@@ -255,7 +255,7 @@ docker compose --profile monitoring up -d
 ### D.1 Checkliste „Erstes Starten auf dem Pi“
 
 1. [ ] Pi vorbereiten (Raspberry Pi OS 64-bit, Docker + Docker Compose installiert)
-2. [ ] Repo klonen: `git clone <url> && cd <projektordner>` (z.B. `autoone` auf **growy2** unter `/home/robin/autoone`; frühere Beispielnamen wie `Auto-one` nur als Alias — **Compose-Label** = Ordnername, sofern nicht `COMPOSE_PROJECT_NAME` gesetzt)
+2. [ ] Repo klonen: `git clone <url> && cd <projektordner>` (z.B. `autoone` auf **growy2** unter `/home/robin/autoone`; der Compose-Name bleibt über `name: auto-one` stabil, unabhängig vom Ordnernamen)
 3. [ ] Branch prüfen: `git checkout main` (oder gewünschter Branch)
 4. [ ] `.env` anlegen: `cp .env.example .env`
 5. [ ] `.env` bearbeiten:
@@ -320,7 +320,7 @@ PGADMIN_DEFAULT_PASSWORD=<STARKES_PASSWORT>
 | Thema | Problem | Lösung |
 |-------|---------|--------|
 | **host.docker.internal** | Auf Linux (ohne Docker Desktop) oft nicht verfügbar | `network_mode: host` oder `extra_hosts: - "host.docker.internal:host-gateway"` (Docker 20.10+) oder Host-IP setzen |
-| **Compose-Projektname** | Alloy filtert `com.docker.compose.project=auto-one` | Ordner **`auto-one`**, oder **`COMPOSE_PROJECT_NAME=auto-one`** in `.env`, **oder** Filter in `docker/alloy/config.alloy` auf den echten Namen (z.B. **`autoone`**) ändern |
+| **Compose-Projektname** | Alloy filtert `com.docker.compose.project=auto-one` | Default bleibt stabil über `name: auto-one` im Basis-Compose. Nur wenn `COMPOSE_PROJECT_NAME` oder `-p` explizit abweicht, Alloy-Filter entsprechend anpassen |
 | **Grafana-URL** | `useGrafana.ts` nutzt `window.location.hostname:3000` | Wenn Frontend auf Port 5173: Grafana auf 3000 muss vom Client erreichbar sein |
 | **Frontend Production** | Nginx-Dockerfile nutzt keine Custom-Config | API/WS-Proxy fehlt — entweder Custom-Config ins Image oder Reverse-Proxy vor dem Stack |
 | **Zeilenenden** | CRLF in Shell-Skripten | `git config core.autocrlf input` vor Clone; `.gitattributes` erzwingt LF |

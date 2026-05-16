@@ -10,6 +10,7 @@ set -euo pipefail
 # Optional:
 #   ATTEMPTS=2 CAPTURE_SECONDS=180 scripts/hardware/verify_disconnect_fix.sh
 #   scripts/hardware/verify_disconnect_fix.sh --attempts 3 --capture-seconds 210 --profile my-check
+#   scripts/hardware/verify_disconnect_fix.sh --actuator-gpios "25,26,27"
 
 ATTEMPTS="${ATTEMPTS:-2}"
 CAPTURE_SECONDS_OVERRIDE="${CAPTURE_SECONDS:-180}"
@@ -17,9 +18,12 @@ RUN_PROFILE_BASE="${RUN_PROFILE_BASE:-verify-disconnect-fix}"
 FLOOD_COUNT_FAST="${FLOOD_COUNT_FAST:-450}"
 FLOOD_COUNT_SLOW="${FLOOD_COUNT_SLOW:-300}"
 FLOOD_DELAY_SLOW_MS="${FLOOD_DELAY_SLOW_MS:-10}"
+ACTUATOR_GPIOS_OVERRIDE="${ACTUATOR_GPIOS:-}"
 DEBUG_LOG_PATH="${DEBUG_LOG_PATH:-/home/robin/.cursor/debug-verify-disconnect.log}"
 DEBUG_SESSION_ID="${DEBUG_SESSION_ID:-verify_disconnect}"
 REPRO_SCRIPT="scripts/hardware/repro_disconnect_esp32.sh"
+RUN_ROOT="logs/current/hardware/disconnect-repro"
+VERIFY_SUMMARY_JSON="${RUN_ROOT}/verify_disconnect_fix_latest.json"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -33,6 +37,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --profile)
       RUN_PROFILE_BASE="$2"
+      shift 2
+      ;;
+    --actuator-gpios)
+      ACTUATOR_GPIOS_OVERRIDE="$2"
       shift 2
       ;;
     *)
@@ -51,9 +59,32 @@ if [[ ! -x "${REPRO_SCRIPT}" ]]; then
   fi
 fi
 
+mkdir -p "${RUN_ROOT}"
+
 list_latest_run_dir() {
-  local root="logs/current/hardware/disconnect-repro"
-  ls -1 "${root}" 2>/dev/null | awk '/^[0-9]{8}_[0-9]{6}$/' | sort | tail -n 1
+  ls -1 "${RUN_ROOT}" 2>/dev/null | awk '/^[0-9]{8}_[0-9]{6}$/' | sort | tail -n 1
+}
+
+extract_run_dir_from_log() {
+  local log_file="$1"
+  python3 - "$log_file" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+log_path = Path(sys.argv[1])
+if not log_path.exists():
+    print("")
+    raise SystemExit(0)
+
+run_dir = ""
+for line in log_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+    m = re.search(r"^Output:\s+(logs/current/hardware/disconnect-repro/\d{8}_\d{6})\s*$", line.strip())
+    if m:
+        run_dir = m.group(1)
+
+print(run_dir)
+PY
 }
 
 analyze_run() {
@@ -87,6 +118,9 @@ result = {
     "intent_outcome_invalid_count": 0,
     "intent_outcome_json_error_count": 0,
     "profile": "",
+    "run_summary_json_exists": False,
+    "run_unusable": None,
+    "run_unusable_reasons": [],
 }
 
 if meta_file.exists():
@@ -116,6 +150,17 @@ if summary.exists():
         return int(m.group(1)) if m else None
     result["mqtt_disconnected_count"] = parse_marker("mqtt_disconnected")
     result["write_timeout_classified_count"] = parse_marker("write_timeout_classified")
+
+run_summary_json = run_dir / "run_summary.json"
+if run_summary_json.exists():
+    result["run_summary_json_exists"] = True
+    try:
+        parsed = json.loads(run_summary_json.read_text(encoding="utf-8", errors="ignore"))
+        result["run_unusable"] = bool(parsed.get("unusable"))
+        result["run_unusable_reasons"] = list(parsed.get("unusable_reasons", []))
+    except Exception:
+        result["run_unusable"] = True
+        result["run_unusable_reasons"] = ["run_summary_json_parse_error"]
 
 print(json.dumps(result, ensure_ascii=True))
 PY
@@ -147,6 +192,10 @@ lines.append(f"- sock_errno=11 count: `{data['sock_errno11_count']}`")
 lines.append(f"- disconnect uptime_ms: `{data['disconnect_uptime_ms']}`")
 lines.append(f"- server invalid intent_outcome: `{data['intent_outcome_invalid_count']}`")
 lines.append(f"- server invalid JSON intent_outcome: `{data['intent_outcome_json_error_count']}`")
+lines.append(f"- run_summary.json vorhanden: `{data.get('run_summary_json_exists')}`")
+lines.append(f"- Lauf als unverwertbar markiert: `{data.get('run_unusable')}`")
+if data.get("run_unusable_reasons"):
+    lines.append(f"- Unverwertbar-Gründe: `{', '.join(data['run_unusable_reasons'])}`")
 lines.append("")
 if data["serial_size"] <= 0:
     lines.append("## Ergebnis")
@@ -168,13 +217,18 @@ PY
 }
 
 echo "Starte Verifikation (max attempts=${ATTEMPTS}, capture_seconds=${CAPTURE_SECONDS_OVERRIDE})"
+if [[ -n "${ACTUATOR_GPIOS_OVERRIDE}" ]]; then
+  echo "Aktor-GPIOs (override): ${ACTUATOR_GPIOS_OVERRIDE}"
+fi
 echo "Debug log: ${DEBUG_LOG_PATH}"
 
 last_json=""
 attempt=1
+attempts_json="[]"
 while (( attempt <= ATTEMPTS )); do
   before_latest="$(list_latest_run_dir || true)"
   run_profile="${RUN_PROFILE_BASE}-attempt${attempt}"
+  attempt_log="${RUN_ROOT}/verify_attempt_${run_profile}.log"
   echo
   echo "[Attempt ${attempt}/${ATTEMPTS}] Profile=${run_profile}"
 
@@ -186,38 +240,45 @@ while (( attempt <= ATTEMPTS )); do
   FLOOD_COUNT_FAST="${FLOOD_COUNT_FAST}" \
   FLOOD_COUNT_SLOW="${FLOOD_COUNT_SLOW}" \
   FLOOD_DELAY_SLOW_MS="${FLOOD_DELAY_SLOW_MS}" \
-  bash "${REPRO_SCRIPT}"
-  repro_exit=$?
+  ACTUATOR_GPIOS="${ACTUATOR_GPIOS_OVERRIDE}" \
+  bash "${REPRO_SCRIPT}" 2>&1 | tee "${attempt_log}"
+  repro_exit=${PIPESTATUS[0]}
   set -e
 
-  after_latest="$(list_latest_run_dir || true)"
-  if [[ -z "${after_latest}" ]]; then
-    echo "Kein Run-Verzeichnis gefunden." >&2
-    exit 1
+  run_dir="$(extract_run_dir_from_log "${attempt_log}")"
+  if [[ -z "${run_dir}" ]]; then
+    after_latest="$(list_latest_run_dir || true)"
+    if [[ -z "${after_latest}" ]]; then
+      echo "Kein Run-Verzeichnis gefunden." >&2
+      exit 1
+    fi
+    if [[ "${after_latest}" == "${before_latest}" ]]; then
+      echo "Kein neues Run-Verzeichnis erzeugt." >&2
+      exit 1
+    fi
+    run_dir="${RUN_ROOT}/${after_latest}"
+    echo "Hinweis: Run-Verzeichnis aus Fallback ermittelt (${run_dir})."
   fi
-  if [[ "${after_latest}" == "${before_latest}" ]]; then
-    echo "Kein neues Run-Verzeichnis erzeugt." >&2
-    exit 1
-  fi
-
-  run_dir="logs/current/hardware/disconnect-repro/${after_latest}"
   echo "Auswertung: ${run_dir}"
   last_json="$(analyze_run "${run_dir}")"
   echo "Analyse: ${last_json}"
 
   serial_size="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["serial_size"])' "${last_json}")"
   summary_exists="$(python3 -c 'import json,sys; print("1" if json.loads(sys.argv[1])["summary_exists"] else "0")' "${last_json}")"
+  run_unusable="$(python3 -c 'import json,sys; print("1" if json.loads(sys.argv[1]).get("run_unusable") else "0")' "${last_json}")"
 
   report_file="${run_dir}/VERIFY_FIX_REPORT.md"
   render_report "${report_file}" "${last_json}" >/dev/null
   echo "Report: ${report_file}"
 
-  if [[ "${summary_exists}" == "1" && "${serial_size}" -gt 0 && "${repro_exit}" -eq 0 ]]; then
+  attempts_json="$(python3 -c 'import json,sys; arr=json.loads(sys.argv[1]); arr.append(json.loads(sys.argv[2])); print(json.dumps(arr, ensure_ascii=True))' "${attempts_json}" "${last_json}")"
+
+  if [[ "${summary_exists}" == "1" && "${serial_size}" -gt 0 && "${run_unusable}" == "0" && "${repro_exit}" -eq 0 ]]; then
     echo "Verwertbarer Lauf abgeschlossen."
     break
   fi
 
-  echo "Lauf nicht verwertbar (exit=${repro_exit}, summary=${summary_exists}, serial_size=${serial_size})"
+  echo "Lauf nicht verwertbar (exit=${repro_exit}, summary=${summary_exists}, serial_size=${serial_size}, run_unusable=${run_unusable})"
   attempt=$((attempt + 1))
 done
 
@@ -232,4 +293,30 @@ if [[ "${final_serial_size}" -le 0 ]]; then
   exit 2
 fi
 
+mkdir -p "${RUN_ROOT}"
+python3 - "${VERIFY_SUMMARY_JSON}" "${ATTEMPTS}" "${CAPTURE_SECONDS_OVERRIDE}" "${attempts_json}" "${last_json}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+out_path = Path(sys.argv[1])
+attempts_max = int(sys.argv[2])
+capture_seconds = int(sys.argv[3])
+attempts = json.loads(sys.argv[4])
+last_result = json.loads(sys.argv[5])
+
+payload = {
+    "attempts_max": attempts_max,
+    "capture_seconds": capture_seconds,
+    "attempt_count": len(attempts),
+    "attempts": attempts,
+    "final_result": last_result,
+    "final_run_dir": last_result.get("run_dir"),
+    "final_profile": last_result.get("profile"),
+}
+out_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+print(str(out_path))
+PY
+
 echo "Finale Analyse abgeschlossen."
+echo "Maschinenlesbare Zusammenfassung: ${VERIFY_SUMMARY_JSON}"

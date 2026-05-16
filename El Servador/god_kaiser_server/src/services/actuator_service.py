@@ -5,6 +5,8 @@ Business logic for actuator control, safety checks, command validation.
 """
 
 import uuid
+import json
+import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from math import isclose
@@ -23,6 +25,40 @@ logger = get_logger(__name__)
 
 
 RejectionReason = Literal["safety", "esp_not_found", "mqtt_publish", "exception"]
+
+
+def _agent_debug_log(
+    *,
+    run_id: str,
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    data: dict,
+) -> None:
+    try:
+        entry = {
+            "sessionId": "eea42f",
+            "id": f"log_{time.time_ns()}",
+            "runId": run_id,
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        line = json.dumps(entry, ensure_ascii=True) + "\n"
+        for candidate_path in (
+            "/home/robin/.cursor/debug-eea42f.log",
+            "/app/logs/debug-eea42f.log",
+        ):
+            try:
+                with open(candidate_path, "a", encoding="utf-8") as fh:
+                    fh.write(line)
+                break
+            except Exception:
+                continue
+    except Exception:
+        pass
 
 
 @dataclass(frozen=True)
@@ -173,6 +209,17 @@ class ActuatorService:
         base_reason = str(reason or "unknown_failure").strip()
         issuer = str(issued_by or "unknown")
         return f"{base_reason} (issued_by={issuer})"
+
+    @staticmethod
+    def _should_apply_noop_guard(issued_by: str) -> bool:
+        """
+        Keep no-op suppression for autonomous producers, but not for manual API commands.
+
+        API users expect a deterministic command dispatch/response cycle per click even
+        when DB state is stale or lagging behind physical actuator state.
+        """
+        issuer = str(issued_by or "")
+        return not issuer.startswith("user:")
 
     async def _persist_terminal_failure(
         self,
@@ -508,6 +555,24 @@ class ActuatorService:
         correlation_id = str(uuid.uuid4())
         context: ActuatorCommandContext | None = None
         command_sent = False
+        command_upper = str(command or "").upper()
+        # #region agent log
+        if command_upper == "OFF":
+            _agent_debug_log(
+                run_id="off-latency-r1",
+                hypothesis_id="H1_API_PATH",
+                location="actuator_service.py:send_command:entry",
+                message="OFF command entered send_command",
+                data={
+                    "esp_id": esp_id,
+                    "gpio": gpio,
+                    "issued_by": issued_by,
+                    "value": value,
+                    "duration": duration,
+                    "correlation_id": correlation_id,
+                },
+            )
+        # #endregion
         try:
             # Step 1: Safety validation (CRITICAL - MUST be called before every command!)
             safety_result = await self._validate_safety_with_fresh_context(
@@ -628,7 +693,7 @@ class ActuatorService:
 
             # Reconnect-safe delta guard: if desired output already equals current
             # hardware projection, do not send a duplicate command.
-            if context.is_noop:
+            if context.is_noop and self._should_apply_noop_guard(issued_by):
                 logger.info(
                     "Skipping no-op actuator command (desired==current): esp_id=%s gpio=%s command=%s value=%s",
                     esp_id,
@@ -653,6 +718,20 @@ class ActuatorService:
 
             # Step 3: Publish MQTT command
             # CRITICAL: value must be 0.0-1.0 (ESP32 converts internally to 0-255)
+            # #region agent log
+            if command_upper == "OFF":
+                _agent_debug_log(
+                    run_id="off-latency-r1",
+                    hypothesis_id="H1_API_PATH",
+                    location="actuator_service.py:send_command:pre_publish",
+                    message="OFF command about to publish MQTT",
+                    data={
+                        "esp_id": esp_id,
+                        "gpio": gpio,
+                        "correlation_id": correlation_id,
+                    },
+                )
+            # #endregion
             success = self.publisher.publish_actuator_command(
                 esp_id=esp_id,
                 gpio=gpio,
@@ -663,6 +742,21 @@ class ActuatorService:
                 correlation_id=correlation_id,
                 issued_by=issued_by,
             )
+            # #region agent log
+            if command_upper == "OFF":
+                _agent_debug_log(
+                    run_id="off-latency-r1",
+                    hypothesis_id="H1_API_PATH",
+                    location="actuator_service.py:send_command:post_publish",
+                    message="OFF command publish returned",
+                    data={
+                        "esp_id": esp_id,
+                        "gpio": gpio,
+                        "correlation_id": correlation_id,
+                        "publish_success": bool(success),
+                    },
+                )
+            # #endregion
 
             if not success:
                 increment_actuator_timeout()

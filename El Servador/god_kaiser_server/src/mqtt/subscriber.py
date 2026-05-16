@@ -13,6 +13,7 @@ Features:
 import asyncio
 import inspect
 import json
+import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -28,11 +29,45 @@ from ..core.request_context import (
     set_request_id,
     set_correlation_id,
 )
-from ..services.inbound_inbox_service import get_inbound_inbox_service
+from ..services.inbound_inbox_service import InboundPriority, get_inbound_inbox_service
 from .client import MQTTClient
 from .topics import TopicBuilder
 
 logger = get_logger(__name__)
+
+
+def _agent_debug_log(
+    *,
+    run_id: str,
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    data: dict,
+) -> None:
+    try:
+        entry = {
+            "sessionId": "eea42f",
+            "id": f"log_{time.time_ns()}",
+            "runId": run_id,
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        line = json.dumps(entry, ensure_ascii=True) + "\n"
+        for candidate_path in (
+            "/home/robin/.cursor/debug-eea42f.log",
+            "/app/logs/debug-eea42f.log",
+        ):
+            try:
+                with open(candidate_path, "a", encoding="utf-8") as fh:
+                    fh.write(line)
+                break
+            except Exception:
+                continue
+    except Exception:
+        pass
 
 
 class Subscriber:
@@ -70,6 +105,10 @@ class Subscriber:
         # Used to prevent blocking MQTT network loop
         self.executor = ThreadPoolExecutor(
             max_workers=max_workers, thread_name_prefix="mqtt_handler_"
+        )
+        # Dedicated lane for response/ack topics so they don't queue behind bulk telemetry.
+        self.priority_executor = ThreadPoolExecutor(
+            max_workers=max(2, max_workers // 3), thread_name_prefix="mqtt_handler_prio_"
         )
         self._is_shutting_down = False
 
@@ -188,7 +227,26 @@ class Subscriber:
             try:
                 payload = json.loads(payload_str)
             except json.JSONDecodeError as e:
-                logger.error(f"Invalid JSON payload on topic {topic}: {e}")
+                payload_len = len(payload_str)
+                topic_class = (
+                    "heartbeat"
+                    if topic.endswith("/system/heartbeat")
+                    else "heartbeat_metrics"
+                    if topic.endswith("/system/heartbeat_metrics")
+                    else "other"
+                )
+                payload_preview = payload_str[:160].replace("\n", "\\n").replace("\r", "\\r")
+                logger.error(
+                    "Invalid JSON payload on topic %s: %s (topic_class=%s payload_len=%s pos=%s line=%s col=%s preview=%r)",
+                    topic,
+                    e,
+                    topic_class,
+                    payload_len,
+                    getattr(e, "pos", None),
+                    getattr(e, "lineno", None),
+                    getattr(e, "colno", None),
+                    payload_preview,
+                )
                 self.messages_failed += 1
                 return
 
@@ -202,16 +260,62 @@ class Subscriber:
             handler = self._find_handler(topic)
             if handler:
                 inbox_event_id = None
-                if self._is_critical_topic(topic):
+                is_off_response = (
+                    "/actuator/" in topic
+                    and topic.endswith("/response")
+                    and str(payload.get("command", "")).upper() == "OFF"
+                )
+                # #region agent log
+                if is_off_response:
+                    _agent_debug_log(
+                        run_id="off-latency-r1",
+                        hypothesis_id="H2_SUBSCRIBER_QUEUE",
+                        location="subscriber.py:_route_message:matched_handler",
+                        message="OFF response matched handler",
+                        data={
+                            "topic": topic,
+                            "correlation_id": payload.get("correlation_id"),
+                            "inbox_critical": self._inbound_priority_for_topic(topic)
+                            == InboundPriority.CRITICAL,
+                        },
+                    )
+                # #endregion
+                inbox_priority, latency_critical = self._classify_inbound_topic(topic)
+                if inbox_priority is not None:
                     inbox_event_id = self._append_critical_inbound_event(
                         topic=topic,
                         payload=payload,
                         correlation_id=correlation_id,
+                        priority=inbox_priority,
                     )
                 # Submit handler to thread pool for async execution
                 # This prevents blocking MQTT network loop
                 try:
-                    self.executor.submit(
+                    target_executor = (
+                        self.priority_executor
+                        if latency_critical
+                        else self.executor
+                    )
+                    # #region agent log
+                    if is_off_response:
+                        _agent_debug_log(
+                            run_id="off-latency-r1",
+                            hypothesis_id="H2_SUBSCRIBER_QUEUE",
+                            location="subscriber.py:_route_message:submit_executor",
+                            message="OFF response submitted to executor",
+                            data={
+                                "topic": topic,
+                                "correlation_id": payload.get("correlation_id"),
+                                "executor": (
+                                    "priority"
+                                    if target_executor is self.priority_executor
+                                    else "default"
+                                ),
+                                "inbox_event_id": inbox_event_id,
+                            },
+                        )
+                    # #endregion
+                    target_executor.submit(
                         self._execute_handler,
                         handler,
                         topic,
@@ -245,6 +349,7 @@ class Subscriber:
         topic: str,
         payload: dict,
         correlation_id: str,
+        priority: InboundPriority,
     ) -> Optional[str]:
         """
         Append critical inbound event via the main loop.
@@ -270,6 +375,7 @@ class Subscriber:
                     payload=payload,
                     correlation_id=correlation_id,
                     source="live",
+                    priority=priority,
                 ),
                 loop,
             )
@@ -281,6 +387,32 @@ class Subscriber:
                 e,
             )
             return None
+
+    @staticmethod
+    def _classify_inbound_topic(topic: str) -> tuple[Optional[InboundPriority], bool]:
+        is_actuator_response = "/actuator/" in topic and topic.endswith("/response")
+        is_sensor_response = "/sensor/" in topic and topic.endswith("/response")
+        is_sensor_data = "/sensor/" in topic and topic.endswith("/data")
+        is_critical = (
+            is_actuator_response
+            or is_sensor_response
+            or topic.endswith("/config_response")
+            or topic.endswith("/zone/ack")
+            or topic.endswith("/subzone/ack")
+            or topic.endswith("/system/command/response")
+        )
+        if is_critical:
+            return InboundPriority.CRITICAL, True
+        if topic.endswith("/system/heartbeat") or is_sensor_data:
+            return InboundPriority.HIGH, False
+        if topic.endswith("/system/diagnostics") or topic.endswith("/system/queue_pressure"):
+            return InboundPriority.NORMAL, False
+        return None, False
+
+    @staticmethod
+    def _inbound_priority_for_topic(topic: str) -> Optional[InboundPriority]:
+        priority, _ = Subscriber._classify_inbound_topic(topic)
+        return priority
 
     def _get_valid_main_loop(self) -> asyncio.AbstractEventLoop:
         """
@@ -353,14 +485,20 @@ class Subscriber:
 
     @staticmethod
     def _is_critical_topic(topic: str) -> bool:
+        # High-frequency sensor data must not go through synchronous durable append,
+        # otherwise the callback thread stalls and latency-critical actuator responses
+        # are delayed in the broker->subscriber ingress queue.
         return (
-            ("/sensor/" in topic and topic.endswith("/data"))
+            Subscriber._inbound_priority_for_topic(topic) == InboundPriority.CRITICAL
             or topic.endswith("/system/error")
-            or topic.endswith("/config_response")
-            or topic.endswith("/system/intent_outcome")
-            or topic.endswith("/system/intent_outcome/lifecycle")
             or topic.endswith("/system/will")
         )
+
+    @staticmethod
+    def _is_latency_critical_topic(topic: str) -> bool:
+        """Response lanes that should bypass bulk-worker congestion."""
+        _, is_latency_critical = Subscriber._classify_inbound_topic(topic)
+        return is_latency_critical
 
     def _execute_handler(
         self,
@@ -397,6 +535,26 @@ class Subscriber:
             correlation_id: Cross-layer correlation ID (esp_id:topic:seq:ts)
         """
         try:
+            is_off_response = (
+                "/actuator/" in topic
+                and topic.endswith("/response")
+                and str(payload.get("command", "")).upper() == "OFF"
+            )
+            # #region agent log
+            if is_off_response:
+                _agent_debug_log(
+                    run_id="off-latency-r1",
+                    hypothesis_id="H2_SUBSCRIBER_QUEUE",
+                    location="subscriber.py:_execute_handler:entry",
+                    message="OFF response entered handler worker",
+                    data={
+                        "topic": topic,
+                        "correlation_id": payload.get("correlation_id"),
+                        "inbox_event_id": inbox_event_id,
+                        "is_async_handler": bool(asyncio.iscoroutinefunction(handler)),
+                    },
+                )
+            # #endregion
             # Check if handler is async (coroutine function)
             if asyncio.iscoroutinefunction(handler):
                 # CRITICAL: Run async handler in MAIN event loop
@@ -419,6 +577,20 @@ class Subscriber:
                 try:
                     # Wait for completion with timeout (30 seconds)
                     result = future.result(timeout=30.0)
+                    # #region agent log
+                    if is_off_response:
+                        _agent_debug_log(
+                            run_id="off-latency-r1",
+                            hypothesis_id="H2_SUBSCRIBER_QUEUE",
+                            location="subscriber.py:_execute_handler:future_done",
+                            message="OFF response async handler finished",
+                            data={
+                                "topic": topic,
+                                "correlation_id": payload.get("correlation_id"),
+                                "result": result,
+                            },
+                        )
+                    # #endregion
                     if result is False:
                         logger.warning(
                             f"Handler returned False for topic {topic} - processing may have failed"
@@ -653,4 +825,8 @@ class Subscriber:
         except TypeError:
             # Fallback for older Python versions without cancel_futures
             self.executor.shutdown(wait=wait)
+        try:
+            self.priority_executor.shutdown(wait=wait, cancel_futures=True)
+        except TypeError:
+            self.priority_executor.shutdown(wait=wait)
         logger.info(f"Subscriber stats: {self.get_stats()}")

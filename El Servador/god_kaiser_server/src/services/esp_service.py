@@ -21,6 +21,7 @@ References:
 - El Trabajante/docs/Mqtt_Protocoll.md
 """
 
+import asyncio
 import hashlib
 import json
 import time
@@ -35,6 +36,7 @@ from ..db.models.audit_log import AuditEventType, AuditSeverity, AuditSourceType
 from ..db.models.esp import ESPDevice
 from ..db.repositories import ESPRepository
 from ..db.repositories.audit_log_repo import AuditLogRepository
+from ..db.session import get_session_maker
 from ..mqtt.publisher import Publisher
 from .event_contract_serializers import serialize_config_response_event
 
@@ -42,6 +44,9 @@ logger = get_logger(__name__)
 
 # El Trabajante: CONFIG_PAYLOAD_MAX_LEN in config_update_queue.h (ingress rejects if >=)
 ESP_COMBINED_CONFIG_MQTT_MAX_BYTES = 4352
+CONFIG_PUSH_COALESCE_SECONDS = 5.0
+_pending_config_pushes: dict[str, asyncio.Task] = {}
+_pending_config_push_handles: dict[str, str] = {}
 
 # =============================================================================
 # Discovery Rate Limiter
@@ -151,6 +156,89 @@ class ESPService:
         """
         self.esp_repo = esp_repo
         self.publisher = publisher or Publisher()
+
+    async def trigger_config_push_debounced(
+        self,
+        device_id: str,
+        reason_code: str = "crud_config_change",
+    ) -> dict[str, Any]:
+        """
+        Coalesce multiple CRUD-triggered config pushes per ESP into one push.
+
+        Heartbeat-initiated pushes must keep using their existing cooldown path and
+        should not call this method.
+        """
+        existing = _pending_config_pushes.get(device_id)
+        if existing is not None and not existing.done():
+            existing_correlation_id = _pending_config_push_handles.get(device_id)
+            if not existing_correlation_id:
+                existing_correlation_id = str(uuid.uuid4())
+                _pending_config_push_handles[device_id] = existing_correlation_id
+            logger.warning(
+                "config_push_coalesce esp_id=%s reason=%s (merged)",
+                device_id,
+                reason_code,
+            )
+            return {
+                "scheduled": True,
+                "merged": True,
+                "correlation_id": existing_correlation_id,
+                "request_id": existing_correlation_id,
+            }
+
+        reserved_correlation_id = str(uuid.uuid4())
+        _pending_config_push_handles[device_id] = reserved_correlation_id
+
+        async def _delayed_push() -> None:
+            try:
+                await asyncio.sleep(CONFIG_PUSH_COALESCE_SECONDS)
+                session_maker = get_session_maker()
+                async with session_maker() as session:
+                    from ..db.repositories import ActuatorRepository, SensorRepository
+                    from .config_builder import ConfigPayloadBuilder
+
+                    esp_repo = ESPRepository(session)
+                    config_builder = ConfigPayloadBuilder(
+                        sensor_repo=SensorRepository(session),
+                        actuator_repo=ActuatorRepository(session),
+                        esp_repo=esp_repo,
+                    )
+                    combined_config = await config_builder.build_combined_config(device_id, session)
+                    service = ESPService(esp_repo, self.publisher)
+                    await service.send_config(
+                        device_id,
+                        combined_config,
+                        reason_code=f"coalesced:{reason_code}",
+                        forced_correlation_id=reserved_correlation_id,
+                    )
+            except Exception as exc:
+                logger.error(
+                    "config_push_coalesced_failed esp_id=%s reason=%s error=%s",
+                    device_id,
+                    reason_code,
+                    exc,
+                    exc_info=True,
+                )
+            finally:
+                current = _pending_config_pushes.get(device_id)
+                if current is asyncio.current_task():
+                    _pending_config_pushes.pop(device_id, None)
+                    _pending_config_push_handles.pop(device_id, None)
+
+        task = asyncio.create_task(_delayed_push())
+        _pending_config_pushes[device_id] = task
+        logger.warning(
+            "config_push_scheduled esp_id=%s reason=%s delay=%.1fs",
+            device_id,
+            reason_code,
+            CONFIG_PUSH_COALESCE_SECONDS,
+        )
+        return {
+            "scheduled": True,
+            "merged": False,
+            "correlation_id": reserved_correlation_id,
+            "request_id": reserved_correlation_id,
+        }
 
     # =========================================================================
     # Device Registration
@@ -492,6 +580,7 @@ class ESPService:
         reason_code: str = "manual_config_sync",
         generation: Optional[int] = None,
         config_fingerprint: Optional[str] = None,
+        forced_correlation_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Send configuration update to ESP via MQTT.
@@ -517,7 +606,11 @@ class ESPService:
         """
         from ..core.error_codes import ConfigErrorCode, ESP32ApplicationError, MQTTErrorCode
 
-        correlation_id = str(uuid.uuid4())
+        correlation_id = (
+            forced_correlation_id.strip()
+            if isinstance(forced_correlation_id, str) and forced_correlation_id.strip()
+            else str(uuid.uuid4())
+        )
         resolved_generation = (
             int(generation)
             if generation is not None and int(generation) > 0
@@ -531,6 +624,7 @@ class ESPService:
             "message": "",
             "error_code": None,
             "correlation_id": correlation_id,
+            "request_id": correlation_id,
             "reason_code": reason_code,
             "generation": resolved_generation,
         }

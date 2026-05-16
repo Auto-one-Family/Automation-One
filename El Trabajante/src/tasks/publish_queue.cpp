@@ -15,6 +15,35 @@ static std::atomic<uint32_t> g_pq_drop_count{0};   // Dropped because queue comp
 static std::atomic<uint8_t>  g_pq_high_watermark{0};
 static std::atomic<bool>     g_pq_paused_for_announce_ack{false};
 static std::atomic<uint32_t> g_pq_resume_guard_deadline_ms{0};
+static std::atomic<uint32_t> g_pq_observability_shed_count{0};
+
+static bool isRealtimeResponseTopic(const char* topic) {
+    if (topic == nullptr) {
+        return false;
+    }
+    return (strstr(topic, "/actuator/") != nullptr && strstr(topic, "/response") != nullptr) ||
+           (strstr(topic, "/sensor/") != nullptr && strstr(topic, "/response") != nullptr) ||
+           strstr(topic, "/config_response") != nullptr ||
+           strstr(topic, "/zone/ack") != nullptr ||
+           strstr(topic, "/subzone/ack") != nullptr ||
+           strstr(topic, "/system/command/response") != nullptr;
+}
+
+// Intent outcome messages are replayable from NVS and can be delayed briefly.
+// Realtime response lanes must not be dropped when queue is saturated.
+static bool isReplayableCriticalTopic(const char* topic) {
+    return topic != nullptr && strstr(topic, "/system/intent_outcome") != nullptr;
+}
+
+// Topics that are useful for diagnostics but must never saturate
+// the only publish lane under pressure.
+static bool isObservabilityOnlyTopic(const char* topic) {
+    if (topic == nullptr) {
+        return false;
+    }
+    return strstr(topic, "/system/queue_pressure") != nullptr ||
+           strstr(topic, "/system/diagnostics") != nullptr;
+}
 
 // Reserve one queue slot for critical publishes by evicting one queued
 // non-critical message. Keeps terminal acknowledgements deliverable under load.
@@ -29,6 +58,7 @@ static bool reserveSlotForCriticalPublish(PublishRequest* critical_req) {
     }
 
     bool evicted_non_critical = false;
+    const bool incoming_realtime = isRealtimeResponseTopic(critical_req->topic);
     PublishRequest item;
 
     for (UBaseType_t i = 0; i < queued; ++i) {
@@ -36,11 +66,31 @@ static bool reserveSlotForCriticalPublish(PublishRequest* critical_req) {
             break;
         }
 
-        if (!evicted_non_critical && !item.critical) {
+        const bool queued_realtime = isRealtimeResponseTopic(item.topic);
+        const bool preempt_replayable_critical =
+            incoming_realtime && !queued_realtime && isReplayableCriticalTopic(item.topic);
+        // Under command bursts, many actuator responses target the same topic.
+        // Keep the freshest response by replacing older same-topic realtime entries.
+        const bool preempt_same_realtime_topic =
+            incoming_realtime && queued_realtime &&
+            strncmp(item.topic, critical_req->topic, sizeof(item.topic)) == 0;
+        if (!evicted_non_critical &&
+            (!item.critical || preempt_replayable_critical || preempt_same_realtime_topic)) {
             evicted_non_critical = true;
-            g_pq_shed_count.fetch_add(1);
-            LOG_W(PQ_TAG, "[SYNC] Evicted non-critical publish to protect critical lane: " +
-                          String(item.topic));
+            if (item.critical) {
+                g_pq_drop_count.fetch_add(1);
+                if (preempt_same_realtime_topic) {
+                    LOG_W(PQ_TAG, "[SYNC] Replaced stale realtime publish with newer payload: " +
+                                  String(item.topic));
+                } else {
+                    LOG_W(PQ_TAG, "[SYNC] Preempted replayable critical publish for realtime lane: " +
+                                  String(item.topic));
+                }
+            } else {
+                g_pq_shed_count.fetch_add(1);
+                LOG_W(PQ_TAG, "[SYNC] Evicted non-critical publish to protect critical lane: " +
+                              String(item.topic));
+            }
             continue;
         }
 
@@ -181,6 +231,24 @@ PublishQueueEnqueueResult tryQueuePublish(const char* topic,
     uint8_t fill = static_cast<uint8_t>(uxQueueMessagesWaiting(g_publish_queue));
     updateHighWatermark(fill);
 
+    const uint8_t observability_shed_watermark =
+        static_cast<uint8_t>((PUBLISH_QUEUE_SIZE * 80U) / 100U);
+    if (fill >= observability_shed_watermark && isObservabilityOnlyTopic(topic)) {
+        g_pq_observability_shed_count.fetch_add(1);
+        g_pq_shed_count.fetch_add(1);
+        static unsigned long s_last_observability_shed_log_ms = 0UL;
+        const unsigned long now_ms = millis();
+        if (s_last_observability_shed_log_ms == 0UL ||
+            (now_ms - s_last_observability_shed_log_ms) >= 2000UL) {
+            s_last_observability_shed_log_ms = now_ms;
+            LOG_W(PQ_TAG, String("[PQ] shed observability payload reason=queue_pressure ") +
+                          "fill=" + String(fill) +
+                          " shed_obs_total=" + String(g_pq_observability_shed_count.load()) +
+                          " topic=" + String(topic));
+        }
+        return PublishQueueEnqueueResult::ShedBackpressure;
+    }
+
     if (!critical && fill >= PUBLISH_QUEUE_SHED_WATERMARK) {
         g_pq_shed_count.fetch_add(1);
         LOG_D(PQ_TAG, "[SYNC] Backpressure shed (fill=" + String(fill) +
@@ -224,13 +292,28 @@ PublishQueueEnqueueResult tryQueuePublish(const char* topic,
             LOG_W(PQ_TAG, "[SYNC] queue-full on /system/error — suppressing recursive ErrorTracker MQTT publish");
         }
         if (critical) {
+            const bool is_realtime_response_topic = isRealtimeResponseTopic(req.topic);
             if (!in_safety_context && !is_intent_outcome_topic && !is_system_error_topic) {
-                publishIntentOutcome("publish",
-                                     req.metadata,
-                                     "failed",
-                                     "QUEUE_FULL",
-                                     "Critical publish queue full",
-                                     true);
+                // Avoid recursive outbox pressure when realtime responses are dropped
+                // during short queue-full spikes. These topics are high-frequency and
+                // can otherwise amplify lock contention in replay/outbox paths.
+                if (!is_realtime_response_topic) {
+                    publishIntentOutcome("publish",
+                                         req.metadata,
+                                         "failed",
+                                         "QUEUE_FULL",
+                                         "Critical publish queue full",
+                                         true);
+                } else if (!in_safety_context) {
+                    static unsigned long s_last_realtime_drop_log_ms = 0UL;
+                    const unsigned long now_ms = millis();
+                    if (s_last_realtime_drop_log_ms == 0UL ||
+                        (now_ms - s_last_realtime_drop_log_ms) >= 2000UL) {
+                        s_last_realtime_drop_log_ms = now_ms;
+                        LOG_W(PQ_TAG, String("[PQ] queue-full realtime drop suppressed outcome topic=") +
+                                      String(req.topic));
+                    }
+                }
             } else if (!in_safety_context) {
                 LOG_W(PQ_TAG,
                       "[SYNC] recursive-critical queue-full drop — skipping recursive failure outcome");

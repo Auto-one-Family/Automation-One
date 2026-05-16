@@ -379,10 +379,10 @@ void ErrorTracker::publishErrorToMqtt(uint16_t error_code, ErrorSeverity severit
   mqtt_publish_in_progress_ = true;
 
   // ✅ Phase 0 Fix: Use TopicBuilder for consistent topic generation
-  const char* topic = TopicBuilder::buildSystemErrorTopic();
+  String topic = String(TopicBuilder::buildSystemErrorTopic());
 
   // ✅ Defensive: Skip publish if topic generation failed (buffer overflow/encoding error)
-  if (topic == nullptr || topic[0] == '\0') {
+  if (topic.length() == 0) {
     mqtt_publish_in_progress_ = false;
     return;
   }
@@ -419,7 +419,7 @@ void ErrorTracker::publishErrorToMqtt(uint16_t error_code, ErrorSeverity severit
   payload += "}";
 
   // Fire-and-forget publish (no error handling - prevent recursion!)
-  mqtt_callback_(topic, payload.c_str());
+  mqtt_callback_(topic.c_str(), payload.c_str());
 
   // Clear recursion guard
   mqtt_publish_in_progress_ = false;

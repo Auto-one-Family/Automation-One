@@ -194,6 +194,8 @@ def _schema_to_model_fields(
     fields = {}
     if request.actuator_type is not None:
         fields["actuator_type"] = request.actuator_type
+    if request.hardware_type is not None:
+        fields["hardware_type"] = request.hardware_type
     if request.name is not None or existing is None:
         # fallback to empty string to satisfy NOT NULL on create
         fields["actuator_name"] = request.name or ""
@@ -657,18 +659,13 @@ async def create_or_update_actuator(
         combined_config = await config_builder.build_combined_config(esp_id, db)
 
         esp_service: ESPService = get_esp_service(db)
-        config_sent = await esp_service.send_config(
+        schedule_result = await esp_service.trigger_config_push_debounced(
             esp_id,
-            combined_config,
             reason_code="actuator_config_change",
         )
-        config_correlation_id = config_sent.get("correlation_id")
-        config_request_id = config_sent.get("request_id") or config_correlation_id
-
-        if config_sent.get("success"):
-            logger.info(f"Config published to ESP {esp_id} after actuator create/update")
-        else:
-            logger.warning(f"Config publish failed for ESP {esp_id} (DB save was successful)")
+        config_correlation_id = schedule_result.get("correlation_id")
+        config_request_id = schedule_result.get("request_id") or config_correlation_id
+        logger.info("Config push coalesced for ESP %s after actuator create/update", esp_id)
     except Exception as e:
         # Log error but don't fail the request (DB save was successful)
         logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
@@ -1372,16 +1369,11 @@ async def delete_actuator(
         combined_config = await config_builder.build_combined_config(esp_id, db)
 
         esp_service: ESPService = get_esp_service(db)
-        config_sent = await esp_service.send_config(
+        await esp_service.trigger_config_push_debounced(
             esp_id,
-            combined_config,
             reason_code="actuator_config_change",
         )
-
-        if config_sent.get("success"):
-            logger.info(f"Config published to ESP {esp_id} after actuator delete")
-        else:
-            logger.warning(f"Config publish failed for ESP {esp_id} (DB delete was successful)")
+        logger.info("Config push coalesced for ESP %s after actuator delete", esp_id)
     except Exception as e:
         # Log error but don't fail the request (DB delete was successful)
         logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)

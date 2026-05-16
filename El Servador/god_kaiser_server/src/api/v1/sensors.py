@@ -826,12 +826,12 @@ async def create_or_update_sensor(
             config_builder: ConfigPayloadBuilder = get_config_builder(db)
             combined_config = await config_builder.build_combined_config(esp_id, db)
             esp_service: ESPService = get_esp_service(db)
-            config_sent = await esp_service.send_config(esp_id, combined_config)
-            mqtt_correlation_id = config_sent.get("correlation_id")
-            if config_sent.get("success"):
-                logger.info(f"Config published to ESP {esp_id} after multi-value sensor create")
-            else:
-                logger.warning(f"Config publish failed for ESP {esp_id} (DB save was successful)")
+            schedule_result = await esp_service.trigger_config_push_debounced(
+                esp_id,
+                reason_code="sensor_config_change",
+            )
+            mqtt_correlation_id = schedule_result.get("correlation_id")
+            logger.info("Config push coalesced for ESP %s after multi-value sensor create", esp_id)
         except Exception as e:
             # Log error but don't fail the request (DB save was successful)
             logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
@@ -1162,13 +1162,12 @@ async def create_or_update_sensor(
         combined_config = await config_builder.build_combined_config(esp_id, db)
 
         esp_service: ESPService = get_esp_service(db)
-        config_sent = await esp_service.send_config(esp_id, combined_config)
-        mqtt_correlation_id = config_sent.get("correlation_id")
-
-        if config_sent.get("success"):
-            logger.info(f"Config published to ESP {esp_id} after sensor create/update")
-        else:
-            logger.warning(f"Config publish failed for ESP {esp_id} (DB save was successful)")
+        schedule_result = await esp_service.trigger_config_push_debounced(
+            esp_id,
+            reason_code="sensor_config_change",
+        )
+        mqtt_correlation_id = schedule_result.get("correlation_id")
+        logger.info("Config push coalesced for ESP %s after sensor create/update", esp_id)
     except Exception as e:
         # Log error but don't fail the request (DB save was successful)
         logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
@@ -1315,13 +1314,12 @@ async def delete_sensor(
         combined_config = await config_builder.build_combined_config(esp_id, db)
 
         esp_service: ESPService = get_esp_service(db)
-        config_sent = await esp_service.send_config(esp_id, combined_config)
-        mqtt_correlation_id = config_sent.get("correlation_id")
-
-        if config_sent.get("success"):
-            logger.info(f"Config published to ESP {esp_id} after sensor delete")
-        else:
-            logger.warning(f"Config publish failed for ESP {esp_id} (DB delete was successful)")
+        schedule_result = await esp_service.trigger_config_push_debounced(
+            esp_id,
+            reason_code="sensor_config_change",
+        )
+        mqtt_correlation_id = schedule_result.get("correlation_id")
+        logger.info("Config push coalesced for ESP %s after sensor delete", esp_id)
     except Exception as e:
         logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
 

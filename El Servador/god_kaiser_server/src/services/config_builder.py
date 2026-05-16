@@ -310,6 +310,14 @@ class ConfigPayloadBuilder:
         """
         payload = self.mapping_engine.apply_actuator_mapping(actuator)
 
+        # Preserve ESP-side hardware driver tokens when available.
+        # API normalization stores actuator_type as server mode (e.g. "digital"),
+        # while ESP firmware expects hardware tokens such as "relay"/"pump"/"valve".
+        hardware_type = str(getattr(actuator, "hardware_type", "") or "").strip().lower()
+        payload_type = str(payload.get("actuator_type", "") or "").strip().lower()
+        if payload_type == "digital" and hardware_type in {"relay", "pump", "valve", "pwm"}:
+            payload["actuator_type"] = hardware_type
+
         # AUT-120: Add fail_safe_on_disconnect only when the server has an
         # explicit opinion. None → field omitted → ESP32 default applies.
         fail_safe = getattr(actuator, "fail_safe_on_disconnect", None)
