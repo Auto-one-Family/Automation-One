@@ -450,8 +450,13 @@ class HeartbeatHandler:
                 is_reconnect = False
                 offline_seconds = 0.0
                 if isinstance(esp_device.last_seen, datetime):
+                    last_seen_for_reconnect = esp_device.last_seen
+                    if last_seen_for_reconnect.tzinfo is None:
+                        last_seen_for_reconnect = last_seen_for_reconnect.replace(
+                            tzinfo=timezone.utc
+                        )
                     offline_seconds = (
-                        datetime.now(timezone.utc) - esp_device.last_seen
+                        datetime.now(timezone.utc) - last_seen_for_reconnect
                     ).total_seconds()
                     is_reconnect = offline_seconds > RECONNECT_THRESHOLD_SECONDS
                 handover_epoch, session_id = self._build_ack_contract_context(
@@ -567,18 +572,50 @@ class HeartbeatHandler:
                     except Exception as audit_error:
                         logger.warning(f"Failed to audit log device_online: {audit_error}")
 
-                # Step 5: Update device status and last_seen (for online/approved devices)
-                # BUG-06 fix: ts<=0 (Wokwi without NTP) → use server timestamp
-                ts_raw = payload["ts"]
-                if ts_raw is None or ts_raw <= 0:
-                    last_seen = datetime.now(timezone.utc)
-                else:
+                # Step 5: Update device status + last_seen.
+                # Keep server receive time authoritative for timeout freshness.
+                # Payload ts is still parsed for diagnostics but does not drive DB
+                # liveness anymore (prevents stale-ts reconnect flaps).
+                server_received_at = datetime.now(timezone.utc)
+                ts_raw = payload.get("ts")
+                time_valid = payload.get("time_valid", True)  # Default True for old firmware
+
+                payload_seen: Optional[datetime] = None
+                if ts_raw is not None and ts_raw > 0 and time_valid:
                     ts_value = ts_raw / 1000 if ts_raw > 1e10 else ts_raw
-                    last_seen = datetime.fromtimestamp(ts_value, tz=timezone.utc)
+                    payload_seen = datetime.fromtimestamp(ts_value, tz=timezone.utc)
+
+                # Server-authoritative liveness: active heartbeat must never write a
+                # stale payload ts that can immediately re-trigger timeout offline.
+                last_seen = server_received_at
+                existing_seen = esp_device.last_seen
+                if existing_seen and existing_seen.tzinfo is None:
+                    existing_seen = existing_seen.replace(tzinfo=timezone.utc)
+                if existing_seen and last_seen < existing_seen:
+                    logger.info(
+                        "Ignoring regressive server heartbeat timestamp for %s: existing=%s incoming_server=%s",
+                        esp_id_str,
+                        existing_seen.isoformat(),
+                        last_seen.isoformat(),
+                    )
+                    last_seen = existing_seen
+
+                if payload_seen:
+                    payload_drift_seconds = abs(
+                        (server_received_at - payload_seen).total_seconds()
+                    )
+                    if payload_drift_seconds > HEARTBEAT_TIMEOUT_SECONDS:
+                        logger.warning(
+                            "Heartbeat payload timestamp drift too large for %s: payload=%s server=%s drift_s=%.1f (using server last_seen)",
+                            esp_id_str,
+                            payload_seen.isoformat(),
+                            server_received_at.isoformat(),
+                            payload_drift_seconds,
+                        )
+
                 await esp_repo.update_status(esp_id_str, "online", last_seen)
 
                 # Log time_valid status — info only, no error (expected during boot)
-                time_valid = payload.get("time_valid", True)  # Default True for old firmware
                 if not time_valid:
                     logger.info(
                         "ESP %s: time not synchronized (time_valid=false, using server timestamp)",

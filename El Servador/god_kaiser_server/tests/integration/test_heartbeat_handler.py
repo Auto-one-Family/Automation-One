@@ -728,7 +728,7 @@ class TestTimeoutDetection:
 
             with patch("src.mqtt.handlers.heartbeat_handler.ESPRepository") as mock_repo_class:
                 mock_repo = MagicMock()
-                mock_repo.get_online_devices = AsyncMock(return_value=[])
+                mock_repo.get_by_status = AsyncMock(return_value=[])
                 mock_repo_class.return_value = mock_repo
 
                 result = await handler.check_device_timeouts()
@@ -861,6 +861,59 @@ class TestOnlineDeviceHeartbeat:
 
                                         assert result is True
                                         mock_repo.update_status.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_stale_payload_ts_uses_server_last_seen(self, handler, valid_payload):
+        """Stale payload ts with time_valid=true must not write stale last_seen."""
+        topic = "kaiser/god/esp/ESP_ONLINE/system/heartbeat"
+        stale_epoch = int(datetime(2020, 1, 1, tzinfo=timezone.utc).timestamp())
+        payload = {**valid_payload, "ts": stale_epoch, "time_valid": True}
+
+        with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
+            mock_db = MagicMock()
+            mock_db.commit = AsyncMock()
+            mock_db.flush = AsyncMock()
+            mock_db.rollback = AsyncMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            with patch("src.mqtt.handlers.heartbeat_handler.ESPRepository") as mock_repo_class:
+                mock_device = MagicMock()
+                mock_device.device_id = "ESP_ONLINE"
+                mock_device.status = "online"
+                mock_device.device_metadata = {}
+                mock_device.last_seen = datetime.now(timezone.utc)
+                mock_device.id = 1
+
+                mock_repo = MagicMock()
+                mock_repo.get_by_device_id = AsyncMock(return_value=mock_device)
+                mock_repo.update_status = AsyncMock()
+                mock_repo_class.return_value = mock_repo
+
+                with patch("src.mqtt.handlers.heartbeat_handler.ESPHeartbeatRepository"):
+                    with patch.object(handler, "_update_esp_metadata", new_callable=AsyncMock):
+                        with patch.object(handler, "_log_health_metrics"):
+                            with patch.object(
+                                handler, "_send_heartbeat_ack", new_callable=AsyncMock
+                            ):
+                                with patch.object(
+                                    handler, "_has_pending_config", new_callable=AsyncMock
+                                ) as mock_config:
+                                    mock_config.return_value = False
+                                    with patch("src.websocket.manager.WebSocketManager") as mock_ws:
+                                        mock_ws.get_instance = AsyncMock(return_value=AsyncMock())
+
+                                        before_call = datetime.now(timezone.utc)
+                                        result = await handler.handle_heartbeat(topic, payload)
+                                        after_call = datetime.now(timezone.utc)
+
+                                        assert result is True
+                                        mock_repo.update_status.assert_called_once()
+                                        args = mock_repo.update_status.call_args.args
+                                        assert args[0] == "ESP_ONLINE"
+                                        assert args[1] == "online"
+                                        assert isinstance(args[2], datetime)
+                                        assert before_call <= args[2] <= after_call
 
 
 class TestZoneMismatchDetection:
