@@ -17,6 +17,7 @@ import pytest_asyncio
 import time
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from typing import AsyncGenerator
 
@@ -1183,6 +1184,196 @@ class TestHeartbeatHandlerProcessing:
         device = await esp_repo.get_by_device_id("ESP_UNKNOWN1")
         assert device is not None
         assert device.status == "pending_approval"
+
+    @pytest.mark.asyncio
+    async def test_lwt_then_first_heartbeat_recovers_online_and_preserves_last_seen_policy(
+        self,
+        test_session: AsyncSession,
+        sample_esp_device: ESPDevice,
+    ):
+        """LWT offline must preserve heartbeat ts; first valid heartbeat recovers online."""
+        from src.mqtt.handlers.heartbeat_handler import HeartbeatHandler
+        from src.mqtt.handlers.lwt_handler import LWTHandler
+
+        esp_repo = ESPRepository(test_session)
+        previous_heartbeat_ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        await esp_repo.update_status(
+            sample_esp_device.device_id,
+            "online",
+            last_seen=previous_heartbeat_ts,
+        )
+
+        @asynccontextmanager
+        async def mock_resilient_session():
+            yield test_session
+
+        mock_mqtt = MagicMock()
+        mock_mqtt.publish = MagicMock(return_value=True)
+        mock_ws = AsyncMock()
+        mock_contract_repo = MagicMock()
+        mock_contract_repo.upsert_terminal_event_authority = AsyncMock(
+            return_value=(MagicMock(), False)
+        )
+        mock_adoption_service = MagicMock()
+        mock_adoption_service.clear_cycle = AsyncMock()
+
+        with patch("src.mqtt.handlers.lwt_handler.resilient_session", mock_resilient_session):
+            with patch("src.mqtt.handlers.heartbeat_handler.resilient_session", mock_resilient_session):
+                with patch("src.mqtt.client.MQTTClient.get_instance", return_value=mock_mqtt):
+                    with patch(
+                        "src.websocket.manager.WebSocketManager.get_instance",
+                        new=AsyncMock(return_value=mock_ws),
+                    ):
+                        with patch(
+                            "src.mqtt.handlers.lwt_handler.CommandContractRepository",
+                            return_value=mock_contract_repo,
+                        ):
+                            with patch(
+                                "src.mqtt.handlers.lwt_handler.AuditLogRepository"
+                            ) as mock_lwt_audit:
+                                with patch(
+                                    "src.mqtt.handlers.heartbeat_handler.AuditLogRepository"
+                                ) as mock_hb_audit:
+                                    with patch(
+                                        "src.mqtt.handlers.lwt_handler.get_state_adoption_service",
+                                        return_value=mock_adoption_service,
+                                    ):
+                                        mock_lwt_audit.return_value.log_device_event = AsyncMock()
+                                        mock_hb_audit.return_value.log_device_event = AsyncMock()
+
+                                        lwt_handler = LWTHandler()
+                                        heartbeat_handler = HeartbeatHandler()
+                                        lwt_topic = (
+                                            f"kaiser/god/esp/{sample_esp_device.device_id}/system/will"
+                                        )
+                                        lwt_payload = {
+                                            "status": "offline",
+                                            "reason": "unexpected_disconnect",
+                                            "timestamp": int(time.time()),
+                                        }
+                                        lwt_result = await lwt_handler.handle_lwt(
+                                            lwt_topic, lwt_payload
+                                        )
+                                        assert lwt_result is True
+
+                                        after_lwt = await esp_repo.get_by_device_id(
+                                            sample_esp_device.device_id
+                                        )
+                                        assert after_lwt is not None
+                                        assert after_lwt.status == "offline"
+                                        assert after_lwt.last_seen is not None
+                                        assert int(after_lwt.last_seen.timestamp()) == int(
+                                            previous_heartbeat_ts.timestamp()
+                                        )
+
+                                        heartbeat_ts = int(time.time())
+                                        heartbeat_topic = (
+                                            f"kaiser/god/esp/{sample_esp_device.device_id}/heartbeat"
+                                        )
+                                        heartbeat_payload = {
+                                            "ts": heartbeat_ts,
+                                            "uptime": 12,
+                                            "free_heap": 210000,
+                                            "wifi_rssi": -61,
+                                        }
+                                        hb_result = await heartbeat_handler.handle_heartbeat(
+                                            heartbeat_topic, heartbeat_payload
+                                        )
+                                        assert hb_result is True
+                                        timeout_result = (
+                                            await heartbeat_handler.check_device_timeouts()
+                                        )
+                                        assert timeout_result["timed_out"] == 0
+
+        after_heartbeat = await esp_repo.get_by_device_id(sample_esp_device.device_id)
+        assert after_heartbeat is not None
+        assert after_heartbeat.status == "online"
+        hb_seen_ts = int(after_heartbeat.last_seen.timestamp())
+        assert hb_seen_ts >= heartbeat_ts
+        assert hb_seen_ts <= heartbeat_ts + 30
+
+    @pytest.mark.asyncio
+    async def test_stale_time_valid_payload_does_not_trigger_immediate_timeout(
+        self,
+        test_session: AsyncSession,
+        sample_esp_device: ESPDevice,
+    ):
+        """Heartbeat with stale ts/time_valid=true must still keep device online."""
+        from src.mqtt.handlers.heartbeat_handler import HeartbeatHandler
+
+        handler = HeartbeatHandler()
+        esp_repo = ESPRepository(test_session)
+        topic = f"kaiser/god/esp/{sample_esp_device.device_id}/heartbeat"
+        stale_payload = {
+            "ts": int(datetime(2020, 1, 1, tzinfo=timezone.utc).timestamp()),
+            "time_valid": True,
+            "uptime": 123,
+            "free_heap": 220000,
+            "wifi_rssi": -58,
+        }
+
+        @asynccontextmanager
+        async def mock_resilient_session():
+            yield test_session
+
+        mock_mqtt = MagicMock()
+        mock_mqtt.publish = MagicMock(return_value=True)
+        with patch("src.mqtt.handlers.heartbeat_handler.resilient_session", mock_resilient_session):
+            with patch("src.mqtt.client.MQTTClient.get_instance", return_value=mock_mqtt):
+                before_hb = datetime.now(timezone.utc)
+                result = await handler.handle_heartbeat(topic, stale_payload)
+                timeout_result = await handler.check_device_timeouts()
+
+        assert result is True
+        assert timeout_result["timed_out"] == 0
+        device = await esp_repo.get_by_device_id(sample_esp_device.device_id)
+        assert device is not None
+        assert device.status == "online"
+        assert device.last_seen is not None
+        assert int(device.last_seen.timestamp()) >= int(before_hb.timestamp())
+
+    @pytest.mark.asyncio
+    async def test_long_offline_then_heartbeat_recovers_online_stably(
+        self,
+        test_session: AsyncSession,
+        sample_esp_device: ESPDevice,
+    ):
+        """Long offline phase followed by heartbeat must recover to stable online."""
+        from src.mqtt.handlers.heartbeat_handler import HeartbeatHandler
+
+        handler = HeartbeatHandler()
+        esp_repo = ESPRepository(test_session)
+        await esp_repo.update_status(
+            sample_esp_device.device_id,
+            "offline",
+            last_seen=datetime.now(timezone.utc) - timedelta(hours=1),
+        )
+
+        topic = f"kaiser/god/esp/{sample_esp_device.device_id}/heartbeat"
+        payload = {
+            "ts": int(time.time()),
+            "time_valid": True,
+            "uptime": 88,
+            "free_heap": 210000,
+            "wifi_rssi": -62,
+        }
+
+        @asynccontextmanager
+        async def mock_resilient_session():
+            yield test_session
+
+        mock_mqtt = MagicMock()
+        mock_mqtt.publish = MagicMock(return_value=True)
+        with patch("src.mqtt.handlers.heartbeat_handler.resilient_session", mock_resilient_session):
+            with patch("src.mqtt.client.MQTTClient.get_instance", return_value=mock_mqtt):
+                result = await handler.handle_heartbeat(topic, payload)
+                timeout_result = await handler.check_device_timeouts()
+
+        assert result is True
+        assert timeout_result["timed_out"] == 0
+        recovered = await esp_repo.get_by_device_id(sample_esp_device.device_id)
+        assert recovered is not None
+        assert recovered.status == "online"
 
 
 # =============================================================================
