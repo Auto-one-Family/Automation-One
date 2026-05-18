@@ -1,4 +1,5 @@
 #include "wifi_manager.h"
+#include "mqtt_client.h"
 #include "../../models/error_codes.h"
 #include "../../utils/time_manager.h"
 #include "../../utils/watchdog_storage.h"
@@ -90,6 +91,23 @@ bool WiFiManager::connect(const WiFiConfig& config) {
 }
 
 bool WiFiManager::connectToNetwork() {
+    // Planned network handover must tear down MQTT first so the broker does not
+    // keep a stale TCP session alive while WiFi switches to a different AP.
+    if (WiFi.status() == WL_CONNECTED) {
+        String current_ssid = WiFi.SSID();
+        if (current_ssid != current_config_.ssid) {
+            LOG_I(TAG, "WiFi handover: " + current_ssid + " -> " + current_config_.ssid);
+        } else {
+            LOG_I(TAG, "WiFi reconnect requested on current SSID: " + current_ssid);
+        }
+        if (mqttClient.isConnected()) {
+            mqttClient.disconnect();
+            LOG_I(TAG, "MQTT disconnected before WiFi handover");
+        }
+        WiFi.disconnect(true);
+        delay(100);
+    }
+
     LOG_I(TAG, "Connecting to WiFi: " + current_config_.ssid);
 
     WiFi.begin(current_config_.ssid.c_str(),
@@ -196,6 +214,10 @@ String WiFiManager::getWiFiStatusMessage(wl_status_t status) {
 }
 
 bool WiFiManager::disconnect() {
+    if (mqttClient.isConnected()) {
+        mqttClient.disconnect();
+        LOG_I(TAG, "MQTT disconnected before WiFi disconnect");
+    }
     if (WiFi.status() == WL_CONNECTED) {
         WiFi.disconnect(true);
         LOG_I(TAG, "WiFi disconnected");

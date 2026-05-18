@@ -535,7 +535,9 @@ class HeartbeatHandler:
                     # heartbeat history (previously only the online path did this).
                     self._clear_retained_lwt(esp_id_str)
                     await self._log_heartbeat_entry(
-                        session, esp_device, esp_id_str, payload
+                        esp_device=esp_device,
+                        esp_id_str=esp_id_str,
+                        payload=payload,
                     )
 
                     # Phase 2: ACK - ESP knows it's still pending
@@ -631,6 +633,10 @@ class HeartbeatHandler:
 
                 # Step 6: Update metadata with latest heartbeat info
                 await self._update_esp_metadata(esp_device, payload, session, is_reconnect)
+                self._normalize_last_disconnect_metadata_on_online(
+                    esp_device=esp_device,
+                    server_received_at=server_received_at,
+                )
 
                 # Step 7: Log health metrics
                 self._log_health_metrics(esp_id_str, payload)
@@ -675,7 +681,9 @@ class HeartbeatHandler:
                 # INV-1a/Fix3: Savepoint provides atomicity without risking
                 # the main heartbeat transaction on history-log errors.
                 device_source = await self._log_heartbeat_entry(
-                    session, esp_device, esp_id_str, payload
+                    esp_device=esp_device,
+                    esp_id_str=esp_id_str,
+                    payload=payload,
                 )
 
                 source_indicator = (
@@ -750,12 +758,14 @@ class HeartbeatHandler:
                 esp_actuator_count = payload.get(
                     "actuator_count", payload.get("active_actuators", 0)
                 )
+                esp_offline_rule_count = payload.get("offline_rule_count", -1)
                 esp_subzone_count = payload.get("subzone_count", -1)
                 config_push_triggered = await self._has_pending_config(
                     esp_device,
                     session,
                     esp_sensor_count,
                     esp_actuator_count,
+                    esp_offline_rule_count=esp_offline_rule_count,
                     is_reconnect=is_reconnect,
                     offline_seconds=offline_seconds,
                     reconnect_epoch=payload.get("handover_epoch"),
@@ -1829,6 +1839,54 @@ class HeartbeatHandler:
             f"sensors={active_sensors}, actuators={active_actuators}, errors={error_count}"
         )
 
+    def _normalize_last_disconnect_metadata_on_online(
+        self,
+        *,
+        esp_device: ESPDevice,
+        server_received_at: datetime,
+    ) -> None:
+        """
+        Clear stale LWT disconnect metadata after a valid online heartbeat.
+
+        Legacy LWT payloads may persist ``last_disconnect.timestamp=0``.
+        Keeping that marker while the device is online creates an inconsistent
+        state projection. We retain an audit trace in metadata and remove the
+        stale marker from ``last_disconnect``.
+        """
+        metadata = esp_device.device_metadata
+        if not isinstance(metadata, dict):
+            return
+
+        last_disconnect = metadata.get("last_disconnect")
+        if not isinstance(last_disconnect, dict):
+            return
+
+        source = str(last_disconnect.get("source", "")).strip().lower()
+        raw_timestamp = last_disconnect.get("timestamp")
+        normalized_timestamp: Optional[int] = None
+        try:
+            parsed_timestamp = int(raw_timestamp)
+            if parsed_timestamp > 0:
+                normalized_timestamp = parsed_timestamp
+        except (TypeError, ValueError):
+            normalized_timestamp = None
+
+        # Preserve valid disconnect records and non-LWT markers.
+        if source != "lwt" or normalized_timestamp is not None:
+            return
+
+        metadata["last_disconnect_stale_cleared_at"] = int(server_received_at.timestamp())
+        metadata["last_disconnect_stale_cleared_reason"] = "online_recovery_after_invalid_lwt"
+        metadata.pop("last_disconnect", None)
+        esp_device.device_metadata = metadata
+        flag_modified(esp_device, "device_metadata")
+        logger.info(
+            "Cleared stale last_disconnect metadata after online recovery: esp_id=%s source=%s timestamp=%s",
+            esp_device.device_id,
+            source or "unknown",
+            raw_timestamp,
+        )
+
     def _clear_retained_lwt(self, esp_id: str) -> None:
         """
         Publish empty retained message on the ESP LWT topic to clear stale offline.
@@ -1852,30 +1910,31 @@ class HeartbeatHandler:
 
     async def _log_heartbeat_entry(
         self,
-        session: AsyncSession,
         esp_device: ESPDevice,
         esp_id_str: str,
         payload: dict,
     ) -> str:
         """
-        Append one row to esp_heartbeat_logs in a nested transaction.
+        Append one row to esp_heartbeat_logs in an isolated transaction.
 
         Shared by the online heartbeat path and pending_approval (AUT-339).
+        Uses a dedicated session to keep history logging non-blocking for the
+        caller's main heartbeat transaction.
 
         Returns:
             Resolved data_source (for downstream debug formatting).
         """
         device_source = self._detect_device_source(esp_device, payload)
         try:
-            nested = await session.begin_nested()
-            heartbeat_repo = ESPHeartbeatRepository(session)
-            await heartbeat_repo.log_heartbeat(
-                esp_uuid=esp_device.id,
-                device_id=esp_id_str,
-                payload=payload,
-                data_source=device_source,
-            )
-            await nested.commit()
+            async with resilient_session() as heartbeat_session:
+                heartbeat_repo = ESPHeartbeatRepository(heartbeat_session)
+                await heartbeat_repo.log_heartbeat(
+                    esp_uuid=esp_device.id,
+                    device_id=esp_id_str,
+                    payload=payload,
+                    data_source=device_source,
+                )
+                await heartbeat_session.commit()
         except Exception as hb_log_error:
             logger.warning(
                 "Failed to log heartbeat history for %s: %s",
@@ -2100,6 +2159,7 @@ class HeartbeatHandler:
         session,
         esp_sensor_count: int = 0,
         esp_actuator_count: int = 0,
+        esp_offline_rule_count: int = -1,
         esp_subzone_count: int = -1,
         is_reconnect: bool = False,
         offline_seconds: float = 0.0,
@@ -2157,17 +2217,37 @@ class HeartbeatHandler:
                 and db_subzone_count > 0
                 and esp_subzone_count != db_subzone_count
             )
+            db_offline_rule_count = -1
+            needs_offline_rules_push = False
+            try:
+                esp_offline_rule_count = int(esp_offline_rule_count)
+            except (TypeError, ValueError):
+                esp_offline_rule_count = -1
+            # Reconnect regression guard: if offline rules are missing on ESP after reconnect,
+            # trigger the existing config push path to restore them.
+            if esp_offline_rule_count == 0:
+                db_offline_rule_count = await self._expected_offline_rule_count(
+                    esp_device.device_id, session
+                )
+                needs_offline_rules_push = db_offline_rule_count > 0
 
-            if needs_sensor_push or needs_actuator_push or needs_subzone_push:
+            if (
+                needs_sensor_push
+                or needs_actuator_push
+                or needs_subzone_push
+                or needs_offline_rules_push
+            ):
                 if esp_device.device_id in self._config_push_pending_esps:
                     logger.debug(
-                        "Config push for %s skipped (already pending). ESP sensors=%d/actuators=%d, "
-                        "DB sensors=%d/actuators=%d",
+                        "Config push for %s skipped (already pending). ESP sensors=%d/actuators=%d/"
+                        "offline_rules=%d, DB sensors=%d/actuators=%d/offline_rules=%d",
                         esp_device.device_id,
                         esp_sensor_count,
                         esp_actuator_count,
+                        esp_offline_rule_count,
                         db_sensor_count,
                         db_actuator_count,
+                        db_offline_rule_count if db_offline_rule_count >= 0 else -1,
                     )
                     return False
 
@@ -2200,24 +2280,34 @@ class HeartbeatHandler:
                         )
                     else:
                         bypass_cooldown_for_reconnect = last_push is None
-                reason_code = (
-                    "reconnect_count_mismatch"
-                    if bypass_cooldown_for_reconnect
-                    else "heartbeat_count_mismatch"
-                )
+                if needs_offline_rules_push:
+                    reason_code = (
+                        "reconnect_offline_rules_mismatch"
+                        if bypass_cooldown_for_reconnect
+                        else "heartbeat_offline_rules_mismatch"
+                    )
+                else:
+                    reason_code = (
+                        "reconnect_count_mismatch"
+                        if bypass_cooldown_for_reconnect
+                        else "heartbeat_count_mismatch"
+                    )
 
                 if last_push and not bypass_cooldown_for_reconnect:
                     elapsed = now_ts - last_push
                     if elapsed < CONFIG_PUSH_COOLDOWN_SECONDS:
                         logger.debug(
                             "Config push for %s skipped (cooldown: %ds remaining). "
-                            "ESP: sensors=%d/actuators=%d, DB: sensors=%d/actuators=%d",
+                            "ESP: sensors=%d/actuators=%d/offline_rules=%d, "
+                            "DB: sensors=%d/actuators=%d/offline_rules=%d",
                             esp_device.device_id,
                             int(CONFIG_PUSH_COOLDOWN_SECONDS - elapsed),
                             esp_sensor_count,
                             esp_actuator_count,
+                            esp_offline_rule_count,
                             db_sensor_count,
                             db_actuator_count,
+                            db_offline_rule_count if db_offline_rule_count >= 0 else -1,
                         )
                         return False
                 elif last_push and bypass_cooldown_for_reconnect:
@@ -2225,15 +2315,18 @@ class HeartbeatHandler:
                     logger.info(
                         "Config push cooldown bypass for reconnect %s "
                         "(offline=%.1fs, epoch=%s, elapsed_since_last_push=%ds, "
-                        "ESP: sensors=%d/actuators=%d, DB: sensors=%d/actuators=%d)",
+                        "ESP: sensors=%d/actuators=%d/offline_rules=%d, "
+                        "DB: sensors=%d/actuators=%d/offline_rules=%d)",
                         esp_device.device_id,
                         float(offline_seconds),
                         str(reconnect_epoch_int) if reconnect_epoch_int is not None else "none",
                         int(elapsed),
                         esp_sensor_count,
                         esp_actuator_count,
+                        esp_offline_rule_count,
                         db_sensor_count,
                         db_actuator_count,
+                        db_offline_rule_count if db_offline_rule_count >= 0 else -1,
                     )
 
                 # Cooldown expired or first push — update metadata and trigger
@@ -2244,8 +2337,12 @@ class HeartbeatHandler:
                 metadata["config_push_snapshot"] = {
                     "esp_sensor_count": int(esp_sensor_count),
                     "esp_actuator_count": int(esp_actuator_count),
+                    "esp_offline_rule_count": int(esp_offline_rule_count),
                     "db_sensor_count": int(db_sensor_count),
                     "db_actuator_count": int(db_actuator_count),
+                    "db_offline_rule_count": int(db_offline_rule_count)
+                    if db_offline_rule_count >= 0
+                    else None,
                     "is_reconnect": bool(is_reconnect),
                     "offline_seconds": float(offline_seconds),
                 }
@@ -2254,14 +2351,17 @@ class HeartbeatHandler:
 
                 logger.info(
                     "Config count mismatch detected for %s (reason=%s): "
-                    "ESP sensors=%d/actuators=%d, DB sensors=%d/actuators=%d. "
+                    "ESP sensors=%d/actuators=%d/offline_rules=%d, "
+                    "DB sensors=%d/actuators=%d/offline_rules=%d. "
                     "Triggering auto config push.",
                     esp_device.device_id,
                     reason_code,
                     esp_sensor_count,
                     esp_actuator_count,
+                    esp_offline_rule_count,
                     db_sensor_count,
                     db_actuator_count,
+                    db_offline_rule_count if db_offline_rule_count >= 0 else -1,
                 )
                 # Mark ESP as config-push-pending so reconnect evaluation is gated
                 # until the ESP applies the new config (prevents "No actuator on GPIO X").
@@ -2281,6 +2381,22 @@ class HeartbeatHandler:
         except Exception as e:
             logger.warning(f"Failed to check pending config for {esp_device.device_id}: {e}")
             return False
+
+    async def _expected_offline_rule_count(self, esp_device_id: str, session) -> int:
+        """Return expected offline-rule count for an ESP using existing config builder logic."""
+        try:
+            from ...services.config_builder import ConfigPayloadBuilder
+
+            config_builder = ConfigPayloadBuilder()
+            combined_config = await config_builder.build_combined_config(esp_device_id, session)
+            return len(combined_config.get("offline_rules", []))
+        except Exception as e:
+            logger.warning(
+                "Failed to compute expected offline rule count for %s: %s",
+                esp_device_id,
+                e,
+            )
+            return -1
 
     async def _auto_push_config(self, esp_device_id: str, reason_code: str) -> None:
         """
@@ -2650,8 +2766,13 @@ class HeartbeatHandler:
                             last_disc = (device.device_metadata or {}).get("last_disconnect")
                             if isinstance(last_disc, dict) and last_disc.get("source") == "lwt":
                                 lwt_ts = last_disc.get("timestamp")
-                                if isinstance(lwt_ts, (int, float)) and lwt_ts > 0:
-                                    lwt_age = now.timestamp() - lwt_ts
+                                normalized_lwt_ts: Optional[float] = None
+                                if isinstance(lwt_ts, (int, float)):
+                                    normalized_lwt_ts = float(lwt_ts)
+                                elif isinstance(lwt_ts, str) and lwt_ts.strip().isdigit():
+                                    normalized_lwt_ts = float(int(lwt_ts.strip()))
+                                if normalized_lwt_ts is not None and normalized_lwt_ts > 0:
+                                    lwt_age = now.timestamp() - normalized_lwt_ts
                                     if lwt_age < HEARTBEAT_TIMEOUT_SECONDS:
                                         logger.info(
                                             "Skipping heartbeat timeout for %s — "

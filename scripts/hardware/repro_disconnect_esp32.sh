@@ -38,8 +38,8 @@ KAISER_ID="${KAISER_ID:-god}"
 GPIO="${GPIO:-25}"
 ACTUATOR_GPIOS="${ACTUATOR_GPIOS:-}"
 RUN_PROFILE="${RUN_PROFILE:-default}"
-DEBUG_LOG_PATH="${DEBUG_LOG_PATH:-/home/robin/.cursor/debug-a57651.log}"
-DEBUG_SESSION_ID="${DEBUG_SESSION_ID:-a57651}"
+DEBUG_LOG_PATH="${DEBUG_LOG_PATH:-/home/robin/.cursor/debug-6dd16c.log}"
+DEBUG_SESSION_ID="${DEBUG_SESSION_ID:-6dd16c}"
 FRONTEND_DEVICE_SAVE_CMD="${FRONTEND_DEVICE_SAVE_CMD:-}"
 FRONTEND_API_BASE_URL="${FRONTEND_API_BASE_URL:-http://localhost:8000}"
 FRONTEND_USERNAME="${FRONTEND_USERNAME:-}"
@@ -644,6 +644,13 @@ run_actuator_probe() {
   local max_probe_attempts=3
   local probe_tap_log=""
   local probe_tap_pid=0
+  local probe_mqtt_log=""
+  local probe_mqtt_pid=0
+  local status_topic=""
+  local response_topic=""
+  local mqtt_hit=0
+  local probe_tap_bytes=0
+  local probe_tap_merged=0
 
   if [[ "${PROBE_BEFORE_FLOOD}" != "1" ]]; then
     echo "Probe vor Flood deaktiviert (PROBE_BEFORE_FLOOD=${PROBE_BEFORE_FLOOD})."
@@ -661,6 +668,8 @@ run_actuator_probe() {
 
   for gpio in "${ACTUATOR_GPIO_LIST[@]}"; do
     topic="kaiser/${KAISER_ID}/esp/${ESP_ID}/actuator/${gpio}/command"
+    status_topic="kaiser/${KAISER_ID}/esp/${ESP_ID}/actuator/${gpio}/status"
+    response_topic="kaiser/${KAISER_ID}/esp/${ESP_ID}/actuator/${gpio}/response"
     payload="{\"command\":\"ON\",\"request_id\":\"probe-${RUN_ID}-${gpio}\",\"correlation_id\":\"probe-${RUN_ID}\",\"source\":\"disconnect_repro_probe\",\"target_gpio\":${gpio}}"
 
     probe_output="missing"
@@ -671,10 +680,27 @@ run_actuator_probe() {
       probe_tap_log="$(mktemp)"
       timeout "${timeout_s}"s sh -c "cat \"${SERIAL_PORT}\"" 2>/dev/null | tr -d '\r' > "${probe_tap_log}" &
       probe_tap_pid=$!
+      probe_mqtt_log="$(mktemp)"
+      timeout "${timeout_s}"s docker compose exec -T mqtt-broker sh -lc \
+        "mosquitto_sub -h localhost -p 1883 -v -W ${timeout_s} -C 2 -t '${status_topic}' -t '${response_topic}'" \
+        > "${probe_mqtt_log}" 2>/dev/null &
+      probe_mqtt_pid=$!
       sleep 1
       docker compose exec -T mqtt-broker sh -lc "mosquitto_pub -h localhost -p 1883 -t '${topic}' -q 1 -m '${payload}'" >/dev/null
       wait "${probe_tap_pid}" 2>/dev/null || true
+      wait "${probe_mqtt_pid}" 2>/dev/null || true
 
+      probe_tap_bytes="$(wc -c < "${probe_tap_log}" | tr -d '[:space:]')"
+      if [[ -z "${probe_tap_bytes}" ]]; then
+        probe_tap_bytes=0
+      fi
+      probe_tap_merged=0
+      if (( probe_tap_bytes > 0 )); then
+        awk '{ cmd="date -Iseconds"; cmd | getline ts; close(cmd); print "[" ts "] [PROBE-TAP] " $0; fflush(); }' "${probe_tap_log}" >> "${SERIAL_LOG}"
+        probe_tap_merged=1
+      fi
+
+      probe_rc=0
       probe_output="$(python3 - "${SERIAL_LOG}" "${probe_tap_log}" "${gpio}" <<'PY'
 import re
 import sys
@@ -728,11 +754,33 @@ print("missing")
 sys.exit(4)
 PY
 )" || probe_rc=$?
-      probe_rc="${probe_rc:-0}"
+
+      mqtt_hit="$(python3 - "${probe_mqtt_log}" "${status_topic}" "${response_topic}" <<'PY'
+import sys
+from pathlib import Path
+
+log_path = Path(sys.argv[1])
+status_topic = sys.argv[2]
+response_topic = sys.argv[3]
+text = log_path.read_text(encoding="utf-8", errors="ignore") if log_path.exists() else ""
+print(1 if status_topic in text or response_topic in text else 0)
+PY
+)"
+      # region agent log
+      debug_log "H73" "probe_attempt_evidence" "{\"gpio\":${gpio},\"attempt\":${probe_attempt},\"serial_probe\":\"${probe_output}\",\"serial_rc\":${probe_rc},\"mqtt_hit\":${mqtt_hit},\"probe_tap_bytes\":${probe_tap_bytes},\"probe_tap_merged\":$(json_bool "${probe_tap_merged}")}"
+      # endregion
+
       rm -f "${probe_tap_log}" 2>/dev/null || true
       probe_tap_log=""
+      rm -f "${probe_mqtt_log}" 2>/dev/null || true
+      probe_mqtt_log=""
 
       if [[ "${probe_rc}" -eq 0 && "${probe_output}" == "ok" ]]; then
+        break
+      fi
+      if [[ "${mqtt_hit}" == "1" ]]; then
+        probe_output="mqtt_only"
+        probe_rc=0
         break
       fi
       if [[ "${probe_output}" == "unconfigured" ]]; then
@@ -746,6 +794,9 @@ PY
 
     if [[ "${probe_rc}" -eq 0 && "${probe_output}" == "ok" ]]; then
       echo "  Probe OK GPIO ${gpio}: command ingress + execute bestätigt."
+      probe_ok=$((probe_ok + 1))
+    elif [[ "${probe_output}" == "mqtt_only" ]]; then
+      echo "  Probe OK GPIO ${gpio}: command via MQTT status/response bestätigt (Serial ohne Ingress)." >&2
       probe_ok=$((probe_ok + 1))
     elif [[ "${probe_output}" == "ingress_only" ]]; then
       echo "  Probe WARN GPIO ${gpio}: command ingress erkannt, execute-log nicht eindeutig." >&2
@@ -941,6 +992,18 @@ run_load_schedule() {
   send_slow_flood
 }
 
+collect_network_snapshot_json() {
+  local wlan_conn eth_conn wlan_ip eth_ip default_dev default_gw
+  wlan_conn="$(nmcli -t -f DEVICE,CONNECTION device status 2>/dev/null | awk -F: '$1=="wlan0"{print $2; exit}')"
+  eth_conn="$(nmcli -t -f DEVICE,CONNECTION device status 2>/dev/null | awk -F: '$1=="eth0"{print $2; exit}')"
+  wlan_ip="$(ip -4 -o addr show wlan0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)"
+  eth_ip="$(ip -4 -o addr show eth0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)"
+  default_dev="$(ip -4 route show default 2>/dev/null | awk '/^default/{print $5; exit}')"
+  default_gw="$(ip -4 route show default 2>/dev/null | awk '/^default/{print $3; exit}')"
+  printf '{"wlan_connection":"%s","eth_connection":"%s","wlan_ip":"%s","eth_ip":"%s","default_dev":"%s","default_gw":"%s"}' \
+    "${wlan_conn:-}" "${eth_conn:-}" "${wlan_ip:-}" "${eth_ip:-}" "${default_dev:-}" "${default_gw:-}"
+}
+
 monitor_capture_heartbeat() {
   local started_epoch="$1"
   local expected_end=$((started_epoch + CAPTURE_SECONDS))
@@ -1073,6 +1136,10 @@ fi
 
 # region agent log
 debug_log "H0" "repro_started" "{\"esp_id\":\"${ESP_ID}\",\"serial_port\":\"${SERIAL_PORT}\",\"capture_seconds\":${CAPTURE_SECONDS},\"flood_fast\":${FLOOD_COUNT_FAST},\"flood_slow\":${FLOOD_COUNT_SLOW},\"flood_delay_ms\":${FLOOD_DELAY_SLOW_MS},\"profile\":\"${RUN_PROFILE}\",\"actuator_gpios\":\"${ACTUATOR_GPIOS_EFFECTIVE}\"}"
+# endregion
+
+# region agent log
+debug_log "H71" "network_snapshot_before_run" "$(collect_network_snapshot_json)"
 # endregion
 
 resolve_frontend_credentials
@@ -1479,6 +1546,27 @@ def extract_transport_classification(lines: list[str]) -> dict[str, int]:
             counts["tcp_other"] += 1
     return counts
 
+def extract_esp_keepalive_from_broker(path: Path, esp_id: str):
+    if not path.exists():
+        return None, None
+    rx = re.compile(
+        rf"New client connected .* as {re.escape(esp_id)} \([^)]*k(\d+)\)",
+        re.IGNORECASE,
+    )
+    first_line = None
+    first_keepalive = None
+    for row in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        m = rx.search(row)
+        if not m:
+            continue
+        first_line = row
+        try:
+            first_keepalive = int(m.group(1))
+        except Exception:
+            first_keepalive = None
+        break
+    return first_keepalive, first_line
+
 def assess_serial_quality(lines: list[str]) -> dict[str, object]:
     ts_rx = re.compile(r"^\[\d{4}-\d{2}-\d{2}T")
     prefixed = 0
@@ -1506,6 +1594,7 @@ y_events = parse_yesterday_events(yesterday_json)
 serial_lines = serial_log.read_text(encoding="utf-8", errors="ignore").splitlines() if serial_log.exists() else []
 transport_classes = extract_transport_classification(serial_lines)
 serial_quality = assess_serial_quality(serial_lines)
+esp_keepalive_observed, esp_keepalive_line = extract_esp_keepalive_from_broker(broker_log, esp_id)
 max_queue_drain_publish_ms = extract_max_duration(serial_lines, "[DBG5126ae] queue drain publish call slow")
 max_direct_publish_ms = extract_max_duration(serial_lines, "[DBG5126ae] direct publish call slow")
 max_comm_process_queue_ms = extract_max_duration(serial_lines, "[DBG5126ae] comm processPublishQueue slow")
@@ -1517,7 +1606,9 @@ emit_debug("H1", "queue_overflow_signal", {
 })
 emit_debug("H2", "session_takeover_chain", {
     "broker_session_taken_over_count": broker_counts.get("session_taken_over", 0),
+    "broker_exceeded_timeout_count": broker_counts.get("exceeded_timeout", 0),
     "broker_first_session_taken_over": broker_first.get("session_taken_over"),
+    "broker_first_exceeded_timeout": broker_first.get("exceeded_timeout"),
     "server_first_lwt_unexpected": server_first.get("lwt_unexpected"),
 })
 emit_debug("H3", "queue_pressure_vs_server", {
@@ -1780,6 +1871,10 @@ emit_debug("H96", "disconnect_callback_route_load", {
     "direct_publish_slow_count": serial_counts.get("dbg_direct_publish_call_slow", 0),
     "first_mqtt_route_duration": serial_first.get("dbg_mqtt_data_route_duration"),
 })
+emit_debug("H74", "broker_keepalive_observed", {
+    "esp_keepalive_observed": esp_keepalive_observed,
+    "first_esp_connect_line": esp_keepalive_line,
+})
 
 lines = []
 lines.append("# ESP32 Disconnect Repro Summary")
@@ -1889,3 +1984,7 @@ echo "Fertig."
 echo "Summary: ${SUMMARY_MD}"
 echo "Run-JSON: ${RUN_SUMMARY_JSON}"
 echo "Nächster Schritt: Summary prüfen und ggf. erneut mit höheren Flood-Werten laufen lassen."
+
+# region agent log
+debug_log "H72" "network_snapshot_after_run" "$(collect_network_snapshot_json)"
+# endregion

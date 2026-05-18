@@ -261,6 +261,7 @@ PublishQueueEnqueueResult tryQueuePublish(const char* topic,
     req.retain = retain;
     req.critical = critical;
     req.attempt = 0;
+    req.pressure_defer_count = 0;
     req.next_retry_ms = 0;
     if (metadata != nullptr) {
         req.metadata = *metadata;

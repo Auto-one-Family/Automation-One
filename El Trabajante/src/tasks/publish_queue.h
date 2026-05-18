@@ -25,7 +25,15 @@ static const uint16_t PUBLISH_PAYLOAD_MAX_LEN = 1536;
 
 // AUT-55: When queue fill >= watermark, non-critical messages are proactively shed
 // to preserve slots for critical publishes (alerts, responses, intent_outcome).
-static const uint8_t  PUBLISH_QUEUE_SHED_WATERMARK = 6;  // 75% of 8 slots
+//
+// Why this matters for realtime actuator control:
+// if the queue runs too hot, transport writes become bursty and can block long enough
+// to delay actuator response/status feedback visible in frontend controls.
+//
+// Lower watermark = earlier pressure handling:
+// - reduces risk of blocking publish bursts
+// - favors control-path responsiveness over telemetry completeness under stress
+static const uint8_t  PUBLISH_QUEUE_SHED_WATERMARK = 4;  // 50% of 8 slots
 
 struct PublishRequest {
     char    topic[PUBLISH_TOPIC_MAX_LEN];
@@ -34,6 +42,7 @@ struct PublishRequest {
     bool    retain;
     bool    critical;
     uint8_t attempt;
+    uint8_t pressure_defer_count;  // Prevent infinite defer loops under sustained pressure.
     unsigned long next_retry_ms;  // For AUT-6: Backoff-aware retry scheduling
     IntentMetadata metadata;
 };

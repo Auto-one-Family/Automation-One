@@ -124,6 +124,50 @@ class TestLWTInstantOffline:
                         )
 
     @pytest.mark.asyncio
+    async def test_lwt_normalizes_timestamp_zero_in_metadata_and_broadcast(self, handler):
+        """timestamp=0 in payload must never persist as 0 in last_disconnect."""
+        topic = "kaiser/god/esp/ESP_ZERO_TS/system/will"
+        payload = {
+            "status": "offline",
+            "reason": "unexpected_disconnect",
+            "timestamp": 0,
+        }
+
+        with patch("src.mqtt.handlers.lwt_handler.resilient_session") as mock_session:
+            mock_db = MagicMock()
+            mock_db.commit = AsyncMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            with patch("src.mqtt.handlers.lwt_handler.ESPRepository") as mock_repo_class:
+                mock_device = MagicMock()
+                mock_device.device_id = "ESP_ZERO_TS"
+                mock_device.status = "online"
+                mock_device.device_metadata = {}
+                mock_device.last_seen = datetime.now(timezone.utc)
+
+                mock_repo = MagicMock()
+                mock_repo.get_by_device_id = AsyncMock(return_value=mock_device)
+                mock_repo.update_status = AsyncMock()
+                mock_repo_class.return_value = mock_repo
+
+                with patch("src.mqtt.handlers.lwt_handler.AuditLogRepository") as mock_audit:
+                    mock_audit.return_value.log_device_event = AsyncMock()
+
+                    with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
+                        mock_ws = AsyncMock()
+                        mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
+
+                        result = await handler.handle_lwt(topic, payload)
+
+        assert result is True
+        metadata_ts = mock_device.device_metadata["last_disconnect"]["timestamp"]
+        assert isinstance(metadata_ts, int)
+        assert metadata_ts > 0
+        ws_payload = mock_ws.broadcast.call_args.args[1]
+        assert ws_payload["timestamp"] == metadata_ts
+
+    @pytest.mark.asyncio
     async def test_lwt_broadcasts_websocket_event(self, handler, valid_lwt_payload):
         """LWT message triggers WebSocket broadcast."""
         topic = "kaiser/god/esp/ESP_ONLINE/system/will"

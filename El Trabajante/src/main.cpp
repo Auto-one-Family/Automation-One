@@ -3232,7 +3232,7 @@ void setup() {
   mqtt_config.client_id = configManager.getESPId();
   mqtt_config.username = wifi_config.mqtt_username;  // Can be empty (Anonymous)
   mqtt_config.password = wifi_config.mqtt_password;  // Can be empty (Anonymous)
-  mqtt_config.keepalive = 60;
+  mqtt_config.keepalive = 90;
   mqtt_config.timeout = 10;
 
   if (!mqttClient.connect(mqtt_config)) {
