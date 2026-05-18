@@ -51,6 +51,7 @@ private:
   unsigned long activation_start_ms_;
   unsigned long last_stop_ms_;
   unsigned long accumulated_runtime_ms_;
+  unsigned long last_cycle_runtime_ms_;
 
   RuntimeProtection protection_;
   static const uint8_t ACTIVATION_HISTORY = 60;
