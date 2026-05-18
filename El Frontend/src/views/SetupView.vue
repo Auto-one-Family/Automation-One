@@ -266,7 +266,7 @@ const particles = Array.from({ length: 18 }, (_, i) => ({
           <!-- Submit -->
           <button
             type="submit"
-            class="setup-form__submit btn-primary"
+            class="setup-form__submit btn btn-primary"
             :disabled="!isValid || authStore.isLoading"
           >
             <span v-if="authStore.isLoading" class="setup-form__submit-content">
