@@ -18,6 +18,7 @@ PumpActuator::PumpActuator()
       activation_start_ms_(0),
       last_stop_ms_(0),
       accumulated_runtime_ms_(0),
+      last_cycle_runtime_ms_(0),
       gpio_manager_(&GPIOManager::getInstance()) {
   memset(activation_timestamps_, 0, sizeof(activation_timestamps_));
 }
@@ -139,7 +140,8 @@ bool PumpActuator::applyState(bool state, bool force) {
     activation_start_ms_ = now;
     recordActivation(now);
   } else if (activation_start_ms_ != 0) {
-    accumulated_runtime_ms_ += now - activation_start_ms_;
+    last_cycle_runtime_ms_ = now - activation_start_ms_;
+    accumulated_runtime_ms_ += last_cycle_runtime_ms_;
     config_.accumulated_runtime_ms = accumulated_runtime_ms_;
     activation_start_ms_ = 0;
     last_stop_ms_ = now;
@@ -173,7 +175,10 @@ bool PumpActuator::canActivate() const {
 
   unsigned long now = millis();
 
-  if (accumulated_runtime_ms_ >= protection_.max_runtime_ms && last_stop_ms_ != 0) {
+  // Enforce cooldown only when the *last continuous run* exceeded the runtime cap.
+  // accumulated_runtime_ms_ is telemetry across many cycles and must not keep
+  // the pump in permanent cooldown after one long run.
+  if (last_cycle_runtime_ms_ >= protection_.max_runtime_ms && last_stop_ms_ != 0) {
     unsigned long since_stop = now - last_stop_ms_;
     if (since_stop < protection_.cooldown_ms) {
       return false;
