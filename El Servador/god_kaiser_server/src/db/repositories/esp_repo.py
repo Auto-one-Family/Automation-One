@@ -235,7 +235,11 @@ class ESPRepository(BaseRepository[ESPDevice]):
         Args:
             device_id: ESP device ID
             status: New status (online, offline, error, unknown)
-            last_seen: Optional last_seen timestamp (defaults to now)
+            last_seen: Optional explicit last_seen timestamp.
+                - If provided, it is always stored.
+                - If omitted and status != "offline", defaults to now.
+                - If omitted and status == "offline", the previous heartbeat
+                  timestamp is preserved.
 
         Returns:
             Updated ESPDevice or None if not found
@@ -245,7 +249,10 @@ class ESPRepository(BaseRepository[ESPDevice]):
             return None
 
         device.status = status
-        device.last_seen = last_seen or datetime.now(timezone.utc)
+        if last_seen is not None:
+            device.last_seen = last_seen
+        elif status != "offline":
+            device.last_seen = datetime.now(timezone.utc)
 
         await self.session.flush()
         await self.session.refresh(device)

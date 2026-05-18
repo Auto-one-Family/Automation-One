@@ -4,7 +4,7 @@ Tests for ESP device-specific queries
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
@@ -320,6 +320,28 @@ class TestESPRepositoryUpdateStatus:
 
         assert updated is not None
         assert updated.last_seen == custom_timestamp
+
+    async def test_update_status_offline_preserves_last_seen_without_timestamp(
+        self, esp_repo: ESPRepository
+    ):
+        """Offline transition must not overwrite heartbeat-derived last_seen."""
+        await esp_repo.create(
+            device_id="ESP_LASTSEEN_POLICY",
+            name="LastSeen Policy Device",
+            ip_address="192.168.1.120",
+            mac_address="AA:BB:CC:DD:EE:FA",
+            firmware_version="1.0.0",
+            hardware_type="ESP32_WROOM",
+            status="online",
+        )
+        heartbeat_ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        await esp_repo.update_status("ESP_LASTSEEN_POLICY", "online", last_seen=heartbeat_ts)
+
+        updated = await esp_repo.update_status("ESP_LASTSEEN_POLICY", "offline")
+
+        assert updated is not None
+        assert updated.status == "offline"
+        assert updated.last_seen == heartbeat_ts
 
     async def test_update_status_not_found(self, esp_repo: ESPRepository):
         """Test status update with non-existent device."""

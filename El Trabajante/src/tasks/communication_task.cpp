@@ -53,6 +53,8 @@ extern bool         g_boot_force_offline_autonomy;
 
 // ─── External functions from main.cpp ──────────────────────────────────
 extern void handleWatchdogTimeout();
+extern void processDeferredPostReconnectActuatorStatusSync();
+static void enforceMqttDisconnectOnWifiLoss();
 
 // ============================================
 // STATIC HELPER: Provisioning Mode Handler
@@ -65,6 +67,7 @@ static void handleProvisioningState() {
     // Portal open due to MQTT disconnect: run WiFi+MQTT, check for reconnect success
     if (portal_open_due_to_disconnect_) {
         wifiManager.loop();
+        enforceMqttDisconnectOnWifiLoss();
         mqttClient.loop();
 #ifndef MQTT_USE_PUBSUBCLIENT
         mqttClient.processPublishQueue();
@@ -128,6 +131,32 @@ static void handleWifiDisconnectDebounce() {
         }
     } else {
         disconnect_start = 0;
+    }
+}
+
+// ============================================
+// STATIC HELPER: MQTT Teardown on WiFi Loss
+// ============================================
+// During AP handovers we may observe a short window where WiFi is already gone
+// but MQTT still appears connected. Force a local MQTT transport detach in this
+// state so the broker does not keep a stale session for the same client_id.
+static void enforceMqttDisconnectOnWifiLoss() {
+    static unsigned long last_forced_disconnect_ms = 0;
+    const bool wifi_connected = WiFi.isConnected();
+    const bool mqtt_connected = mqttClient.isConnected();
+
+    if (!wifi_connected && mqtt_connected) {
+        const unsigned long now = millis();
+        if (last_forced_disconnect_ms == 0UL || (now - last_forced_disconnect_ms) > 2000UL) {
+            last_forced_disconnect_ms = now;
+            LOG_W(COMM_TAG, "[COMM] WiFi down while MQTT connected -> force MQTT transport detach");
+            mqttClient.disconnect();
+        }
+        return;
+    }
+
+    if (wifi_connected) {
+        last_forced_disconnect_ms = 0;
     }
 }
 
@@ -365,6 +394,7 @@ void communicationTaskFunction(void* param) {
         if (g_system_config.current_state == STATE_PENDING_APPROVAL ||
             g_system_config.current_state == STATE_CONFIG_PENDING_AFTER_RESET) {
             wifiManager.loop();
+            enforceMqttDisconnectOnWifiLoss();
             mqttClient.loop();
 #ifndef MQTT_USE_PUBSUBCLIENT
             // Check registration gate timeout independently — no other publish() calls are
@@ -379,6 +409,7 @@ void communicationTaskFunction(void* param) {
         // ── Operational Mode ───────────────────────────────────────────
         const unsigned long op_cycle_start_ms = millis();
         wifiManager.loop();
+        enforceMqttDisconnectOnWifiLoss();
         const unsigned long wifi_loop_duration_ms = millis() - op_cycle_start_ms;
         static unsigned long s_last_wifi_loop_slow_log_ms = 0;
         if (wifi_loop_duration_ms > 120UL) {

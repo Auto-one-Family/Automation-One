@@ -44,6 +44,15 @@ static bool isCriticalPublishTopic(const String& topic) {
            topic.indexOf("/system/intent_outcome") != -1;
 }
 
+static bool isRealtimeResponsePublishTopic(const String& topic) {
+    return (topic.indexOf("/actuator/") != -1 && topic.indexOf("/response") != -1) ||
+           (topic.indexOf("/sensor/") != -1 && topic.indexOf("/response") != -1) ||
+           topic.indexOf("/config_response") != -1 ||
+           topic.indexOf("/zone/ack") != -1 ||
+           topic.indexOf("/subzone/ack") != -1 ||
+           topic.indexOf("/system/command/response") != -1;
+}
+
 #ifndef MQTT_USE_PUBSUBCLIENT
 static std::atomic<uint32_t> g_publish_outbox_noncritical_drops{0};
 // [FIX5-VERIFY] Total MQTT outbox-full events (msg_id == -2), all topic classes.
@@ -61,7 +70,7 @@ static std::atomic<bool> g_in_mqtt_event_callback{false};
 
 static constexpr unsigned long MANAGED_RECONNECT_BASE_DELAY_MS = 1500;
 static constexpr unsigned long MANAGED_RECONNECT_MAX_DELAY_MS = 12000;
-// Give ESP-IDF auto-reconnect a head-start before issuing manual reconnect calls.
+// Hold reconnect requests briefly after disconnect so transport/WiFi can settle.
 static constexpr unsigned long MANAGED_RECONNECT_AUTO_GRACE_MS = 15000;
 
 // PKG-18 (INC-2026-04-11-ea5484): Standby-resume disconnect loop hardening.
@@ -77,11 +86,13 @@ static constexpr unsigned long MANAGED_RECONNECT_WRITE_TIMEOUT_BOOST_MS = 5000;
 static constexpr uint32_t POST_RECONNECT_TRANSPORT_SETTLE_MS = 2000;
 
 // ESP-IDF default network_timeout_ms = 10000 keeps transport write stalls bounded.
-// Longer values (45s) can block comm-task publish paths for almost a full minute.
-// AUT-117-fix: Reduced 3000→1500ms. Under TCP-send-buffer exhaustion (fast flood),
-// esp_mqtt_client_publish() blocks for network_timeout_ms, stalling the comm task.
-// Evidence (run 20260515_141510): 3229ms stall = exactly 3000ms timeout + overhead.
-// 1500ms is still generous for local Pi network (<1ms RTT) and halves the max stall.
+// For this project we intentionally keep this lower (1500ms), because actuator control
+// depends on short control-loop latency. A very high timeout can make a single publish
+// block long enough to delay subsequent actuator responses in the UI path.
+// Trade-off:
+// - lower timeout => faster recovery from degraded transport, less control lag
+// - higher timeout => fewer transient write timeouts, but higher risk of long stalls
+// Runtime tuning is driven by stress logs (queue/drain/direct publish durations).
 static constexpr int MQTT_CLIENT_NETWORK_TIMEOUT_MS = 1500;
 
 static bool shouldLogAdmissionCorrelation(const String& topic) {
@@ -366,6 +377,10 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     mqtt_cfg.uri = broker_uri;
     mqtt_cfg.keepalive = config.keepalive;
     mqtt_cfg.disable_clean_session = 0;
+    // Keep reconnect orchestration in one place (processManagedReconnect_).
+    // Runtime logs showed IDF auto-reconnect causing repeated TLS-timeout
+    // disconnect churn before the managed backoff/jitter path could stabilize.
+    mqtt_cfg.disable_auto_reconnect = true;
 
     mqtt_cfg.lwt_topic = lw_topic_str.c_str();
     mqtt_cfg.lwt_msg = lw_msg;
@@ -478,11 +493,17 @@ bool MQTTClient::connect(const MQTTConfig& config) {
 bool MQTTClient::disconnect() {
 #ifndef MQTT_USE_PUBSUBCLIENT
     if (mqtt_client_ != nullptr) {
-        esp_mqtt_client_stop(mqtt_client_);
-        esp_mqtt_client_destroy(mqtt_client_);
-        mqtt_client_ = nullptr;
+        const esp_err_t err = esp_mqtt_client_disconnect(mqtt_client_);
+        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+            LOG_W(TAG, String("esp_mqtt_client_disconnect() returned ") + esp_err_to_name(err));
+        }
         g_mqtt_connected.store(false);
-        LOG_I(TAG, "MQTT disconnected (ESP-IDF client destroyed)");
+        // Ensure managed reconnect can recover after explicit local disconnect requests.
+        last_disconnect_ms_ = millis();
+        if (next_managed_reconnect_ms_ == 0) {
+            scheduleManagedReconnect_("local_disconnect", MANAGED_RECONNECT_BASE_DELAY_MS);
+        }
+        LOG_I(TAG, "MQTT disconnected (ESP-IDF transport detached, client kept alive)");
     }
     return true;
 #else
@@ -703,6 +724,52 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
     }
 
     // Core 0: direct publish via ESP-IDF (thread-safe internally).
+    //
+    // IMPORTANT for actuator responsiveness:
+    // Direct publish is "fast path" only while the system is healthy. Under queue pressure,
+    // even critical direct publishes can block inside esp_mqtt_client_publish().
+    // That blocking steals time from near-realtime actuator feedback/response handling.
+    //
+    // Therefore, once pressure crosses the shed watermark, we reroute critical direct traffic
+    // back into the queue path. This keeps control flow non-blocking from the caller's view
+    // and avoids long synchronous stalls in the comm loop.
+    //
+    // In short:
+    // - healthy transport: direct path keeps latency low
+    // - pressured/degraded transport: queue path protects realtime behavior
+    const bool critical_direct = isCriticalPublishTopic(topic);
+    const bool realtime_response_direct = isRealtimeResponsePublishTopic(topic);
+    if (critical_direct && !realtime_response_direct) {
+        const PublishQueuePressureStats pq_stats = getPublishQueuePressureStats();
+        if (pq_stats.fill_level >= PUBLISH_QUEUE_SHED_WATERMARK) {
+            IntentMetadata metadata =
+                extractIntentMetadataFromPayload(payload.c_str(), "critical_pub_defer");
+            PublishQueueEnqueueResult pq = tryQueuePublish(topic.c_str(),
+                                                           payload.c_str(),
+                                                           qos,
+                                                           false,
+                                                           true,
+                                                           &metadata);
+            if (pq == PublishQueueEnqueueResult::Enqueued) {
+                // Enqueued = accepted for async processing; caller is not blocked on socket I/O.
+                // #region agent log
+                LOG_W(TAG, String("[DBG5126ae] direct critical deferred to queue fill=") +
+                                String(pq_stats.fill_level) +
+                                " watermark=" + String(PUBLISH_QUEUE_SHED_WATERMARK) +
+                                " topic=" + topic);
+                // #endregion
+                return true;
+            }
+            if (pq == PublishQueueEnqueueResult::ShedBackpressure) {
+                // Explicit shed under pressure: prefer dropping lower-value traffic over
+                // risking long blocking calls that hurt control responsiveness.
+                LOG_D(TAG, "[DBG5126ae] direct critical shed by queue pressure: " + topic);
+                return false;
+            }
+            LOG_W(TAG, "Direct critical defer enqueue failed, fallback to direct publish: " + topic);
+        }
+    }
+
     // Returns msg_id > 0 (QoS 1 queued), 0 (QoS 0 sent), -1 (error), -2 (outbox full).
     // PKG-16: pass explicit payload length so IDF skips its internal strlen()
     // on a possibly-NULL c_str() buffer (observed failure mode under OOM).
@@ -1158,8 +1225,8 @@ void MQTTClient::processManagedReconnect_() {
         return;
     }
 
-    // ESP-IDF auto-reconnect is enabled by default. Avoid issuing manual reconnect
-    // requests immediately after disconnect to prevent reconnect-race amplification.
+    // Avoid issuing reconnect requests immediately after disconnect to prevent
+    // reconnect-race amplification while WiFi/transport are still settling.
     if (last_disconnect_ms_ > 0) {
         unsigned long now = millis();
         unsigned long grace_until = last_disconnect_ms_ + MANAGED_RECONNECT_AUTO_GRACE_MS;
@@ -1185,12 +1252,12 @@ void MQTTClient::processManagedReconnect_() {
     esp_err_t err = esp_mqtt_client_reconnect(mqtt_client_);
     if (err != ESP_OK) {
         LOG_W(TAG, String("[INC-EA5484] managed reconnect request failed: ") + esp_err_to_name(err));
-        // Runtime evidence (H10/H12): repeated ESP_FAIL loops create reconnect churn.
-        // Suspend manual reconnect until the next real MQTT_EVENT_CONNECTED and rely on
-        // ESP-IDF auto-reconnect only.
-        manual_reconnect_suspended_ = true;
+        // Keep managed reconnect active even after transient ESP_FAIL/INVALID_STATE.
+        // Otherwise disconnect recovery can deadlock when no other reconnect path runs.
+        manual_reconnect_suspended_ = false;
         next_managed_reconnect_ms_ = 0;
-        LOG_W(TAG, "[INC-EA5484] reconnect failed -> suspend manual reconnect, rely on IDF auto-reconnect");
+        scheduleManagedReconnect_("reconnect_request_failed", MANAGED_RECONNECT_WRITE_TIMEOUT_BOOST_MS);
+        LOG_W(TAG, "[INC-EA5484] reconnect failed -> retry scheduled via managed backoff");
         return;
     }
 
@@ -1290,6 +1357,7 @@ static uint32_t getRetryBackoffMs(uint8_t attempt) {
 // became dead code once the default budget was lowered to 1; write-path backpressure is
 // still handled via retry/shed paths using isWritePathTimeoutErrno (AUT-55).
 static constexpr uint8_t PUBLISH_DRAIN_BUDGET_PER_TICK = 1;
+static constexpr uint8_t MAX_PRESSURE_DEFER_PER_MESSAGE = 3;
 
 void MQTTClient::processPublishQueue() {
     if (mqtt_client_ == nullptr) return;
@@ -1338,10 +1406,12 @@ void MQTTClient::processPublishQueue() {
     processIntentOutcomeOutbox();
 
     // AUT-117-fix: Write-timeout drain guard.
-    // After a write timeout on this connection, esp_mqtt_client_publish() would
-    // block for network_timeout_ms on the already-degraded TCP socket. Skip drain
-    // and let the pending reconnect cycle complete before resuming. Counter is
-    // reset to 0 in MQTT_EVENT_CONNECTED so drain resumes after reconnect.
+    // After a write timeout on this connection, esp_mqtt_client_publish() can block
+    // again on the same degraded socket. If we continue draining here, we accumulate
+    // latency exactly when actuator feedback should stay responsive.
+    //
+    // So we pause drain until reconnect completes, then resume cleanly.
+    // Counter reset happens in MQTT_EVENT_CONNECTED.
     if (transport_write_timeout_count_ > 0) {
         static unsigned long s_drain_wt_guard_log_ms = 0;
         const unsigned long drain_guard_now_ms = millis();
@@ -1389,6 +1459,40 @@ void MQTTClient::processPublishQueue() {
                 // #endregion
             }
             break;
+        }
+
+        const bool critical_topic = req.critical;
+        const bool realtime_response_topic = isRealtimeResponsePublishTopic(String(req.topic));
+        const uint8_t queue_fill_before_publish =
+            static_cast<uint8_t>(uxQueueMessagesWaiting(g_publish_queue));
+        if (critical_topic &&
+            !realtime_response_topic &&
+            queue_fill_before_publish >= PUBLISH_QUEUE_SHED_WATERMARK) {
+            // Keep this defer bounded. Unbounded requeue at high fill can keep the queue hot
+            // indefinitely and starve non-critical sensor publishes after reconnect.
+            if (req.pressure_defer_count < MAX_PRESSURE_DEFER_PER_MESSAGE) {
+                req.pressure_defer_count++;
+                req.next_retry_ms = now_ms + 1000UL;
+                if (xQueueSend(g_publish_queue, &req, 0) != pdTRUE) {
+                    LOG_W(TAG, "Publish defer queue full under pressure (critical), dropping: " + String(req.topic));
+                    g_publish_outbox_noncritical_drops.fetch_add(1);
+                } else {
+                    // #region agent log
+                    LOG_W(TAG, String("[DBG5126ae] queue drain deferred critical under pressure fill=") +
+                                    String(queue_fill_before_publish) +
+                                    " watermark=" + String(PUBLISH_QUEUE_SHED_WATERMARK) +
+                                    " defer_count=" + String(req.pressure_defer_count) +
+                                    " next_retry_ms=" + String(req.next_retry_ms) +
+                                    " topic=" + String(req.topic));
+                    // #endregion
+                }
+                break;
+            }
+
+            LOG_W(TAG, String("[DBG5126ae] forcing critical drain publish after pressure defers topic=") +
+                           String(req.topic) +
+                           " fill=" + String(queue_fill_before_publish) +
+                           " defer_count=" + String(req.pressure_defer_count));
         }
 
         const bool mqtt_connected_before_call = g_mqtt_connected.load();
@@ -1451,6 +1555,7 @@ void MQTTClient::processPublishQueue() {
             // (Recovery aus HALF_OPEN). Vorher fehlte dieser Pfad ganz —
             // Drain-Erfolge wurden vom CB nicht registriert.
             circuit_breaker_.recordSuccess();
+            req.pressure_defer_count = 0;
             continue;
         }
 
@@ -1718,6 +1823,9 @@ void MQTTClient::publishHeartbeat(bool force) {
     payload += "\"actuator_count\":" + String(actuatorManager.getActiveActuatorCount()) + ",";
     payload += "\"zone_name\":\"" + g_kaiser.zone_name + "\",";
     payload += "\"subzone_count\":" + String(configManager.getSubzoneCount()) + ",";
+    // Expose active offline-rule count so server-side drift detection can
+    // trigger a targeted config resync when rules were lost locally.
+    payload += "\"offline_rule_count\":" + String(offlineModeManager.getOfflineRuleCount()) + ",";
     payload += "\"wifi_ip\":\"" + WiFi.localIP().toString() + "\",";
 
     // PKG-17: gpio_status removed from heartbeat (redundant with REST
@@ -2188,7 +2296,7 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
                 // #endregion
                 self->scheduleManagedReconnect_("mqtt_disconnected", reconnect_base);
             } else if (self->manual_reconnect_suspended_) {
-                LOG_W(TAG, "[INC-EA5484] manual reconnect suspended (waiting for IDF auto-reconnect)");
+                LOG_W(TAG, "[INC-EA5484] manual reconnect temporarily suspended");
             } else {
                 LOG_D(TAG, "[INC-EA5484] reconnect already scheduled (skip duplicate in DISCONNECTED)");
             }

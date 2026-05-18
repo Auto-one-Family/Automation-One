@@ -1151,6 +1151,8 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       // Direct mutation doesn't reliably trigger computed/watch updates
       const deviceIndex = devices.value.findIndex(d => getDeviceId(d) === espId)
       if (deviceIndex === -1) return
+      const incomingStatus = typeof data.status === 'string' ? data.status : undefined
+      const effectiveStatus = incomingStatus ?? device.status
 
       // Calculate new last_seen from either source:
       // - timestamp: Unix ms from heartbeat handler (MQTT) - 13 digits
@@ -1166,17 +1168,38 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         const tsMs = parsed > 10000000000 ? parsed : parsed * 1000
         return new Date(tsMs).toISOString()
       }
+      const parseIsoToMs = (iso: unknown): number | undefined => {
+        if (typeof iso !== 'string' || iso.trim().length === 0) return undefined
+        const ms = Date.parse(iso)
+        return Number.isFinite(ms) ? ms : undefined
+      }
       const timestampIso = parseTimestampToIso(data.timestamp)
         ?? parseTimestampToIso(data.metrics_delta_ts)
-      if (timestampIso) {
-        newLastSeen = timestampIso
-      } else if (data.last_seen) {
-        newLastSeen = data.last_seen
+      const incomingLastSeen =
+        timestampIso
+        ?? (typeof data.last_seen === 'string' ? data.last_seen : undefined)
+      const currentLastSeenMs = parseIsoToMs(device.last_seen)
+      const incomingLastSeenMs = parseIsoToMs(incomingLastSeen)
+
+      if (incomingLastSeen && incomingLastSeenMs !== undefined) {
+        // Guard against out-of-order or stale heartbeat events.
+        if (currentLastSeenMs === undefined || incomingLastSeenMs >= currentLastSeenMs) {
+          newLastSeen = incomingLastSeen
+        } else {
+          logger.debug(`Ignoring stale esp_health timestamp for ${espId}`, {
+            current: device.last_seen,
+            incoming: incomingLastSeen
+          })
+        }
+      } else if (effectiveStatus === 'online') {
+        // No usable timestamp in payload, but device is online now.
+        // Use receive-time to avoid temporary "verzoegert" badge.
+        newLastSeen = new Date().toISOString()
       }
 
       // Calculate offline info if device went offline
       let offlineInfo: OfflineInfo | undefined = undefined
-      if (data.status === 'offline') {
+      if (incomingStatus === 'offline') {
         recordDisconnect(espId)
 
         const source = parseStatusSource(data.source) ?? 'heartbeat_timeout'
@@ -1247,9 +1270,9 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       )
       const runtimeHealthView = normalizeEspHealthPayload(dataRec)
       const nextConnected =
-        data.status === 'online'
+        effectiveStatus === 'online'
           ? true
-          : data.status === 'offline'
+          : effectiveStatus === 'offline'
             ? false
             : (typeof data.connected === 'boolean' ? data.connected : device.connected)
 
@@ -1263,20 +1286,25 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         actuator_count: data.actuator_count ?? device.actuator_count,
         last_seen: newLastSeen,
         last_heartbeat: newLastSeen,
-        status: data.status ?? device.status,
+        status: effectiveStatus,
         connected: nextConnected,
         name: data.name ?? device.name,
         actuators: updatedActuators,
-        // Clear offlineInfo when online, set when offline
-        offlineInfo: data.status === 'offline' ? offlineInfo : undefined,
+        // Keep offlineInfo sticky unless we received an explicit online transition.
+        offlineInfo: effectiveStatus === 'offline'
+          ? (incomingStatus === 'offline' ? offlineInfo : device.offlineInfo)
+          : (effectiveStatus === 'online' ? undefined : device.offlineInfo),
         runtime_health_view: runtimeHealthView,
       }
 
       logger.debug(`esp_health update for ${espId}:`, {
         last_seen: newLastSeen,
-        status: data.status ?? device.status,
+        status: effectiveStatus,
         name: data.name ?? device.name,
-        offlineInfo: data.status === 'offline' ? offlineInfo : 'cleared',
+        offlineInfo:
+          effectiveStatus === 'offline'
+            ? (incomingStatus === 'offline' ? offlineInfo : device.offlineInfo)
+            : (effectiveStatus === 'online' ? 'cleared' : device.offlineInfo),
       })
 
       // Phase 3: Update GPIO status from heartbeat if present

@@ -861,6 +861,25 @@ class E2EMQTTClient:
         }
         await self._client.publish(topic, json.dumps(payload))
 
+    async def publish_lwt(
+        self,
+        esp_id: str,
+        reason: str = "unexpected_disconnect",
+        retain: bool = False,
+        kaiser_id: str = "god",
+    ):
+        """Publish LWT-like offline event for reconnect/recovery E2E tests."""
+        import json
+        import time
+
+        topic = f"kaiser/{kaiser_id}/esp/{esp_id}/system/will"
+        payload = {
+            "status": "offline",
+            "reason": reason,
+            "timestamp": int(time.time()),
+        }
+        await self._client.publish(topic, json.dumps(payload), retain=retain)
+
     async def publish_actuator_response(
         self,
         esp_id: str,

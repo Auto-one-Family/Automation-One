@@ -306,14 +306,19 @@ class LWTHandler:
                             f"[LWT] Failed to reset actuator states for {esp_id_str}: {reset_err}"
                         )
 
+                    resolved_lwt_timestamp = int(
+                        self._resolve_lwt_timestamp_part(
+                            payload_timestamp=payload.get("timestamp"),
+                            last_seen=esp_device.last_seen,
+                        )
+                    )
+
                     # Update device_metadata with disconnect reason
                     device_metadata = esp_device.device_metadata or {}
                     device_metadata["last_disconnect"] = {
                         "reason": payload.get("reason", "unexpected_disconnect"),
                         "raw_reason": canonical.raw_fields.get("raw_reason"),
-                        "timestamp": payload.get(
-                            "timestamp", int(datetime.now(timezone.utc).timestamp())
-                        ),
+                        "timestamp": resolved_lwt_timestamp,
                         "source": "lwt",
                         "contract_violation": canonical.is_contract_violation,
                         "contract_code": canonical.contract_code,
@@ -363,10 +368,7 @@ class LWTHandler:
                             status="offline",
                             reason=payload.get("reason", "unexpected_disconnect"),
                             source="lwt",
-                            timestamp=payload.get(
-                                "timestamp",
-                                int(datetime.now(timezone.utc).timestamp()),
-                            ),
+                            timestamp=resolved_lwt_timestamp,
                             actuator_states_reset=reset_count,
                         )
                         broadcast_payload["raw_reason"] = canonical.raw_fields.get("raw_reason")

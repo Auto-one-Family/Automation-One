@@ -1213,6 +1213,109 @@ class TestHeartbeatTimeoutAntiDuplicateEscalation:
                             assert result["timed_out"] == 1
 
 
+class TestHeartbeatReconnectMetadataConsistency:
+    """Regression tests for reconnect cleanup of stale LWT metadata."""
+
+    @pytest.fixture
+    def handler(self):
+        return HeartbeatHandler()
+
+    @pytest.mark.asyncio
+    async def test_online_heartbeat_clears_stale_lwt_last_disconnect(self, handler):
+        topic = "kaiser/god/esp/ESP_STALE/system/heartbeat"
+        payload = {
+            "ts": int(datetime.now(timezone.utc).timestamp()),
+            "uptime": 7200,
+            "heap_free": 47000,
+            "wifi_rssi": -48,
+            "sensor_count": 1,
+            "actuator_count": 1,
+        }
+
+        with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
+            mock_db = MagicMock()
+            mock_db.commit = AsyncMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            with patch("src.mqtt.handlers.heartbeat_handler.ESPRepository") as mock_repo_class:
+                mock_device = MagicMock()
+                mock_device.id = "uuid-esp-stale"
+                mock_device.device_id = "ESP_STALE"
+                mock_device.status = "online"
+                mock_device.last_seen = datetime.now(timezone.utc)
+                mock_device.zone_id = None
+                mock_device.master_zone_id = None
+                mock_device.zone_name = None
+                mock_device.kaiser_id = "god"
+                mock_device.device_metadata = {
+                    "last_disconnect": {
+                        "source": "lwt",
+                        "timestamp": 0,
+                        "reason": "unexpected_disconnect",
+                    }
+                }
+
+                mock_repo = MagicMock()
+                mock_repo.get_by_device_id = AsyncMock(return_value=mock_device)
+                mock_repo.update_status = AsyncMock()
+                mock_repo_class.return_value = mock_repo
+
+                with patch.object(
+                    handler,
+                    "_log_heartbeat_entry",
+                    new_callable=AsyncMock,
+                    return_value="production",
+                ):
+                    with patch("src.mqtt.client.MQTTClient.get_instance") as mock_mqtt:
+                        mock_mqtt.return_value = MagicMock()
+                        with patch("src.websocket.manager.WebSocketManager") as mock_ws:
+                            mock_ws.get_instance = AsyncMock(return_value=AsyncMock())
+                            with patch(
+                                "src.services.logic_engine.get_logic_engine",
+                                return_value=None,
+                            ):
+                                result = await handler.handle_heartbeat(topic, payload)
+
+        assert result is True
+        assert "last_disconnect" not in mock_device.device_metadata
+        assert "last_disconnect_stale_cleared_at" in mock_device.device_metadata
+        assert (
+            mock_device.device_metadata.get("last_disconnect_stale_cleared_reason")
+            == "online_recovery_after_invalid_lwt"
+        )
+
+    @pytest.mark.asyncio
+    async def test_log_heartbeat_entry_commits_isolated_session(self, handler):
+        with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
+            heartbeat_db = MagicMock()
+            heartbeat_db.commit = AsyncMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=heartbeat_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            with patch("src.mqtt.handlers.heartbeat_handler.ESPHeartbeatRepository") as mock_repo_class:
+                mock_repo = MagicMock()
+                mock_repo.log_heartbeat = AsyncMock()
+                mock_repo_class.return_value = mock_repo
+
+                mock_device = MagicMock()
+                mock_device.id = "uuid-esp-heartbeat"
+                mock_device.device_id = "ESP_HEARTBEAT"
+                mock_device.hardware_type = "ESP32_WROOM"
+                mock_device.mac_address = "AA:BB:CC:DD:EE:FF"
+                mock_device.device_metadata = {}
+
+                resolved_source = await handler._log_heartbeat_entry(
+                    esp_device=mock_device,
+                    esp_id_str="ESP_HEARTBEAT",
+                    payload={"ts": int(datetime.now(timezone.utc).timestamp())},
+                )
+
+        assert resolved_source
+        mock_repo.log_heartbeat.assert_called_once()
+        heartbeat_db.commit.assert_called_once()
+
+
 class TestHeartbeatErrorAckContract:
     """Error-ACK must satisfy the same fail-closed contract as normal ACKs."""
 
