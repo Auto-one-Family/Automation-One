@@ -34,6 +34,13 @@ class ESPRepository(BaseRepository[ESPDevice]):
         super().__init__(ESPDevice, session)
 
     @staticmethod
+    def _normalize_utc_last_seen(device: Optional[ESPDevice]) -> Optional[ESPDevice]:
+        """Ensure last_seen is timezone-aware UTC in repository return objects."""
+        if device is not None and device.last_seen is not None and device.last_seen.tzinfo is None:
+            device.last_seen = device.last_seen.replace(tzinfo=timezone.utc)
+        return device
+
+    @staticmethod
     def _not_deleted():
         """Filter clause to exclude soft-deleted devices."""
         return ESPDevice.deleted_at.is_(None)
@@ -55,7 +62,7 @@ class ESPRepository(BaseRepository[ESPDevice]):
         if not include_deleted:
             stmt = stmt.where(self._not_deleted())
         result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
+        return self._normalize_utc_last_seen(result.scalar_one_or_none())
 
     async def get_all(
         self, skip: int = 0, limit: int = 100, include_deleted: bool = False
@@ -109,7 +116,7 @@ class ESPRepository(BaseRepository[ESPDevice]):
 
         await self.session.flush()
         await self.session.refresh(device)
-        return device
+        return self._normalize_utc_last_seen(device)
 
     async def get_by_zone(self, zone_id: str) -> list[ESPDevice]:
         """
@@ -256,7 +263,7 @@ class ESPRepository(BaseRepository[ESPDevice]):
 
         await self.session.flush()
         await self.session.refresh(device)
-        return device
+        return self._normalize_utc_last_seen(device)
 
     async def update_capabilities(self, device_id: str, capabilities: dict) -> Optional[ESPDevice]:
         """

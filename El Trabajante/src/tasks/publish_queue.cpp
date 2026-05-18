@@ -203,8 +203,7 @@ PublishQueueEnqueueResult tryQueuePublish(const char* topic,
     // queue pressure telemetry does not compete with command/response traffic.
     const uint8_t observability_shed_watermark =
         static_cast<uint8_t>((PUBLISH_QUEUE_SIZE * 60U) / 100U);
-    if (fill >= observability_shed_watermark && isObservabilityOnlyTopic(topic)) {
-        g_pq_observability_shed_count.fetch_add(1);
+    if (fill >= observability_shed_watermark && !critical) {
         g_pq_shed_count.fetch_add(1);
         static unsigned long s_last_observability_shed_log_ms = 0UL;
         const unsigned long now_ms = millis();
@@ -213,7 +212,7 @@ PublishQueueEnqueueResult tryQueuePublish(const char* topic,
             s_last_observability_shed_log_ms = now_ms;
             LOG_W(PQ_TAG, String("[PQ] shed observability payload reason=queue_pressure ") +
                           "fill=" + String(fill) +
-                          " shed_obs_total=" + String(g_pq_observability_shed_count.load()) +
+                          " shed_total=" + String(g_pq_shed_count.load()) +
                           " topic=" + String(topic));
         }
         return PublishQueueEnqueueResult::ShedBackpressure;

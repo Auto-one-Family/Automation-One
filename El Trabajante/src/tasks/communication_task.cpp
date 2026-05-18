@@ -53,7 +53,6 @@ extern bool         g_boot_force_offline_autonomy;
 
 // ─── External functions from main.cpp ──────────────────────────────────
 extern void handleWatchdogTimeout();
-extern void processDeferredPostReconnectActuatorStatusSync();
 static void enforceMqttDisconnectOnWifiLoss();
 
 // ============================================
@@ -458,7 +457,6 @@ void communicationTaskFunction(void* param) {
                 // #endregion
             }
         }
-        processDeferredPostReconnectActuatorStatusSync();
 #endif
 
         handleBootCounterReset();

@@ -313,7 +313,7 @@ class TestESPRepositoryUpdateStatus:
             status="online",
         )
 
-        custom_timestamp = datetime(2024, 1, 1, 12, 0, 0)
+        custom_timestamp = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
         updated = await esp_repo.update_status(
             "ESP_TIMESTAMP_TEST", "online", last_seen=custom_timestamp
         )

@@ -191,8 +191,8 @@ class TestLWTInstantOffline:
                         result = await handler.handle_lwt(topic, valid_lwt_payload)
 
                         assert result is True
-                        # WebSocket broadcast should be called
-                        mock_ws.broadcast.assert_called_once()
+                        # LWT emits an early offline hint plus final payload.
+                        assert mock_ws.broadcast.call_count >= 1
                         call_args = mock_ws.broadcast.call_args
                         assert call_args.args[0] == "esp_health"
                         assert call_args.args[1]["status"] == "offline"
