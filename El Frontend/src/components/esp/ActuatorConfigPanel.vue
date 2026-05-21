@@ -113,10 +113,13 @@ const metadata = ref<DeviceMetadata>({})
 // Computed
 // =============================================================================
 const isMock = computed(() => espApi.isMockEsp(props.espId))
-const isPump = computed(() => props.actuatorType.toLowerCase() === 'pump')
-const isValve = computed(() => props.actuatorType.toLowerCase() === 'valve')
-const isPWM = computed(() => props.actuatorType.toLowerCase() === 'pwm')
-const isRelay = computed(() => props.actuatorType.toLowerCase() === 'relay')
+const actuatorTypeNormalized = computed(() => props.actuatorType.toLowerCase())
+const isPump = computed(() => actuatorTypeNormalized.value === 'pump')
+const isValve = computed(() => actuatorTypeNormalized.value === 'valve')
+const isPWM = computed(() => actuatorTypeNormalized.value === 'pwm')
+const isRelay = computed(() =>
+  ['relay', 'digital', 'binary', 'switch'].includes(actuatorTypeNormalized.value),
+)
 
 /** Live actuator state from store */
 const liveActuator = computed<MockActuator | null>(() => {
@@ -136,7 +139,20 @@ const accordionKey = computed(() => `actuator-${props.espId}-${props.gpio}`)
 // AUT-252: Aktor-Datenblatt (read-only, aus ACTUATOR_TYPE_CONFIG)
 // =============================================================================
 
-const actuatorTypeConfig = computed(() => ACTUATOR_TYPE_CONFIG[props.actuatorType.toLowerCase()])
+const actuatorTypeConfig = computed(() => {
+  const normalized = actuatorTypeNormalized.value
+  if (normalized in ACTUATOR_TYPE_CONFIG) {
+    return ACTUATOR_TYPE_CONFIG[normalized]
+  }
+  if (isRelay.value) {
+    return ACTUATOR_TYPE_CONFIG.relay
+  }
+  return undefined
+})
+
+function getDefaultMaxRuntimeSeconds(): number {
+  return isPump.value ? 3600 : 0
+}
 
 const hasActuatorDatasheet = computed<boolean>(() => {
   const cfg = actuatorTypeConfig.value
@@ -208,13 +224,13 @@ onMounted(async () => {
         enabled.value = c.enabled !== false
 
         // Block A: Backend→Frontend field mapping (max_runtime_seconds, cooldown_seconds, metadata)
-        maxRuntime.value = (c.max_runtime_seconds as number) ?? 3600
+        maxRuntime.value = (c.max_runtime_seconds as number) ?? getDefaultMaxRuntimeSeconds()
         minPause.value = (c.cooldown_seconds as number) ?? 60
         maxOpenTime.value =
           (c.max_runtime_seconds as number) ??
           (meta.max_open_time as number) ??
           (meta.max_open_time_seconds as number) ??
-          3600
+          getDefaultMaxRuntimeSeconds()
         isNormalClosed.value =
           meta.inverted_logic !== undefined
             ? !!meta.inverted_logic
@@ -406,6 +422,10 @@ async function handleSave() {
         config.max_runtime_seconds = maxOpenTime.value
         meta.inverted_logic = isNormalClosed.value
         meta.aux_gpio = auxGpio.value
+      }
+
+      if (isRelay.value) {
+        config.max_runtime_seconds = maxRuntime.value
       }
 
       if (isPWM.value) {
@@ -691,10 +711,10 @@ function formatDuration(seconds: number): string {
           <div class="actuator-config__field">
             <label class="actuator-config__label">Geraete-Sicherheitslimit</label>
             <div class="actuator-config__input-with-unit">
-              <input v-model.number="maxRuntime" type="number" min="1" class="actuator-config__input" />
+              <input v-model.number="maxRuntime" type="number" min="0" class="actuator-config__input" />
               <span class="actuator-config__unit">Sek. ({{ formatDuration(maxRuntime) }})</span>
             </div>
-            <span class="actuator-config__helper">Absolute Sicherheitsgrenze — greift unabhaengig von Regeln, auch bei manuellen Befehlen. Bei Ueberschreitung: Emergency Stop (Aktor gesperrt bis manueller Reset). Standard: 3600 Sek.</span>
+            <span class="actuator-config__helper">Absolute Sicherheitsgrenze — greift unabhaengig von Regeln, auch bei manuellen Befehlen. Bei Ueberschreitung: Emergency Stop (Aktor gesperrt bis manueller Reset). 0 = unbegrenzt. Standard: 3600 Sek.</span>
           </div>
           <div class="actuator-config__field">
             <label class="actuator-config__label">Mindest-Pause zwischen Laeufen</label>
@@ -757,6 +777,14 @@ function formatDuration(seconds: number): string {
 
         <!-- Relay -->
         <template v-else-if="isRelay">
+          <div class="actuator-config__field">
+            <label class="actuator-config__label">Geraete-Sicherheitslimit</label>
+            <div class="actuator-config__input-with-unit">
+              <input v-model.number="maxRuntime" type="number" min="0" class="actuator-config__input" />
+              <span class="actuator-config__unit">Sek. ({{ formatDuration(maxRuntime) }})</span>
+            </div>
+            <span class="actuator-config__helper">Absolute Sicherheitsgrenze fuer Relais/Aktorlaufzeit. 0 = unbegrenzt (empfohlen fuer Dauerlicht).</span>
+          </div>
           <div class="actuator-config__field actuator-config__field--toggle">
             <label class="actuator-config__label">Normal-Closed (NC)</label>
             <button
