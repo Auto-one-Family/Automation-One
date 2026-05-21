@@ -6,11 +6,8 @@ description: |
   Verwenden bei: auto-debugger, Incident-Artefakte, Korrelation, TASK-PACKAGES,
   artefact_improvement, verify-plan-Gate vor Implementierung,
   VERIFY-PLAN-REPORT.md, Post-Verify TASK-PACKAGES mutieren, SPECIALIST-PROMPTS rollenweise, Dev-Handoff,
-<<<<<<< Updated upstream
-  Linear-first, BELEG-MD, Findings-Kategorien, LINEAR-SYNC-MANIFEST, LINEAR-ISSUES.md, Resilienz-Check.
-=======
+  Linear-first, BELEG-MD, Findings-Kategorien, LINEAR-SYNC-MANIFEST, LINEAR-ISSUES.md, Resilienz-Check,
   Pattern-Scan (closest implementation), Fehler-Register (Mikrozirkular), keine Standard-Chat-Rueckfragen mit Steuerdatei.
->>>>>>> Stashed changes
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash
 user-invocable: true
 argument-hint: "Linear-Issue-ID (z. B. AUT-209) oder legacy @inbox/STEUER-….md"
@@ -87,22 +84,20 @@ Inbox ist eingefroren — kein neues Schreibziel. Bestehende MDs für historisch
 | `incident_id` | bei `incident` oder `both` — Ziel `.claude/reports/current/incidents/<id>/` |
 | `run_id` | Ausgabe `.claude/reports/current/auto-debugger-runs/<run_id>/` |
 | `order` | bei `both`: `incident_first` (Default) oder `artefact_first` |
-<<<<<<< Updated upstream
 | `linear_local_only` | `true` — kein Linear-Pflichtspiegel (nur mit Begründung in `scope`) |
 | `linear_epic_issue_id` / `linear_parent_issue_id` | bestehendes Epic/Parent |
 | `linear_run_issue_id` | bestehendes Run-Issue statt neuem Parent |
 | `linear_target_labels` | kommagetrennte Label-Namen |
 | `linear_dedup_search_query` | Suchstring vor Issue-Erstellung |
-=======
-| `no_chat_questions` | optional: `true` — dokumentiert im Frontmatter die Erwartung „keine Standard-Rückfragen“ (Norm bei gültiger Steuerdatei ohne `allow_user_escalation`; siehe Agent §0) |
+| `no_chat_questions` | optional: `true` — dokumentiert im Frontmatter die Erwartung „keine Standard-Rückfragen” (Norm bei gültiger Steuerdatei ohne `allow_user_escalation`; siehe Agent §0) |
 | `konsolidierung_step` | optional: `single` — höchstens ein begrenzter Konsolidierungsschritt Alt+Neu pro Lauf; weitere Schritte als Folge-PKGs |
 | `allow_user_escalation` | optional: `true` — nur dann gezielte Rückfragen an den Menschen erlaubt, wenn die Steuerdatei es ausdrücklich freigibt |
->>>>>>> Stashed changes
 
 **Startpattern (Robin):** Linear-Issue-ID im Chat, z. B. `AUT-209 abarbeiten` — oder legacy `@inbox/STEUER-….md`.
 
-<<<<<<< Updated upstream
 **Ohne gültigen Eingang:** nur Klärungsfragen — **keine** vollständige Artefaktstruktur ausgeben.
+
+**Mit gültiger Steuerdatei:** Pflichtsequenz **ohne** Standard-Chat-Rückfragen ausführen (Repo-Lektüre, konservative Annahme mit Risikozeile, oder BLOCKER) — vollständig in `.claude/agents/auto-debugger.md` §0.
 
 ---
 
@@ -167,15 +162,10 @@ Verweis auf Profil-Sektion: `.claude/agents/auto-debugger.md` — **8. Konsolidi
 `auto-debugger` ist **Analyst**, nicht Implementierer. Kein Code-Change direkt — Ausgabe geht als Linear-Issue an Spezialagenten.
 
 Vollständige Regel: `.claude/agents/auto-debugger.md` — **9. Rollen-Trennung**.
-=======
-**Ohne gueltige Steuerdatei:** nur **minimale** Klärung der normativen Pflichtfelder — **keine** vollstaendige Artefaktstruktur ausgeben.
-
-**Mit gueltiger Steuerdatei:** Pflichtsequenz **ohne** Standard-Chat-Rückfragen ausführen (Repo-Lektüre, konservative Annahme mit Risikozeile, oder BLOCKER) — vollständig in `.claude/agents/auto-debugger.md` §0.
->>>>>>> Stashed changes
 
 ---
 
-## 2a. Git-Arbeitsbranch `auto-debugger/work`
+## 2d. Git-Arbeitsbranch `auto-debugger/work`
 
 - **Fixer Arbeitsbranch** für alle auto-debugger-orchestrierten Änderungen: **`auto-debugger/work`** (von `master` abgezweigt).  
 - **Robin:** Vor dem Lauf `git checkout auto-debugger/work` (Branch existiert im Repo; bei neuem Clone einmal von `master` anlegen: `git checkout -b auto-debugger/work master`).  
@@ -193,12 +183,9 @@ Unter `.claude/reports/current/incidents/<incident_id>/`:
 - `TASK-PACKAGES.md`
 - `SPECIALIST-PROMPTS.md`
 - `VERIFY-PLAN-REPORT.md`
-<<<<<<< Updated upstream
 - `LINEAR-SYNC-MANIFEST.json` (Idempotenz / Linear-IDs; vom Orchestrator gepflegt)
 - `LINEAR-ISSUES.md` (optional; PKG → Linear-Identifier — **gleiche** IDs wie verify-plan/TASK-PACKAGES)
-=======
 - `FEHLER-REGISTER.md` — **Pflicht**, sobald **Code-PKGs** geplant sind (Mikroskopischer Fehlerworkflow; gleicher Dateiname unter `auto-debugger-runs/<run_id>/` bei Artefakt-Modus mit Implementierung)
->>>>>>> Stashed changes
 
 **Clustering-Reihenfolge** fuer Korrelation (nicht mischen ohne Evidence):
 
