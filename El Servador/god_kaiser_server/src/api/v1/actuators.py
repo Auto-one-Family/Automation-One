@@ -112,8 +112,16 @@ def _model_to_schema_response(
     - actuator_metadata -> metadata + technical PWM/servo fields split out
     """
     safety = actuator.safety_constraints or {}
-    max_runtime_seconds = safety.get("max_runtime") or safety.get("max_runtime_seconds")
-    cooldown_seconds = safety.get("cooldown_period") or safety.get("cooldown_seconds")
+    max_runtime_seconds = (
+        safety["max_runtime"]
+        if "max_runtime" in safety
+        else safety.get("max_runtime_seconds")
+    )
+    cooldown_seconds = (
+        safety["cooldown_period"]
+        if "cooldown_period" in safety
+        else safety.get("cooldown_seconds")
+    )
 
     # Normalize possible millisecond storage to seconds (future proof)
     if isinstance(max_runtime_seconds, (int, float)) and max_runtime_seconds:

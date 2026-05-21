@@ -391,7 +391,7 @@ class ConfigMappingEngine:
         # Phase 2C: Convert milliseconds to seconds for ESP32 measurement interval
         "ms_to_seconds": lambda x: (int(x) // 1000) if x else 30,
         # SAFETY-P1: Convert seconds to milliseconds for max_runtime_ms Config-Push
-        "seconds_to_ms": lambda x: (int(x) * 1000) if x else 3600000,
+        "seconds_to_ms": lambda x: (int(x) * 1000) if x is not None else 3600000,
         # BUG-FIX: Convert Server actuator types to ESP32-compatible types
         # Server stores "digital" but ESP32 expects "relay"
         # See: El Trabajante/src/models/actuator_types.h (ActuatorTypeTokens)

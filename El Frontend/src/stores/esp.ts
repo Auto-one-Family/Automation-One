@@ -1011,8 +1011,8 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
           name: config.name || null,
           enabled: true,
           subzone_id: normalizeSubzoneId(config.subzone_id),
-          max_runtime_seconds: config.max_runtime_seconds || null,
-          cooldown_seconds: config.cooldown_seconds || null,
+          max_runtime_seconds: config.max_runtime_seconds ?? null,
+          cooldown_seconds: config.cooldown_seconds ?? null,
           pwm_frequency: isPwmActuator(config.actuator_type) ? 1000 : null,
           metadata: {
             created_via: 'dashboard_drag_drop',
