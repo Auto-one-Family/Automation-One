@@ -22,9 +22,10 @@ import zipfile
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -92,6 +93,8 @@ from ..deps import (
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/v1/debug", tags=["Debug"])
+
+EXPORT_BATCH_SIZE = 500
 
 
 # =========================================================================
@@ -2335,6 +2338,184 @@ async def query_table(
         page_size=page_size,
         total_pages=total_pages,
     )
+
+
+@router.get(
+    "/db/{table_name}/export",
+    summary="Export Table Data",
+    description=(
+        "Bulk export of a database table as CSV or JSON stream. "
+        "No pagination limit — streams in batches of EXPORT_BATCH_SIZE rows. "
+        "For time-series tables (sensor_data, audit_logs, …) the default time window "
+        "is the last 24 hours unless date_from / date_to are supplied explicitly."
+    ),
+)
+async def export_table(
+    table_name: str,
+    current_user: AdminUser,
+    format: Literal["csv", "json"] = Query(default="json"),
+    date_from: Optional[datetime] = Query(default=None),
+    date_to: Optional[datetime] = Query(default=None),
+    columns: Optional[str] = Query(
+        default=None, description="Comma-separated column names (default: all)"
+    ),
+    sort_by: Optional[str] = Query(default=None),
+    sort_order: SortOrder = Query(default=SortOrder.DESC),
+    db: AsyncSession = Depends(_get_db_session),
+) -> StreamingResponse:
+    if table_name not in ALLOWED_TABLES:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Table '{table_name}' not found or not accessible",
+        )
+
+    if date_from is not None and date_to is not None and date_from > date_to:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="date_from must be before date_to",
+        )
+
+    # Fetch column metadata once (needs a synchronous inspector call)
+    async with db.begin():
+        connection = await db.connection()
+        columns_info = await connection.run_sync(
+            lambda conn: inspect(conn).get_columns(table_name)
+        )
+
+    all_column_names = [col["name"] for col in columns_info]
+
+    # Validate and resolve column selection
+    if columns:
+        requested_columns = [c.strip() for c in columns.split(",") if c.strip()]
+        unknown = [c for c in requested_columns if c not in all_column_names]
+        if unknown:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Unknown columns: {unknown}. Available: {all_column_names}",
+            )
+    else:
+        requested_columns = all_column_names
+
+    # Build WHERE clause — mirrors query_table logic with explicit date parameters
+    where_clauses: List[str] = []
+    params: Dict[str, Any] = {}
+    ts_col: Optional[str] = TIME_SERIES_TABLES.get(table_name)
+
+    if ts_col:
+        if date_from is None and date_to is None:
+            # Default 24 h window for time-series tables (same as query_table)
+            where_clauses.append(
+                f"{ts_col} >= NOW() - INTERVAL '{DEFAULT_TIME_SERIES_LIMIT_HOURS} hours'"
+            )
+        else:
+            if date_from is not None:
+                where_clauses.append(f"{ts_col} >= :date_from")
+                params["date_from"] = date_from
+            if date_to is not None:
+                where_clauses.append(f"{ts_col} <= :date_to")
+                params["date_to"] = date_to
+
+    cols_sql = ", ".join(requested_columns)
+    base_query = f"SELECT {cols_sql} FROM {table_name}"
+    if where_clauses:
+        base_query += " WHERE " + " AND ".join(where_clauses)
+
+    # ORDER BY — prefer explicit sort_by, fall back to natural table order
+    if sort_by and sort_by in all_column_names:
+        order_dir = "ASC" if sort_order == SortOrder.ASC else "DESC"
+        base_query += f" ORDER BY {sort_by} {order_dir}"
+    elif ts_col and ts_col in all_column_names:
+        base_query += f" ORDER BY {ts_col} DESC"
+    elif "created_at" in all_column_names:
+        base_query += " ORDER BY created_at DESC"
+    elif "id" in all_column_names:
+        base_query += " ORDER BY id DESC"
+
+    export_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    logger.info(
+        "Admin %s exporting table %s: format=%s columns=%s date_from=%s date_to=%s",
+        current_user.username,
+        table_name,
+        format,
+        requested_columns,
+        date_from,
+        date_to,
+    )
+
+    if format == "csv":
+
+        async def generate_csv():
+            yield "﻿"  # UTF-8 BOM for Excel compatibility
+            yield ",".join(requested_columns) + "\r\n"
+            offset = 0
+            while True:
+                batch_query = base_query + f" LIMIT {EXPORT_BATCH_SIZE} OFFSET {offset}"
+                result = await db.execute(text(batch_query), params)
+                rows = result.mappings().all()
+                if not rows:
+                    break
+                for row in rows:
+                    record = {k: _serialize_value(v) for k, v in dict(row).items()}
+                    record = _mask_sensitive_fields(table_name, record)
+                    values: List[str] = []
+                    for col in requested_columns:
+                        val = record.get(col)
+                        if val is None:
+                            values.append("")
+                        else:
+                            s = str(val)
+                            if any(ch in s for ch in (",", '"', "\n", "\r")):
+                                s = '"' + s.replace('"', '""') + '"'
+                            values.append(s)
+                    yield ",".join(values) + "\r\n"
+                offset += EXPORT_BATCH_SIZE
+                if len(rows) < EXPORT_BATCH_SIZE:
+                    break
+
+        return StreamingResponse(
+            generate_csv(),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{table_name}-export-{export_date}.csv"'
+                )
+            },
+        )
+
+    else:  # json
+
+        async def generate_json():
+            yield "["
+            offset = 0
+            first_item = True
+            while True:
+                batch_query = base_query + f" LIMIT {EXPORT_BATCH_SIZE} OFFSET {offset}"
+                result = await db.execute(text(batch_query), params)
+                rows = result.mappings().all()
+                if not rows:
+                    break
+                for row in rows:
+                    record = {k: _serialize_value(v) for k, v in dict(row).items()}
+                    record = _mask_sensitive_fields(table_name, record)
+                    if not first_item:
+                        yield ","
+                    yield json.dumps(record)
+                    first_item = False
+                offset += EXPORT_BATCH_SIZE
+                if len(rows) < EXPORT_BATCH_SIZE:
+                    break
+            yield "]"
+
+        return StreamingResponse(
+            generate_json(),
+            media_type="application/json",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{table_name}-export-{export_date}.json"'
+                )
+            },
+        )
 
 
 @router.get(

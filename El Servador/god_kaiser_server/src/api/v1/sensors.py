@@ -22,11 +22,14 @@ References:
 - ds18b20_onewire_integration Plan (Phase 5)
 """
 
+import csv
+import io
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Optional
+from typing import Annotated, AsyncGenerator, Literal, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import SQLAlchemyError
 
 from ...core.exceptions import (
@@ -1521,6 +1524,241 @@ async def query_sensor_data(
         response.time_range["has_more"] = False
 
     return response
+
+
+# =============================================================================
+# Export Sensor Data as CSV
+# =============================================================================
+
+_EXPORT_BATCH_SIZE = 500
+_EXPORT_ALLOWED_COLUMNS: frozenset[str] = frozenset(
+    {
+        "timestamp",
+        "raw_value",
+        "processed_value",
+        "unit",
+        "quality",
+        "sensor_type",
+        "esp_id",
+        "gpio",
+        "zone_id",
+        "subzone_id",
+    }
+)
+_EXPORT_DEFAULT_COLUMNS: list[str] = [
+    "timestamp",
+    "processed_value",
+    "unit",
+    "quality",
+    "sensor_type",
+]
+
+
+def _export_column_value(row: object, col: str, is_aggregated: bool) -> str:
+    """Extract a column value from a SensorData row (raw or aggregated) as a string."""
+    if is_aggregated:
+        mapping = {
+            "timestamp": "bucket",
+            "raw_value": "avg_raw",
+            "processed_value": "avg_processed",
+            "zone_id": None,  # intentionally empty for aggregated rows
+            "subzone_id": None,  # intentionally empty for aggregated rows
+        }
+        attr = mapping.get(col, col)
+        if col == "quality":
+            return "aggregated"
+        if attr is None:
+            return ""
+        val = getattr(row, attr, None)
+    else:
+        val = getattr(row, col, None)
+
+    if val is None:
+        return ""
+    if isinstance(val, datetime):
+        return val.isoformat()
+    if isinstance(val, uuid.UUID):
+        return str(val)
+    return str(val)
+
+
+async def _generate_csv(
+    sensor_repo: SensorRepository,
+    esp_db_id: Optional[uuid.UUID],
+    gpio: Optional[int],
+    sensor_type: Optional[str],
+    start_time: datetime,
+    end_time: datetime,
+    resolution: Optional[str],
+    zone_id: Optional[str],
+    subzone_id: Optional[str],
+    col_list: list[str],
+    is_aggregated: bool,
+) -> AsyncGenerator[str, None]:
+    """Yield BOM + CSV header, then data rows via cursor-based batching (500 rows/batch)."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+
+    yield "﻿"  # BOM for Excel compatibility
+
+    buf.seek(0)
+    buf.truncate()
+    writer.writerow(col_list)
+    buf.seek(0)
+    yield buf.read()
+
+    cursor: Optional[datetime] = None
+    while True:
+        batch = await sensor_repo.query_data(
+            esp_id=esp_db_id,
+            gpio=gpio,
+            sensor_type=sensor_type,
+            start_time=start_time,
+            end_time=end_time,
+            resolution=resolution or "raw",
+            zone_id=zone_id,
+            subzone_id=subzone_id,
+            limit=_EXPORT_BATCH_SIZE,
+            before_timestamp=cursor,
+        )
+        if not batch:
+            break
+
+        for row in batch:
+            buf.seek(0)
+            buf.truncate()
+            writer.writerow([_export_column_value(row, col, is_aggregated) for col in col_list])
+            buf.seek(0)
+            yield buf.read()
+
+        if len(batch) < _EXPORT_BATCH_SIZE:
+            break
+
+        # Cursor: oldest timestamp in DESC-ordered batch (last element)
+        last_row = batch[-1]
+        ts_attr = "bucket" if is_aggregated else "timestamp"
+        cursor = getattr(last_row, ts_attr, None)
+        if cursor is None:
+            break
+
+
+@router.get(
+    "/export",
+    response_class=StreamingResponse,
+    summary="Export sensor data as CSV",
+    responses={200: {"content": {"text/csv": {}}, "description": "Sensor data CSV file"}},
+)
+async def export_sensor_data(
+    db: DBSession,
+    current_user: ActiveUser,
+    esp_id: Annotated[Optional[str], Query(description="Filter by ESP device ID")] = None,
+    gpio: Annotated[Optional[int], Query(ge=0, le=39, description="Filter by GPIO")] = None,
+    sensor_type: Annotated[Optional[str], Query(description="Filter by sensor type")] = None,
+    start_time: Annotated[Optional[datetime], Query(description="Start of time range (ISO-8601)")] = None,
+    end_time: Annotated[Optional[datetime], Query(description="End of time range (ISO-8601)")] = None,
+    columns: Annotated[
+        Optional[str],
+        Query(description="Comma-separated column names (default: timestamp,processed_value,unit,quality,sensor_type)"),
+    ] = None,
+    resolution: Annotated[
+        Optional[str],
+        Query(
+            pattern=r"^(raw|1m|5m|1h|1d)$",
+            description="Time resolution: raw (default), 1m, 5m, 1h, 1d",
+        ),
+    ] = None,
+    zone_id: Annotated[Optional[str], Query(description="Filter by zone ID")] = None,
+    subzone_id: Annotated[Optional[str], Query(description="Filter by subzone ID")] = None,
+    format: Annotated[
+        Literal["csv"],
+        Query(description="Export format (currently only csv)"),
+    ] = "csv",
+) -> StreamingResponse:
+    """
+    Stream all sensor data matching the given filters as a CSV file.
+
+    Pagination is handled internally via cursor batching (500 rows/batch).
+    No hard cap on total rows — suitable for multi-day exports.
+
+    Requires at least one of: esp_id, zone_id, subzone_id.
+    """
+    # Validate: at least one scoping filter required
+    if not esp_id and not zone_id and not subzone_id:
+        raise HTTPException(
+            status_code=422,
+            detail="Mindestens esp_id, zone_id oder subzone_id erforderlich.",
+        )
+
+    # Validate and parse column selection
+    if columns is not None:
+        col_list = [c.strip() for c in columns.split(",") if c.strip()]
+        if not col_list:
+            raise HTTPException(
+                status_code=422,
+                detail="columns darf nicht leer sein. Erlaubt: "
+                + str(sorted(_EXPORT_ALLOWED_COLUMNS)),
+            )
+        unknown = sorted(set(col_list) - _EXPORT_ALLOWED_COLUMNS)
+        if unknown:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unbekannte Spalten: {unknown}. Erlaubt: {sorted(_EXPORT_ALLOWED_COLUMNS)}",
+            )
+    else:
+        col_list = list(_EXPORT_DEFAULT_COLUMNS)
+
+    # Normalize time range (timezone-aware UTC)
+    if not start_time:
+        start_time = datetime.now(timezone.utc) - timedelta(hours=24)
+    elif start_time.tzinfo is None:
+        start_time = start_time.replace(tzinfo=timezone.utc)
+    if not end_time:
+        end_time = datetime.now(timezone.utc)
+    elif end_time.tzinfo is None:
+        end_time = end_time.replace(tzinfo=timezone.utc)
+
+    if start_time >= end_time:
+        raise HTTPException(
+            status_code=422,
+            detail="start_time muss vor end_time liegen.",
+        )
+
+    # Resolve esp_id string → internal UUID
+    esp_repo = ESPRepository(db)
+    sensor_repo = SensorRepository(db)
+    esp_db_id: Optional[uuid.UUID] = None
+    if esp_id:
+        esp_device = await esp_repo.get_by_device_id(esp_id)
+        if not esp_device:
+            raise ESPNotFoundError(esp_id)
+        esp_db_id = esp_device.id
+
+    is_aggregated = bool(resolution and resolution != "raw")
+
+    # Build filename: sensor-export_{esp_id}_{start}_{end}.csv
+    start_str = start_time.strftime("%Y%m%dT%H%M%S")
+    end_str = end_time.strftime("%Y%m%dT%H%M%S")
+    filename = f"sensor-export_{esp_id or zone_id or subzone_id or 'all'}_{start_str}_{end_str}.csv"
+
+    generator = _generate_csv(
+        sensor_repo=sensor_repo,
+        esp_db_id=esp_db_id,
+        gpio=gpio,
+        sensor_type=sensor_type,
+        start_time=start_time,
+        end_time=end_time,
+        resolution=resolution,
+        zone_id=zone_id,
+        subzone_id=subzone_id,
+        col_list=col_list,
+        is_aggregated=is_aggregated,
+    )
+
+    return StreamingResponse(
+        generator,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # =============================================================================

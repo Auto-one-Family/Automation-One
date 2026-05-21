@@ -21,12 +21,8 @@
 
 import { defineStore } from 'pinia'
 import { createLogger } from '@/utils/logger'
-import {
-  getDeviceTypeFromSensorType,
-  getMultiValueDeviceConfigBySensorType,
-} from '@/utils/sensorDefaults'
 import type { ESPDevice } from '@/api/esp'
-import type { MockSensor, MultiValueEntry, QualityLevel, SensorHealthEvent } from '@/types'
+import type { MockSensor, QualityLevel, SensorHealthEvent } from '@/types'
 
 const logger = createLogger('SensorStore')
 
@@ -63,17 +59,6 @@ function normalizeSensorType(sensorType: string | undefined | null): string {
   return (sensorType ?? '').trim().toLowerCase()
 }
 
-function resolveMultiValueKey(
-  multiValues: Record<string, MultiValueEntry>,
-  incomingSensorType: string,
-): string {
-  const normalizedIncoming = normalizeSensorType(incomingSensorType)
-  const existingKey = Object.keys(multiValues).find(
-    key => normalizeSensorType(key) === normalizedIncoming,
-  )
-  return existingKey ?? incomingSensorType
-}
-
 /**
  * Normalize raw timestamp from server WebSocket event to ISO string.
  *
@@ -94,23 +79,6 @@ function normalizeRawTimestamp(ts: number | undefined | null): string | null {
 function parseSensorTimestampMs(raw: unknown): number | null {
   if (typeof raw !== 'number' || Number.isNaN(raw)) return null
   return raw > 1_000_000_000_000 ? raw : raw * 1000
-}
-
-// ============================================================================
-// Helper: Get worst quality from multi-values
-// ============================================================================
-function getWorstQuality(values: MultiValueEntry[]): QualityLevel {
-  const qualityOrder: QualityLevel[] = ['excellent', 'good', 'fair', 'poor', 'bad', 'stale', 'error']
-
-  let worstIndex = 0
-  for (const value of values) {
-    const index = qualityOrder.indexOf(value.quality)
-    if (index > worstIndex) {
-      worstIndex = index
-    }
-  }
-
-  return qualityOrder[worstIndex]
 }
 
 // ============================================================================
@@ -197,25 +165,7 @@ export const useSensorStore = defineStore('sensor', () => {
         return { ...device, sensors }
       }
 
-      // Fallback: legacy multi-value merge for sensors not yet in array
-      const knownDeviceType = getDeviceTypeFromSensorType(sensorType)
-      if (knownDeviceType) {
-        handleKnownMultiValueSensor(sensors, data, knownDeviceType)
-        return { ...device, sensors }
-      }
-
-      // Dynamic multi-value detection (different type on same GPIO)
-      const existingSensor = sensors.find(s => s.gpio === gpio)
-      if (
-        existingSensor &&
-        normalizeSensorType(existingSensor.sensor_type) !== normalizeSensorType(sensorType) &&
-        !existingSensor.is_multi_value
-      ) {
-        handleDynamicMultiValueSensor(existingSensor, data)
-        return { ...device, sensors }
-      }
-
-      // Single-value sensor (or first value of unknown multi-value)
+      // Fallback: keep separate single-value sensor entries (no GPIO-level merge)
       handleSingleValueSensorData(sensors, data)
       return { ...device, sensors }
     })
@@ -226,101 +176,7 @@ export const useSensorStore = defineStore('sensor', () => {
   }
 
   // ════════════════════════════════════════════════════════════════════════════
-  // HANDLER 1: KNOWN MULTI-VALUE (Registry-based)
-  // ════════════════════════════════════════════════════════════════════════════
-  function handleKnownMultiValueSensor(
-    sensors: MockSensor[],
-    data: SensorDataPayload,
-    deviceType: string
-  ): void {
-    let sensor = sensors.find(s => s.gpio === data.gpio)
-    const deviceConfig = getMultiValueDeviceConfigBySensorType(data.sensor_type)
-
-    if (!sensor) {
-      sensor = {
-        gpio: data.gpio,
-        sensor_type: data.sensor_type,
-        name: deviceConfig?.label ?? data.sensor_type,
-        raw_value: data.value,
-        unit: data.unit,
-        quality: data.quality ?? 'good',
-        raw_mode: true,
-        last_read: normalizeRawTimestamp(data.timestamp),
-        device_type: deviceType,
-        is_multi_value: true,
-        multi_values: {}
-      }
-      sensors.push(sensor)
-    }
-
-    if (!sensor.multi_values) {
-      sensor.multi_values = {}
-      sensor.is_multi_value = true
-      sensor.device_type = deviceType
-    }
-
-    const multiValueKey = resolveMultiValueKey(sensor.multi_values, data.sensor_type)
-    sensor.multi_values[multiValueKey] = {
-      value: data.value,
-      unit: data.unit,
-      quality: data.quality ?? 'good',
-      timestamp: Date.now(),
-      sensorType: data.sensor_type
-    }
-
-    if (deviceConfig) {
-      const primaryType = deviceConfig.values[0]?.sensorType
-      if (sensor.multi_values[primaryType]) {
-        sensor.raw_value = sensor.multi_values[primaryType].value
-        sensor.unit = sensor.multi_values[primaryType].unit
-      }
-    }
-
-    sensor.quality = getWorstQuality(Object.values(sensor.multi_values))
-    const knownTs = normalizeRawTimestamp(data.timestamp)
-    if (knownTs !== null) sensor.last_read = knownTs
-  }
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // HANDLER 2: DYNAMIC MULTI-VALUE (Auto-detected)
-  // ════════════════════════════════════════════════════════════════════════════
-  function handleDynamicMultiValueSensor(
-    existingSensor: MockSensor,
-    data: SensorDataPayload
-  ): void {
-    if (!existingSensor.is_multi_value) {
-      existingSensor.is_multi_value = true
-      existingSensor.device_type = null
-      existingSensor.multi_values = existingSensor.raw_value == null
-        ? {}
-        : {
-            [existingSensor.sensor_type]: {
-              value: existingSensor.raw_value,
-              unit: existingSensor.unit,
-              quality: existingSensor.quality,
-              timestamp: Date.now(),
-              sensorType: existingSensor.sensor_type
-            }
-          }
-      existingSensor.name = `Multi-Sensor GPIO ${existingSensor.gpio}`
-    }
-
-    const multiValueKey = resolveMultiValueKey(existingSensor.multi_values!, data.sensor_type)
-    existingSensor.multi_values![multiValueKey] = {
-      value: data.value,
-      unit: data.unit,
-      quality: data.quality ?? 'good',
-      timestamp: Date.now(),
-      sensorType: data.sensor_type
-    }
-
-    existingSensor.quality = getWorstQuality(Object.values(existingSensor.multi_values!))
-    const dynTs = normalizeRawTimestamp(data.timestamp)
-    if (dynTs !== null) existingSensor.last_read = dynTs
-  }
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // HANDLER 3: SINGLE-VALUE (unchanged behavior)
+  // HANDLER: SINGLE-VALUE UPsert (no multi-value merge fallback)
   // ════════════════════════════════════════════════════════════════════════════
   function handleSingleValueSensorData(sensors: MockSensor[], data: SensorDataPayload): void {
     const sensor = sensors.find(s => matchSensorToEvent(s, data))
@@ -331,7 +187,27 @@ export const useSensorStore = defineStore('sensor', () => {
       if (data.unit) sensor.unit = data.unit
       const singleTs = normalizeRawTimestamp(data.timestamp)
       if (singleTs !== null) sensor.last_read = singleTs
+      return
     }
+
+    const newSensor: MockSensor = {
+      config_id: data.config_id,
+      gpio: data.gpio,
+      sensor_type: data.sensor_type,
+      name: null,
+      raw_value: data.value ?? null,
+      unit: data.unit ?? '',
+      quality: data.quality ?? 'good',
+      raw_mode: true,
+      last_read: normalizeRawTimestamp(data.timestamp),
+      interface_type: data.i2c_address != null ? 'I2C' : (data.onewire_address ? 'ONEWIRE' : undefined),
+      i2c_address: data.i2c_address ?? null,
+      onewire_address: data.onewire_address ?? null,
+      is_multi_value: false,
+      device_type: null,
+      multi_values: null,
+    }
+    sensors.push(newSensor)
   }
 
   // =========================================================================

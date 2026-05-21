@@ -97,6 +97,7 @@ import ErrorState from '@/shared/design/patterns/ErrorState.vue'
 import ZoneRulesSection from '@/components/monitor/ZoneRulesSection.vue'
 import QuickActionBall from '@/components/quick-action/QuickActionBall.vue'
 import AddWidgetDialog from '@/components/monitor/AddWidgetDialog.vue'
+import ExportDialog from '@/components/export/ExportDialog.vue'
 import { getChartColors } from '@/utils/chartColors'
 import { tokens } from '@/utils/cssTokens'
 import { getZoneTileRenderableWidgets } from '@/utils/zoneTileWidgets'
@@ -972,24 +973,21 @@ const detailChartOptions = computed(() => {
   }
 })
 
-function exportDetailCsv() {
-  if (!detailReadings.value.length) return
-  const sensor = selectedDetailSensor.value
-  const unit = sensor?.unit || ''
-  const header = 'timestamp,raw_value,processed_value,unit,quality'
-  const rows = detailReadings.value.map(r => {
-    const processedVal = r.processed_value ?? r.raw_value
-    const rowUnit = r.unit || unit
-    return `${r.timestamp},${r.raw_value},${processedVal},${rowUnit},${r.quality}`
-  })
-  const csv = [header, ...rows].join('\n')
-  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `sensor-data_${sensor?.espId}_gpio${sensor?.gpio}_${Date.now()}.csv`
-  a.click()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
+const exportWizardOpen = ref(false)
+
+const exportWizardSensorContext = computed(() =>
+  selectedDetailSensor.value
+    ? {
+        espId: selectedDetailSensor.value.espId,
+        gpio: selectedDetailSensor.value.gpio,
+        sensorType: selectedDetailSensor.value.sensorType,
+        sensorName: selectedDetailSensor.value.name || `GPIO ${selectedDetailSensor.value.gpio}`,
+      }
+    : undefined
+)
+
+function openExportWizard(): void {
+  exportWizardOpen.value = true
 }
 
 // =============================================================================
@@ -2716,13 +2714,27 @@ function handleFabWidgetSelected(widgetType: string) {
       <!-- ═══ Section 5: Quick-Actions (fixed footer) ═══ -->
       <template #footer v-if="selectedDetailSensor">
         <div class="sensor-detail__actions">
-          <button class="sensor-detail__action-btn" @click="exportDetailCsv" :disabled="detailReadings.length === 0">
+          <button class="sensor-detail__action-btn" @click="openExportWizard" :disabled="!selectedDetailSensor">
             <Download :size="14" />
-            CSV Export
+            Export
           </button>
         </div>
       </template>
     </SlideOver>
+
+    <ExportDialog
+      v-if="exportWizardSensorContext"
+      mode="sensor"
+      :open="exportWizardOpen"
+      :esp-id="exportWizardSensorContext.espId"
+      :gpio="exportWizardSensorContext.gpio"
+      :sensor-type="exportWizardSensorContext.sensorType"
+      :sensor-name="exportWizardSensorContext.sensorName"
+      :default-start-time="detailStartTime"
+      :default-end-time="detailEndTime"
+      @update:open="exportWizardOpen = $event"
+      @close="exportWizardOpen = false"
+    />
 
     <!-- FAB (Quick-Add Widget) -->
     <QuickActionBall

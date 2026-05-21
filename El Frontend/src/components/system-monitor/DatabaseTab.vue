@@ -19,10 +19,10 @@ import { ref, computed, onMounted } from 'vue'
 import { useDatabaseStore } from '@/shared/stores/database.store'
 import {
   getColumnLabel,
-  formatCellValue,
   getTableLabel,
   getPrimaryColumnKeys,
-  getTableConfig
+  getTableConfig,
+  getDefaultVisibleColumns,
 } from '@/utils/databaseColumnTranslator'
 import {
   Database,
@@ -38,6 +38,7 @@ import FilterPanel from '@/components/database/FilterPanel.vue'
 import DataTable from '@/components/database/DataTable.vue'
 import Pagination from '@/components/database/Pagination.vue'
 import RecordDetailModal from '@/components/database/RecordDetailModal.vue'
+import ExportDialog from '@/components/export/ExportDialog.vue'
 
 const log = createLogger('DatabaseTab')
 
@@ -52,6 +53,31 @@ const store = useDatabaseStore()
 // ============================================================================
 
 const showFilterPanel = ref(false)
+const exportDialogOpen = ref(false)
+
+// Tables that carry a timestamp column (matches server auto-default logic)
+const TIMESTAMP_TABLES = new Set([
+  'sensor_data',
+  'actuator_history',
+  'logic_execution_history',
+  'audit_logs',
+  'esp_heartbeat_logs',
+  'diagnostic_reports',
+])
+
+const tableHasTimestamp = computed((): boolean =>
+  TIMESTAMP_TABLES.has(store.currentTable ?? '')
+)
+
+const exportTableColumns = computed(() => {
+  if (!store.currentTable || !store.currentColumns.length) return []
+  const defaultVisible = new Set(getDefaultVisibleColumns(store.currentTable))
+  return store.currentColumns.map((col) => ({
+    key: col.name,
+    label: getColumnLabel(store.currentTable!, col.name),
+    visible: defaultVisible.has(col.name),
+  }))
+})
 
 // ============================================================================
 // Computed - Column Translation
@@ -212,32 +238,6 @@ async function handleNavigateToForeignKey(table: string, id: string): Promise<vo
 }
 
 // ============================================================================
-// Methods - Export
-// ============================================================================
-
-function exportToJson(): void {
-  if (!store.currentTable || !store.currentData?.data) return
-
-  // Build translated export data
-  const exportData = store.currentData.data.map(row => {
-    const translatedRow: Record<string, unknown> = {}
-    for (const [key, value] of Object.entries(row)) {
-      const label = getColumnLabel(store.currentTable!, key)
-      translatedRow[label] = formatCellValue(store.currentTable!, key, value)
-    }
-    return translatedRow
-  })
-
-  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${store.currentTable}-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
-// ============================================================================
 // Lifecycle
 // ============================================================================
 
@@ -300,15 +300,27 @@ onMounted(async () => {
 
         <!-- Export -->
         <button
-          v-if="store.currentTable && store.currentData?.data.length"
+          v-if="store.currentTable"
           class="btn-ghost btn-sm"
-          @click="exportToJson"
+          @click="exportDialogOpen = true"
         >
           <Download class="w-4 h-4" />
-          <span class="btn-label">JSON</span>
+          <span class="btn-label">Export</span>
         </button>
       </div>
     </div>
+
+    <ExportDialog
+      v-if="store.currentTable"
+      mode="table"
+      :open="exportDialogOpen"
+      :table-name="store.currentTable"
+      :table-display-name="store.currentTable ? getTableLabel(store.currentTable) : undefined"
+      :has-timestamp="tableHasTimestamp"
+      :table-columns="exportTableColumns"
+      @update:open="exportDialogOpen = $event"
+      @close="exportDialogOpen = false"
+    />
 
     <!-- Error Alert -->
     <div v-if="store.error" class="db-error">
