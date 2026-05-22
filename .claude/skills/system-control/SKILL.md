@@ -40,7 +40,7 @@ allowed-tools: Read, Write, Bash, Grep, Glob
 | **Status prüfen** | [Section 2](#monitoring) | `make status` → `make health` |
 | **MQTT beobachten** | [Section 2](#monitoring) | `make mqtt-sub` |
 | **Logs lesen** | [Section 2](#monitoring) | `make logs` / `make logs-server` |
-| **ESP32 Serial (Docker)** | [Section 2](#monitoring) | `docker logs automationone-esp32-serial` (Profile: hardware) |
+| **ESP32 Serial (Docker)** | [Section 2](#monitoring) | `docker logs automationone-esp32-serial` (Profile: hardware). Wenn Container `Exited`: Heartbeats `kaiser/god/esp/+/system/heartbeat` + DB `esp_devices.last_seen` prüfen |
 | **Health-Check** | [Section 4](#4-health-check-referenz) | `curl /v1/health/live` |
 | **Session starten** | [Section 5](#5-session-scripts-v40) | `./scripts/debug/start_session.sh` |
 | **Container-Shell** | [Section 2](#shell-zugriff) | `make shell-server` |

@@ -385,6 +385,7 @@ Located in `.claude/` directory:
 - `./docker/loki/loki-config.yml` -> Loki config
 - `./docker/alloy/config.alloy` -> Alloy config (native River syntax)
 - `./docker/prometheus/prometheus.yml` -> Prometheus config
+- `./docker/prometheus/rules/` -> Prometheus Alert-Regeln (climate.yml: CriticalRuleSkippedDueToTargetOffline, AUT-110)
 - `./docker/grafana/provisioning/` -> Grafana provisioning
 
 ### docker-compose.dev.yml (Development Overrides)

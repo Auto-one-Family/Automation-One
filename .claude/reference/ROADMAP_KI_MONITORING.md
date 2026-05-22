@@ -1,7 +1,7 @@
 # AutomationOne - KI & Monitoring Roadmap
 
-**Version:** 1.3
-**Datum:** 2026-02-25
+**Version:** 1.4
+**Datum:** 2026-04-10
 **Status:** Living Document (Alert-Quality Fix 2026-02-25)
 **Quelle:** TM-Plan, korrigiert mit 8 verify-plan Findings; Full-Stack-Abgleich gegen echte Configs (docker-compose, Alloy/Promtail, Prometheus, metrics.py, Alert Rules); Alert-Quality Nachbesserung (6 Bloecke, cAdvisor-Limitierung Docker Desktop)
 
@@ -50,7 +50,8 @@ Vier Monitoring-Services in `docker-compose.yml` unter `profiles: ["monitoring"]
 | `compose_project` | Label | Docker SD | auto-one |
 | `level` | Label | Parser | Log-Level (el-servador: regex, el-frontend: JSON) |
 | `logger` | Structured Metadata | Regex Parser | Python module path (el-servador only) |
-| `request_id` | Structured Metadata | Regex Parser | Request-Correlation-ID (el-servador only) |
+| `request_id` | Structured Metadata | Regex Parser | ContextVar: REST-UUID oder MQTT-CID (el-servador only) |
+| `correlation_id` | Structured Metadata | Regex auf `message` | Optional; nur wenn die Zeile `\bcorrelation_id=` enthält (Business-/Actuator-Pfade; el-servador only) |
 | `component` | Structured Metadata | JSON Parser | Vue/ESP32 component name |
 | `device` | Structured Metadata | JSON Parser | ESP32 device_id (esp32-serial-logger only) |
 | `error_code` | Structured Metadata | Regex Parser | Error-Code E\d{4} (el-servador only) |
@@ -58,7 +59,7 @@ Vier Monitoring-Services in `docker-compose.yml` unter `profiles: ["monitoring"]
 **Alloy Pipeline (DONE, native River-Config `docker/alloy/config.alloy`):**
 - Health-Endpoint-Logs werden gedroppt (noise reduction)
 - Multiline-Aggregation fuer Python Tracebacks
-- Structured regex parsing fuer el-servador Text-Logs
+- Structured regex parsing fuer el-servador Text-Logs; optionales Metadata-Feld `correlation_id` aus Message-Text (`\bcorrelation_id=`)
 - JSON parsing fuer el-frontend Logs
 - **ESP32 → Loki:** Stage 4 `{compose_service="esp32-serial-logger"}` – JSON-Parse (level, device_id, component), Labels fuer Abfragen. ESP-Serial-Output fliesst in Loki sobald `esp32-serial-logger` (Profile: hardware) laeuft und sich mit ser2net/socat auf dem Host verbindet.
 - **Loki-Selbst-Logs:** Stage 5 – Loki-Container-Logs werden mitgeholt, logfmt-Parser, Query-Stats-Drop (Noise-Reduktion).

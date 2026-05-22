@@ -53,6 +53,10 @@ class IntentOutcomeLifecycleHandler:
             schema = str(payload.get("schema") or "").strip()
             boot_sequence_id = payload.get("boot_sequence_id")
             reason_code = payload.get("reason_code")
+            correlation_id = str(payload.get("correlation_id") or "").strip() or None
+            intent_id = str(payload.get("intent_id") or "").strip() or None
+            if correlation_id is None and intent_id is not None:
+                correlation_id = intent_id
 
             logger.info(
                 "Intent outcome lifecycle: esp_id=%s event_type=%s schema=%s boot_sequence_id=%s",
@@ -88,10 +92,13 @@ class IntentOutcomeLifecycleHandler:
                         "config_pending_exit_blocked_count": payload.get(
                             "config_pending_exit_blocked_count"
                         ),
+                        "intent_id": intent_id,
+                        "correlation_id": correlation_id,
                         "seq": payload.get("seq"),
                         "ts": payload.get("ts"),
                     },
                     severity=AuditSeverity.INFO,
+                    correlation_id=correlation_id,
                 )
                 await session.commit()
 

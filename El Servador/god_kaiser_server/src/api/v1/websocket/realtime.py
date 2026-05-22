@@ -9,6 +9,8 @@ from jose import JWTError
 
 from ....core.logging_config import get_logger
 from ....core.security import verify_token
+from ....db.models.audit_log import AuditSourceType
+from ....db.repositories.audit_log_repo import AuditLogRepository
 from ....db.repositories.token_blacklist_repo import TokenBlacklistRepository
 from ....db.repositories.user_repo import UserRepository
 from ....db.session import get_session
@@ -144,6 +146,47 @@ async def websocket_realtime(websocket: WebSocket, client_id: str):
                 filters = data.get("filters", None)
                 await manager.unsubscribe(client_id, filters)
                 logger.debug(f"Client {client_id} unsubscribed")
+
+            elif action == "client_stage":
+                stage = str(data.get("stage") or "").strip()
+                correlation_id = str(data.get("correlation_id") or "").strip()
+                observed_at_ms = data.get("observed_at_ms")
+                extra = data.get("extra") if isinstance(data.get("extra"), dict) else {}
+                if stage and correlation_id:
+                    # Keep stage logs aligned with server_window capture level.
+                    logger.warning(
+                        "latency_stage stage=%s correlation_id=%s observed_at_ms=%s client_id=%s",
+                        stage,
+                        correlation_id,
+                        observed_at_ms,
+                        client_id,
+                    )
+                    try:
+                        async for session in get_session():
+                            audit_repo = AuditLogRepository(session)
+                            await audit_repo.create(
+                                event_type="latency_stage",
+                                severity="info",
+                                source_type=AuditSourceType.API,
+                                source_id=f"ws_client:{client_id}",
+                                status=stage[:50],
+                                message=f"Frontend stage observation: {stage}",
+                                details={
+                                    "client_id": client_id,
+                                    "stage": stage,
+                                    "observed_at_ms": observed_at_ms,
+                                    "user_id": user_id,
+                                    "extra": extra,
+                                },
+                                correlation_id=correlation_id,
+                            )
+                            await session.commit()
+                            break
+                    except Exception as stage_persist_error:
+                        logger.warning(
+                            "Failed to persist latency_stage observation: %s",
+                            stage_persist_error,
+                        )
 
             else:
                 logger.warning(f"Unknown action from client {client_id}: {action}")

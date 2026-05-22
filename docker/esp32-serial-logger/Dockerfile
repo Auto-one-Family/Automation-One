@@ -39,9 +39,10 @@ ENV SERIAL_HOST=host.docker.internal \
 RUN useradd -m -u 1000 logger && chown -R logger:logger /app
 USER logger
 
-# Health check: Check if process is running
+# Health check: avoid external tools like pgrep in slim image.
+# Verify PID 1 still runs the logger entrypoint.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD pgrep -f serial_logger.py || exit 1
+    CMD python3 -c "from pathlib import Path; import sys; sys.exit(0 if b'serial_logger.py' in Path('/proc/1/cmdline').read_bytes() else 1)"
 
 # Entry point
 ENTRYPOINT ["python3", "-u", "serial_logger.py"]

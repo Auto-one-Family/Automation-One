@@ -90,11 +90,17 @@ El Servador/god_kaiser_server/src/
   "function": "handle_sensor_data",
   "line": 296,
   "request_id": "abc123-def456",
+  "failure_class": "sensor_payload_validation",
   "exception": "Traceback ..."
 }
 ```
 
+**failure_class:** Optional (Pilot I08); kleines String-Set aus `logging` `extra=` — erscheint in **JSON-Datei** als Schlüssel; in **Docker-stdout** als Text-Suffix `failure_class=…` (kein JSON pro Zeile). Whitelist: `core/logging_config.py` (`_STRUCTURED_JSON_FIELDS`).
+
 **request_id:** UUID via `RequestIdMiddleware` für HTTP. MQTT-Handler: `{esp_id}:{topic}:{seq}:{ts_ms}` via `generate_mqtt_correlation_id()`.
+
+**Loki (Docker-Stdout, Text-Logs):** Alloy legt Structured Metadata `logger`, `request_id` an; optional **`correlation_id`**, wenn die Log**nachricht** ein Feld `correlation_id=…` enthält (nicht jede Zeile). Filter in LogQL: `docs/debugging/logql-queries.md` § Structured Metadata; Semantik REST vs. MQTT: `docs/debugging/correlation-id-playbook.md`.
+
 **Noise-Reduction:** paho.mqtt, urllib3, asyncio, apscheduler (+ executors.default, scheduler) auf WARNING.
 **Rotation:** 10 MB, 10 Backups (`LOG_FILE_MAX_BYTES`, `LOG_FILE_BACKUP_COUNT`).
 

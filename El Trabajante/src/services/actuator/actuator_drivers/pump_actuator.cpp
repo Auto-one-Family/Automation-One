@@ -1,7 +1,5 @@
 #include "pump_actuator.h"
 
-#include <cstring>
-
 #include "../../../drivers/gpio_manager.h"
 #include "../../../error_handling/error_tracker.h"
 #include "../../../models/error_codes.h"
@@ -19,9 +17,7 @@ PumpActuator::PumpActuator()
       last_stop_ms_(0),
       accumulated_runtime_ms_(0),
       last_cycle_runtime_ms_(0),
-      gpio_manager_(&GPIOManager::getInstance()) {
-  memset(activation_timestamps_, 0, sizeof(activation_timestamps_));
-}
+      gpio_manager_(&GPIOManager::getInstance()) {}
 
 PumpActuator::~PumpActuator() {
   end();
@@ -138,7 +134,6 @@ bool PumpActuator::applyState(bool state, bool force) {
   unsigned long now = millis();
   if (state) {
     activation_start_ms_ = now;
-    recordActivation(now);
   } else if (activation_start_ms_ != 0) {
     last_cycle_runtime_ms_ = now - activation_start_ms_;
     accumulated_runtime_ms_ += last_cycle_runtime_ms_;
@@ -156,16 +151,9 @@ bool PumpActuator::applyState(bool state, bool force) {
   return true;
 }
 
-void PumpActuator::recordActivation(unsigned long now) {
-  for (uint8_t i = ACTIVATION_HISTORY - 1; i > 0; i--) {
-    activation_timestamps_[i] = activation_timestamps_[i - 1];
-  }
-  activation_timestamps_[0] = now;
-}
-
 // Hardware-Safety-Feature (Runtime-Protection):
 // Schützt Pump vor Überhitzung/Verschleiß (wie Thermal-Shutdown in CPUs).
-// Protection-Parameter werden vom Server konfiguriert (max_runtime, cooldown, max_activations).
+// Protection-Parameter werden vom Server konfiguriert (max_runtime, cooldown).
 // WICHTIG: Dies ist NICHT Business-Logic (keine Priority-basierte Entscheidung).
 // Dokumentiert in: docs/ZZZ.md - "Server-Centric Pragmatic Deviations"
 bool PumpActuator::canActivate() const {
@@ -183,18 +171,6 @@ bool PumpActuator::canActivate() const {
     if (since_stop < protection_.cooldown_ms) {
       return false;
     }
-  }
-
-  unsigned long window_start = now - protection_.activation_window_ms;
-  uint16_t activations_in_window = 0;
-  for (uint8_t i = 0; i < ACTIVATION_HISTORY; i++) {
-    if (activation_timestamps_[i] >= window_start && activation_timestamps_[i] != 0) {
-      activations_in_window++;
-    }
-  }
-
-  if (activations_in_window >= protection_.max_activations_per_hour) {
-    return false;
   }
 
   return true;

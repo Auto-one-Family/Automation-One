@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 
 from src.db.models.actuator import ActuatorConfig, ActuatorState
+from src.db.models.audit_log import AuditLog
 from src.db.models.command_contract import CommandIntent, CommandOutcome
 from src.db.models.esp import ESPDevice
 from src.db.repositories.actuator_repo import ActuatorRepository
@@ -164,6 +165,14 @@ async def test_send_command_noop_has_correlation_without_publish(
     assert result.command_sent is False
     uuid.UUID(result.correlation_id)
     publisher.publish_actuator_command.assert_not_called()
+
+    noop_audit = (
+        await db_session.execute(
+            select(AuditLog).where(AuditLog.correlation_id == result.correlation_id)
+        )
+    ).scalar_one_or_none()
+    assert noop_audit is not None
+    assert noop_audit.event_type == "actuator_command_noop"
 
 
 @pytest.mark.asyncio

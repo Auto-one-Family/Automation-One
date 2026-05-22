@@ -125,6 +125,7 @@ class ActuatorResponseHandler:
             success = canonical.success
             message = canonical.message
             correlation_id = canonical.correlation_id
+            t3_seen_ms = int(time.time() * 1000)
             issued_by_raw = payload.get("issued_by")
             issued_by = (
                 issued_by_raw.strip()
@@ -166,6 +167,15 @@ class ActuatorResponseHandler:
 
             # Step 3: Convert ESP32 timestamp
             esp32_timestamp = self._convert_timestamp(canonical.ts)
+            if correlation_id:
+                logger.warning(
+                    "latency_stage stage=t3_actuator_response_seen correlation_id=%s esp_id=%s gpio=%s observed_at_ms=%s payload_ts=%s",
+                    correlation_id,
+                    esp_id_str,
+                    gpio,
+                    t3_seen_ms,
+                    canonical.ts,
+                )
 
             # Step 4: Get database session and repositories
             async with resilient_session() as session:
@@ -232,6 +242,7 @@ class ActuatorResponseHandler:
                         "duration": payload.get("duration", 0),
                         "response_message": message,
                         "zone_id": payload.get("zone_id", ""),
+                        "correlation_id": correlation_id,
                         "issued_by": issued_by,
                         "code": canonical.code,
                         "domain": canonical.domain,

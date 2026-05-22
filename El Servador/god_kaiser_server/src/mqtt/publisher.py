@@ -93,6 +93,7 @@ class Publisher:
             "value": value,
             "duration": duration,
             "timestamp": int(time.time()),
+            "timestamp_ms": int(time.time() * 1000),
         }
         if issued_by:
             payload["issued_by"] = issued_by
@@ -106,7 +107,16 @@ class Publisher:
         logger.info(
             f"Publishing actuator command to {esp_id} GPIO {gpio}: {command} (value={value})"
         )
-        return self._publish_with_retry(topic, payload, qos, retry)
+        publish_ok = self._publish_with_retry(topic, payload, qos, retry)
+        if publish_ok and correlation_id:
+            logger.warning(
+                "latency_stage stage=t2_mqtt_published correlation_id=%s esp_id=%s gpio=%s observed_at_ms=%s",
+                correlation_id,
+                esp_id,
+                gpio,
+                int(time.time() * 1000),
+            )
+        return publish_ok
 
     def publish_sensor_command(
         self,

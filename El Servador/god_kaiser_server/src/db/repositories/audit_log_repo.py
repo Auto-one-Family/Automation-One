@@ -304,6 +304,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
         message: Optional[str] = None,
         details: Optional[dict] = None,
         severity: str = AuditSeverity.INFO,
+        correlation_id: Optional[str] = None,
     ) -> AuditLog:
         """
         Log a device-related event.
@@ -315,6 +316,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
             message: Human-readable message
             details: Additional event details
             severity: Event severity level
+            correlation_id: Optional correlation id for cross-table tracing
 
         Returns:
             Created AuditLog entry
@@ -327,6 +329,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
             status=status,
             message=message,
             details=details or {},
+            correlation_id=correlation_id,
         )
 
     async def log_actuator_command(

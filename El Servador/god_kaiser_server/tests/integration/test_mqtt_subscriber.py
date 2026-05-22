@@ -200,6 +200,31 @@ class TestMessageRouting:
         assert Subscriber._is_critical_topic("kaiser/god/esp/ESP_1/system/will") is True
         assert Subscriber._is_critical_topic("kaiser/god/esp/ESP_1/system/heartbeat") is False
 
+    def test_route_message_prefers_payload_correlation_id_for_handler_context(self):
+        """If payload has correlation_id, it is forwarded to handler execution."""
+        with patch("src.mqtt.subscriber.MQTTClient") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client_class.get_instance.return_value = mock_client
+
+            subscriber = Subscriber(max_workers=2)
+            try:
+                submit_mock = MagicMock()
+                subscriber.executor.submit = submit_mock
+
+                async def handler(topic, payload):
+                    return True
+
+                subscriber.register_handler("kaiser/god/esp/+/actuator/+/status", handler)
+                subscriber._route_message(
+                    "kaiser/god/esp/ESP_TEST/actuator/25/status",
+                    '{"esp_id":"ESP_TEST","seq":42,"correlation_id":"cid-from-payload"}',
+                )
+
+                submit_mock.assert_called_once()
+                assert submit_mock.call_args.args[4] == "cid-from-payload"
+            finally:
+                subscriber.shutdown(wait=False)
+
 
 class TestErrorIsolation:
     """Test error isolation in handler execution."""

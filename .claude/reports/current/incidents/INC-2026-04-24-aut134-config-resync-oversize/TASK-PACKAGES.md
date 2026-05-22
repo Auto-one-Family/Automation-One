@@ -149,11 +149,11 @@
 
 **Ziel:** Jede vollwertige Config-Push-Zeile mit geändertem `max_runtime_ms` muss NVS + Pump-Treiber erreichen, ohne sinnlose GPIO-Neuinitialisierung.
 
-**Akzeptanzkriterien:**
-- [ ] `soft_changed` enthält mindestens Vergleich `prev.runtime_protection.max_runtime_ms` vs. `config` (und ggf. weitere `RuntimeProtection`-Felder, die vom Server gepusht werden).
-- [ ] Soft-Update-Pfad: Felder persistieren, `PumpActuator::setRuntimeProtection` o. ä. aufrufen wo zutreffend.
-- [ ] Test/Manual: Server sendet geändertes `max_runtime_ms` bei sonst identischem Actuator-JSON; ESP-Log/NVS widerspricht nicht mehr dem Serverwert.
-- [ ] Commit nur auf `auto-debugger/work`.
+**Akzeptanzkriterien (verifiziert 2026-05-06):**
+- [x] `soft_changed` enthält Vergleich `prev.runtime_protection.max_runtime_ms` UND `.timeout_enabled` vs. `config` — actuator_manager.cpp Z. 244–247.
+- [x] Soft-Update-Pfad: RAM + NVS (`saveActuatorConfig` Z. 287–291) + `PumpActuator::syncRuntimeLimitsFromConfig()` (Z. 274–278). Non-PUMP: Timeout-Loop liest direkt aus `config.runtime_protection` (Z. 667–688).
+- [x] Server-Mapping `safety_constraints.max_runtime → max_runtime_ms` via `seconds_to_ms` in config_mapping.py Z. 344–352 vorhanden.
+- [x] Fix ist committed auf `auto-debugger/work`. Linear-Issue auf Done gesetzt.
 
 ---
 
@@ -172,13 +172,13 @@
 
 ## PKG-08 — Anzahl `offline_rules` vs. sichtbare Logik-Regeln (P2)
 
-**Hintergrund:** Config enthält `offline_rules` aus `config_builder._build_offline_rules` (Kappung `MAX_OFFLINE_RULES`); UI kann weniger Regeln anzeigen oder andere SSOT. Serial zeigt 6 Regeln, „nur eine gespeichert“ ist ein **Produkt/Erwartung**-Gap, kein Beweis für fehlgeschlagenen Austausch.
+**Hintergrund:** Config enthält `offline_rules` aus `config_builder._build_offline_rules` (Kappung `MAX_OFFLINE_RULES`); UI kann weniger Regeln anzeigen oder andere SSOT. Serial zeigt 6 Regeln, „nur eine gespeichert” ist ein **Produkt/Erwartung**-Gap, kein Beweis für fehlgeschlagenen Austausch.
 
 **Ziel:** server-dev: Doku/Operator-Hinweis (welche Regeln in den Push einfließen); optional `reason_code`/Meta im Payload, ohne Breaking Change.
 
-**Akzeptanzkriterien:**
-- [ ] Verhalten dokumentiert oder telemetriert: „6 Regeln“ = welche Quellen (inkl. Zeitfenster- und effektiv `__twindow_on` mit GPIO 255).
-- [ ] Kein Breaking Change an MQTT-Schema ohne separates Gate.
+**Akzeptanzkriterien (verifiziert 2026-05-06):**
+- [x] Verhalten dokumentiert und telemetriert: Docstring in `_build_offline_rules` listet alle 6 Ausschlussursachen inkl. `__twindow_on/off` mit `sensor_gpio=255`. Strukturiertes Audit-Log `[CONFIG] offline_rules audit` nach jedem Build mit `enabled_rules_checked / included (sensor_hysteresis + time_window_only) / skipped / capped`.
+- [x] Kein Breaking Change an MQTT-Schema — reine Log-Ergänzung, kein Payload-Feld hinzugefügt. Linear-Issue auf Done gesetzt.
 
 ---
 

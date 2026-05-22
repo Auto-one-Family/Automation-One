@@ -14,6 +14,48 @@ static const char* ACT_Q_TAG = "SYNC";
 QueueHandle_t g_actuator_cmd_queue = NULL;
 extern SystemConfig g_system_config;
 
+static bool coalescePendingActuatorCommand(const ActuatorMqttQueueItem& incoming) {
+    if (g_actuator_cmd_queue == NULL) {
+        return false;
+    }
+
+    const UBaseType_t queued = uxQueueMessagesWaiting(g_actuator_cmd_queue);
+    if (queued == 0) {
+        return false;
+    }
+
+    bool replaced_any = false;
+    ActuatorMqttQueueItem item;
+    for (UBaseType_t i = 0; i < queued; ++i) {
+        if (xQueueReceive(g_actuator_cmd_queue, &item, 0) != pdTRUE) {
+            break;
+        }
+
+        if (strncmp(item.topic, incoming.topic, sizeof(item.topic)) == 0) {
+            // Keep latest command for same actuator topic (last-write-wins).
+            replaced_any = true;
+            continue;
+        }
+
+        if (xQueueSend(g_actuator_cmd_queue, &item, 0) != pdTRUE) {
+            LOG_W(ACT_Q_TAG, "[SYNC] Actuator queue restore dropped: " + String(item.topic));
+        }
+    }
+
+    if (!replaced_any) {
+        return false;
+    }
+
+    if (xQueueSend(g_actuator_cmd_queue, &incoming, 0) == pdTRUE) {
+        LOG_I(ACT_Q_TAG, "[SYNC] Coalesced pending actuator command with newer payload: " +
+                         String(incoming.topic));
+        return true;
+    }
+
+    LOG_W(ACT_Q_TAG, "[SYNC] Coalesced enqueue failed for: " + String(incoming.topic));
+    return false;
+}
+
 void initActuatorCommandQueue() {
     g_actuator_cmd_queue = xQueueCreate(ACTUATOR_CMD_QUEUE_SIZE, sizeof(ActuatorMqttQueueItem));
     if (g_actuator_cmd_queue == NULL) {
@@ -35,6 +77,9 @@ bool queueActuatorCommand(const char* topic, const char* payload, const IntentMe
     }
     cmd.enqueued_ms = millis();
     bool recovery_intent = isRecoveryIntentAllowed(topic, payload);
+    if (!recovery_intent && coalescePendingActuatorCommand(cmd)) {
+        return true;
+    }
     BaseType_t queued = recovery_intent
                         ? xQueueSendToFront(g_actuator_cmd_queue, &cmd, pdMS_TO_TICKS(20))
                         : xQueueSend(g_actuator_cmd_queue, &cmd, 0);

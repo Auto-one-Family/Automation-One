@@ -26,7 +26,7 @@
 
 | # | Quelle | Schlüssel | Tabelle | Evidence |
 |---|--------|------------|---------|----------|
-|15 | Subzone-Zuordnung | `assigned_gpios` JSON-Liste, `esp_id` = **`esp_devices.device_id`** | `subzone_configs.assigned_gpios`, `subzone_configs.esp_id` | `src/db/models/subzone.py` FK auf `esp_devices.device_id` |
+|15 | Subzone-Zuordnung | `assigned_gpios` JSON-Liste, `esp_id` = **`esp_devices.device_id`** | `subzone_configs.assigned_gpios`, `subzone_configs.esp_id` | `src/db/models/subzone.py`; **kein echter DB-FK-Constraint** — String-Referenz auf `esp_devices.device_id` (VARCHAR), Integrität nur auf Applikationsebene |
 
 **Firmware-Abgleich (Checkliste only, kein C++ in diesem Agenten):**
 

@@ -255,6 +255,18 @@ class Subscriber:
             seq = payload.get("seq")
             topic_suffix = topic.rsplit("/", 1)[-1] if "/" in topic else topic
             correlation_id = generate_mqtt_correlation_id(esp_id, topic_suffix, seq)
+            payload_correlation_id = self._extract_payload_correlation_id(payload)
+            effective_correlation_id = payload_correlation_id or correlation_id
+            if payload_correlation_id and (
+                ("/actuator/" in topic and topic.endswith("/response"))
+                or topic.endswith("/system/intent_outcome")
+            ):
+                logger.warning(
+                    "latency_stage stage=mqtt_subscriber_received correlation_id=%s topic=%s observed_at_ms=%s",
+                    payload_correlation_id,
+                    topic,
+                    int(time.time() * 1000),
+                )
 
             # Find matching handler
             handler = self._find_handler(topic)
@@ -281,11 +293,14 @@ class Subscriber:
                     )
                 # #endregion
                 inbox_priority, latency_critical = self._classify_inbound_topic(topic)
-                if inbox_priority is not None:
+                # Keep the durable inbox strictly for critical classes. High-frequency
+                # telemetry (sensor data / heartbeat) must not synchronously block the
+                # subscriber callback thread.
+                if inbox_priority == InboundPriority.CRITICAL:
                     inbox_event_id = self._append_critical_inbound_event(
                         topic=topic,
                         payload=payload,
-                        correlation_id=correlation_id,
+                        correlation_id=effective_correlation_id,
                         priority=inbox_priority,
                     )
                 # Submit handler to thread pool for async execution
@@ -320,7 +335,7 @@ class Subscriber:
                         handler,
                         topic,
                         payload,
-                        correlation_id,
+                        effective_correlation_id,
                         inbox_event_id,
                         retain,
                     )
@@ -393,9 +408,12 @@ class Subscriber:
         is_actuator_response = "/actuator/" in topic and topic.endswith("/response")
         is_sensor_response = "/sensor/" in topic and topic.endswith("/response")
         is_sensor_data = "/sensor/" in topic and topic.endswith("/data")
+        is_intent_outcome = topic.endswith("/system/intent_outcome")
+        is_intent_outcome_lifecycle = topic.endswith("/system/intent_outcome/lifecycle")
         is_critical = (
             is_actuator_response
             or is_sensor_response
+            or is_intent_outcome
             or topic.endswith("/config_response")
             or topic.endswith("/zone/ack")
             or topic.endswith("/subzone/ack")
@@ -403,11 +421,22 @@ class Subscriber:
         )
         if is_critical:
             return InboundPriority.CRITICAL, True
+        if is_intent_outcome_lifecycle:
+            return InboundPriority.HIGH, False
         if topic.endswith("/system/heartbeat") or is_sensor_data:
             return InboundPriority.HIGH, False
         if topic.endswith("/system/diagnostics") or topic.endswith("/system/queue_pressure"):
             return InboundPriority.NORMAL, False
         return None, False
+
+    @staticmethod
+    def _extract_payload_correlation_id(payload: dict) -> Optional[str]:
+        """Return payload correlation_id when present and non-empty."""
+        correlation = payload.get("correlation_id")
+        if correlation is None:
+            return None
+        normalized = str(correlation).strip()
+        return normalized if normalized else None
 
     @staticmethod
     def _inbound_priority_for_topic(topic: str) -> Optional[InboundPriority]:

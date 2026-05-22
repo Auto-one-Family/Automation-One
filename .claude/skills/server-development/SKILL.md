@@ -16,7 +16,56 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 # God-Kaiser Server - Skill Dokumentation
 
 > **Architektur:** Server-Centric. ESP32 = dumme Agenten. ALLE Logik auf Server.
-> **Codebase:** `El Servador/god_kaiser_server/src/` (~60,604 Zeilen Python)
+> **Codebase:** `El Servador/god_kaiser_server/src/` (grosses Monorepo-Backend; Umfang bei Bedarf im Repo messen).
+
+---
+
+## 0.1 Stack-Anker (Ist-Stand)
+
+Verbindliche Tech-Liste aus `El Servador/god_kaiser_server/pyproject.toml` — **keine** parallelen Frameworks oder ORM-Stile einführen.
+
+| Technologie | Version / Hinweis | Anker im Repo |
+|-------------|-------------------|---------------|
+| Python | ^3.11 | Tooling: ruff `py311`, pytest |
+| FastAPI | >=0.115, unter 1.0 (pyproject) | `src/main.py` (`lifespan`), `src/api/` |
+| Uvicorn | ^0.27 (standard extras) | Start / Container |
+| SQLAlchemy | ^2.0 | `src/db/session.py`, Models `src/db/models/` |
+| Alembic | ^1.13 | `alembic/`, Revisionen unter `alembic/versions/` |
+| asyncpg / psycopg2-binary | PostgreSQL | `DATABASE_URL` mit `postgresql+asyncpg://` (async App) |
+| Pydantic | ^2.5 (+ email extras) | `src/schemas/` |
+| paho-mqtt, aiomqtt | MQTT | `src/mqtt/client.py`, `subscriber.py`, `publisher.py` |
+| python-jose, passlib | JWT / Passwort | `src/core/security.py`, `src/api/deps.py` |
+| httpx, aiohttp | HTTP-Clients | Services / Outbound |
+| prometheus-client, prometheus-fastapi-instrumentator | Metriken | `src/core/metrics.py`, App-Setup in `main.py` |
+| APScheduler | Jobs | `src/services/*scheduler*.py`, Lifespan-Registrierung |
+| websockets | WS-Protokoll | zusammen mit FastAPI-Starlette-Stack |
+| pytest, pytest-asyncio, aiosqlite | Tests | `tests/conftest.py` (SQLite In-Memory, Overrides) |
+
+---
+
+## 0.2 Schichten & Protokolle (El Servador)
+
+| Schicht | Rolle | Pfad (unter `god_kaiser_server/src/`) |
+|---------|--------|--------------------------------------|
+| REST API | Router, Auth-Dependencies, Pydantic-IO | `api/v1/` (`api/v1/__init__.py` bündelt Router) |
+| DI / Auth | Session, JWT, Rollen, API-Key-Stellen | `api/deps.py` |
+| Services | Domänenlogik, Safety, Logic Engine, Zonen | `services/` |
+| Daten | ORM-Modelle, Repositories | `db/models/` (~25 Moduldateien), `db/repositories/` (~23 Module inkl. `base_repo.py`) |
+| MQTT | Transport, Routing, Handler, Publisher | `mqtt/subscriber.py`, `mqtt/handlers/`, `mqtt/publisher.py`, `mqtt/topics.py` |
+| Realtime | WebSocket an Clients | `api/v1/websocket/realtime.py`, `websocket/manager.py` |
+| Querschnitt | Config, Logging, Request-ID, Resilience | `core/config.py`, `core/logging_config.py`, `middleware/request_id.py`, `core/resilience.py` |
+
+**Dual-Protokoll-Denken:** Zustände und Befehle betreffen oft **REST + MQTT** (und bei UI/Monitor zusätzlich **WebSocket**). Finalität und Korrelation (z. B. `correlation_id`, ACK-Pfade) sind in `El Servador/god_kaiser_server/docs/finalitaet-http-mqtt-ws.md` und in `.claude/reference/api/MQTT_TOPICS.md` / `WEBSOCKET_EVENTS.md` beschrieben — bei Änderungen immer mitlesen und Payloads/Events abstimmen.
+
+### Datenbank-Session: drei gängige Muster
+
+| API | Verwendung |
+|-----|------------|
+| `get_db()` in `api/deps.py` | FastAPI-`Depends(get_db)` für Request-Handler — intern `async for session in get_session(): yield` |
+| `get_session()` in `db/session.py` | Async-Generator für Services, MQTT-Handler, Lifespan, wenn keine FastAPI-Request-Dependency verfügbar ist |
+| `get_session_maker()` | Explizite Session-Factory (z. B. Scheduler, Background-Jobs, `async with get_session_maker()()`) |
+
+Tests überschreiben **`get_db`** via `app.dependency_overrides[get_db]` (siehe `tests/conftest.py` — `override_get_db`).
 
 ---
 
@@ -37,16 +86,16 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 ### Ordnerstruktur (Kurzübersicht)
 
 ```
-src/ (60,604 Zeilen)
-├── services/      13,675 (22.6%)  Business Logic, Logic Engine
-├── api/v1/        12,210 (20.1%)  REST Endpoints (~230, inkl. zone_context, backups, export, schema_registry)
-├── core/           7,294 (12.0%)  Config, Security, Scheduler
-├── db/             6,942 (11.5%)  Models (19), Repositories (18)
-├── mqtt/           6,938 (11.4%)  Client, Handlers (14), Publisher
-├── schemas/        6,778 (11.2%)  Pydantic DTOs (70+)
-├── sensors/        3,728 (6.2%)   Sensor Libraries
-├── main.py           711 (1.2%)   FastAPI App, Lifespan
-└── andere          2,328 (3.8%)   WebSocket, Utils, Middleware
+src/
+├── services/       Business Logic, Logic Engine, Scheduler-Jobs
+├── api/v1/         REST (u. a. zone_context, backups, export, schema_registry)
+├── core/           Config, Security, Resilience, Metriken, Logging
+├── db/             Models (`db/models/`), Repositories (`db/repositories/`)
+├── mqtt/           Client, Subscriber, Handlers, Publisher, Topics
+├── schemas/        Pydantic DTOs
+├── sensors/        Sensor Libraries (`sensor_libraries/active/`)
+├── main.py         FastAPI App, Lifespan (MQTT/WebSocket/Services)
+└── (weitere)       WebSocket, Utils, Middleware
 ```
 
 **API-Details:** Siehe `MODULE_REGISTRY.md`
@@ -82,68 +131,38 @@ Server sendet:  Actuator-Commands, Config-Updates
 
 ## 2. Startup-Sequenz (main.py)
 
-**Datei:** `src/main.py` (711 Zeilen)
+**Datei:** `src/main.py` — `lifespan()` kapselt Startup/Shutdown.
 
-### Startup-Reihenfolge (kritische Steps)
+### Startup-Reihenfolge (logisch, Reihenfolge im Code beachten)
 
-| Step | Aktion | Zeile | Kritisch |
-|------|--------|-------|----------|
-| 0 | Security Validation (JWT Secret) | 99-127 | HALT in Prod |
-| 0.5 | Resilience Registry Init | 129-151 | JA |
-| 1 | **Database Init** | 153-165 | KRITISCH |
-| 2 | MQTT Client Connect | 167-178 | NON-FATAL |
-| 3 | MQTT Handler Registration | 180-310 | JA |
-| 3.4 | Central Scheduler Init | 264-268 | JA |
-| 3.4.1 | Simulation Scheduler | 270-278 | JA |
-| 3.4.2 | Maintenance Service | 312-322 | JA |
-| 3.4.5 | Alert Suppression Scheduler | ~325 | NON-FATAL |
-| 3.5 | Mock-ESP Recovery | 324-336 | NON-FATAL |
-| 3.5.1 | Rebuild simulation_configs (Write-Through Cache) | ~466-485 | NON-FATAL |
-| 3.6 | Sensor Type Auto-Reg | 338-357 | NON-FATAL |
-| 3.7 | Sensor Schedule Recovery | 359-387 | NON-FATAL |
-| 4 | MQTT Topics Subscribe | 389-395 | CONDITIONAL |
-| 5 | **WebSocket Manager Init** | 397-402 | JA |
-| 6 | **Services Init (Safety → Logic)** | 404-482 | KRITISCH |
-| 6.1 | Plugin-Sync (Registry → DB) | ~484-500 | NON-FATAL |
-| 6.2 | Daily Diagnostic Scheduler | ~502-530 | NON-FATAL |
-| 6.3 | Plugin Schedule Registration (DB → APScheduler) | ~532-580 | NON-FATAL |
+| Phase | Aktion | Kritisch |
+|-------|--------|----------|
+| 0 | Security Validation (JWT Secret — Abbruch in Production bei Default) | HALT in Prod |
+| 0.5 | Resilience Registry | JA |
+| 1 | Database Init (`init_db`, Circuit Breaker) | KRITISCH |
+| 2 | MQTT Client Connect | NON-FATAL (Betrieb oft ohne Broker möglich) |
+| 3 | MQTT-Handler registrieren (`Subscriber.register_handler`, Topic-Pattern aus `mqtt/topics`) | JA |
+| 3.x | Scheduler (Simulation, Maintenance, Alert-Suppression, …) | gemischt |
+| 4 | MQTT Subscriptions / Bridge (inkl. `MQTTCommandBridge` wo konfiguriert) | JA |
+| 5 | WebSocket Manager | JA |
+| 6 | Services (Safety → Logic Engine, Runtime-State, …) | KRITISCH |
+| 7 | Plugin-Sync / diagnostische Jobs / weitere Registrierungen | meist NON-FATAL |
 
-### Shutdown-Reihenfolge
+**Handler-Registrierung:** Im `lifespan`-Block — Suche nach `register_handler(` und Log-Zeilen `... handler registered` für die aktuelle Liste (Topics ändern sich seltener als Zeilennummern).
 
-| Priorität | Aktion | Zeile |
-|-----------|--------|-------|
-| FIRST | Logic Scheduler/Engine Stop | 514-524 |
-| EARLY | Sequence Executor Cleanup | 526-530 |
-| EARLY | Maintenance/Mock-ESP Stop | 532-560 |
-| MIDDLE | WebSocket/MQTT Shutdown | 562-578 |
-| LAST | Database Dispose | 580-583 |
+### Shutdown-Reihenfolge (logisch)
+
+Logic/Scheduler zuerst stoppen → Maintenance/Mock → WebSocket/MQTT → Engine `dispose` (Details im `lifespan`-Shutdown-Teil von `main.py`).
 
 ---
 
 ## 3. MQTT Layer
 
-**Dateien:** `src/mqtt/` (6,938 Zeilen, 15+ Handler-Module)
+**Dateien:** `src/mqtt/` — u. a. `client.py`, `subscriber.py`, `publisher.py`, `handlers/`, `topics.py`
 
 ### Handler-Übersicht
 
-| Topic Pattern | Handler | QoS | Zeile (main.py) |
-|---------------|---------|-----|-----------------|
-| `+/sensor/+/data` | SensorDataHandler | 1 | 203-206 |
-| `+/actuator/+/status` | ActuatorStatusHandler | 1 | 207-210 |
-| `+/actuator/+/response` | ActuatorResponseHandler | 1 | 212-215 |
-| `+/actuator/+/alert` | ActuatorAlertHandler | 1 | 217-220 |
-| `+/system/heartbeat` | HeartbeatHandler | 0 | 221-224 |
-| `discovery/esp32_nodes` | DiscoveryHandler | 1 | 225-228 |
-| `+/config_response` | ConfigHandler | 1 | 229-232 |
-| `+/zone/ack` | ZoneAckHandler | 1 | 234-237 |
-| `+/subzone/ack` | SubzoneAckHandler | 1 | 239-242 |
-| `+/system/will` | LWTHandler | 0 | 248-251 |
-| `+/system/error` | ErrorEventHandler | 1 | 256-259 |
-| `+/system/intent_outcome` | IntentOutcomeHandler | 1 | ~299-302 |
-| `+/system/intent_outcome/lifecycle` | IntentOutcomeLifecycleHandler | 1 | ~303-309 |
-| `+/actuator/+/command` | MockActuatorHandler | 1 | 297-300 |
-| `+/actuator/emergency` | MockActuatorHandler | 1 | 302-305 |
-| `broadcast/emergency` | MockActuatorHandler | 1 | 306-309 |
+**Vollständige Topic-Pattern und QoS:** `.claude/reference/api/MQTT_TOPICS.md` und Registrierung in `src/main.py` (`register_handler`-Aufrufe im `lifespan`). Die Tabelle im Skill war historisch; bei Abweichungen gilt **Code + MQTT_TOPICS**.
 
 ### Handler-Flow
 
@@ -159,18 +178,21 @@ DB Persist → Logic Engine → WebSocket Broadcast
 
 ### Neuen Handler hinzufügen
 
-1. Erstelle `src/mqtt/handlers/your_handler.py`
-2. Implementiere `async def handle_your_event(topic: str, payload: dict) -> bool`
-3. Registriere in `main.py` (lifespan, ~Zeile 260)
-4. Füge Topic zu `src/mqtt/topics.py` hinzu
+1. Neues Modul unter `src/mqtt/handlers/` — **bestehenden Handler gleicher Domäne** als Vorlage (z. B. `sensor_handler.py`: Klasse mit Methoden wie `handle_sensor_data`; andere nutzen `BaseMQTTHandler` aus `handlers/base_handler.py`).
+2. Callback an `Subscriber.register_handler(topic_pattern, callable)` übergeben — Signatur wie die Nachbarn (siehe `mqtt/subscriber.py`).
+3. Im `lifespan` von `main.py` registrieren (gleiche Stelle wie andere Handler).
+4. Topic-Pattern und Konstanten in `src/mqtt/topics.py` / `TopicBuilder` abstimmen — **kein** freier String-Bau neben dem etablierten Builder.
+5. Payload-Validierung, Error-Codes, Logging wie in `base_handler`-Mustern; Exceptions nicht schlucken.
 
 **Vollständige Topics:** `.claude/reference/api/MQTT_TOPICS.md`
+
+**Skill `mqtt-development`:** bei reinem Protokoll-/Topic-/Payload-Contract-Fokus zusätzlich nutzen.
 
 ---
 
 ## 4. REST API
 
-**Dateien:** `src/api/v1/` (~12,500 Zeilen, 21 Router inkl. 3 PLANNED, ~208 Endpoints)
+**Dateien:** `src/api/v1/` (viele Router-Module; exakte Endpoint-Zahl in OpenAPI oder `.claude/reference/api/REST_ENDPOINTS.md`)
 
 ### Auth Matrix
 
@@ -189,7 +211,7 @@ DB Persist → Logic Engine → WebSocket Broadcast
 | esp | /v1/esp | 17 | Active/Operator |
 | sensors | /v1/sensors | 16 | Active/Operator |
 | actuators | /v1/actuators | 12 | Active/Operator |
-| logic | /v1/logic | 11 | Operator+ |
+| logic | /v1/logic | 12 | Operator+ |
 | health | /v1/health | 6 | Mixed |
 | audit | /v1/audit | 21 | Admin/Active |
 | debug | /v1/debug | 59 | Admin |
@@ -232,7 +254,7 @@ async def get_items(
 
 ## 5. Database
 
-**Dateien:** `src/db/` (6,942 Zeilen, 20 Models, 18 Repositories)
+**Dateien:** `src/db/` — Models unter `db/models/`, Repositories unter `db/repositories/` (siehe Quick-Reference-Ordnerliste).
 
 ### Repository Pattern
 
@@ -251,12 +273,12 @@ class YourRepository(BaseRepository[YourModel]):
 | Model | Tabelle | Wichtige Felder |
 |-------|---------|-----------------|
 | ESPDevice | `esps` | esp_id (PK), zone_id, zone_name, master_zone_id, is_online, last_heartbeat, deleted_at (soft-delete), deleted_by |
-| SensorConfig | `sensor_configs` | esp_id (FK), gpio, sensor_type, i2c_address, sensor_kind (`continuous`\|`snapshot`, Default `continuous`), sensor_metadata (JSON, inkl. description, unit), alert_config (JSONB), runtime_stats (JSONB) |
+| SensorConfig | `sensor_configs` | esp_id (FK), gpio, sensor_type, i2c_address, sensor_metadata (JSON, inkl. description, unit), alert_config (JSONB), runtime_stats (JSONB) |
 | ActuatorConfig | `actuator_configs` | esp_id (FK), gpio, actuator_type, inverted, alert_config (JSONB), runtime_stats (JSONB) |
 | Zone | `zones` | id (UUID PK), zone_id (UNIQUE), name, description, status (active/archived/deleted), deleted_at, deleted_by, created_at, updated_at. FK: esp_devices.zone_id → zones.zone_id (T13-R1) |
 | SubzoneConfig | `subzone_configs` | id (UUID PK), esp_id (FK), subzone_id, assigned_gpios (JSON), assigned_sensor_config_ids (JSON), is_active (Bool), safe_mode_active |
 | DeviceZoneChange | `device_zone_changes` | id (UUID PK), esp_id, old_zone_id, new_zone_id, subzone_strategy, affected_subzones (JSON), changed_by, changed_at (T13-R1 Audit) |
-| CrossESPLogic | `cross_esp_logic` | rule_name (UNIQUE), trigger_conditions (JSON), logic_operator, actions (JSON), priority (kleinere Zahl = höhere Ausführungs-/Konfliktpriorität), cooldown_seconds |
+| CrossESPLogic | `cross_esp_logic` | rule_name (UNIQUE), trigger_conditions (JSON), logic_operator, actions (JSON), priority (kleinere Zahl = höhere Ausführungs-/Konfliktpriorität), cooldown_seconds, is_critical (Bool, default false), escalation_policy (JSON, nullable), degraded_since (DateTime TZ, nullable), degraded_reason (VARCHAR 64, nullable) |
 | LogicHysteresisState | `logic_hysteresis_states` | rule_id (FK CASCADE), condition_index, is_active, last_value, last_activation, last_deactivation, updated_at. UQ(rule_id, condition_index) |
 | SensorData | `sensor_data` | sensor_id (FK), esp_id (FK SET NULL), raw_value, processed_value, zone_id, subzone_id (Phase 0.1), device_name, data_source |
 | AuditLog | `audit_logs` | event_type, severity, source_type |
@@ -329,18 +351,38 @@ class YourSensorProcessor(BaseSensorProcessor):
         }
 ```
 
+### Feuchte-Kalibrierung (Moisture)
+
+- `CalibrationService._compute_calibration`: `moisture_2point` und (Legacy) `linear_2point` mit normalisiertem Sensor **`moisture`** liefern **`derived`** mit `dry_value`/`wet_value` für `MoistureSensorProcessor`; `resolve_calibration_for_processor` reicht `derived` flach an `process()`.
+- Kurzreferenz: `docs/analysen/FIX-kalibrierungsflow-bodenfeuchte-2026-04-09.md`
+- Persistenz/Tests: nach Session **Apply** ist `sensor_configs.calibration_data` kanonisch mit vollem `derived` abgesichert u. a. in `tests/unit/test_calibration_service.py` (Persistenz-Assertions).
+- Altbestände (DB) / Operator: `docs/analysen/FIX-kalibrierungsflow-bodenfeuchte-operator-hinweis-2026-04-10.md`
+- Live-Messung (Wizard): `mqtt/handlers/calibration_response_handler.py` → WS `calibration_measurement_received` / `calibration_measurement_failed`; fehlendes `raw`/`raw_value` in der MQTT-Antwort → Fehler-Event (**kein** `get_latest_reading`-Fallback). Doku: `.claude/reference/api/WEBSOCKET_EVENTS.md` §4.4–4.5, `MQTT_TOPICS.md` §1.4.
+
 ### Build & Test
 
 ```bash
-cd "El Servador"
-poetry install                                    # Dependencies
-poetry run pytest god_kaiser_server/tests/ -v     # Tests
-poetry run uvicorn god_kaiser_server.src.main:app --reload  # Server
-
-# Wokwi Test-Devices seeden (3 ESPs: ESP_00000001/02/03)
 cd "El Servador/god_kaiser_server"
-poetry run python scripts/seed_wokwi_esp.py
+poetry install
+poetry run pytest tests/ -q
+poetry run ruff check .
+poetry run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+
+# Wokwi Test-Devices seeden (Skript im jeweiligen `scripts/`-Ordner prüfen)
+# poetry run python scripts/seed_wokwi_esp.py
 ```
+
+(Abgleich mit `AGENTS.md` / `.claude/CLAUDE.md` Verifikations-Tabelle.)
+
+### Feature erweitern (Minimalpfad)
+
+1. **Suchen:** `Grep`/`Glob` nach ähnlichem Router, Handler oder Service.
+2. **Wiederverwenden:** gleiche Exception-, Log- und Session-Muster wie der Nachbarcode.
+3. **REST:** Schema in `src/schemas/`, Endpoint in passendem `api/v1/*`, Router in `api/v1/__init__.py` registrieren.
+4. **Persistenz:** Model/Repository nur bei echtem Datenbedarf; Migration mit Alembic (`alembic revision --autogenerate` + Review + `upgrade head`).
+5. **MQTT betroffen:** Handler + Topics + ggf. Publisher; Referenzen `MQTT_TOPICS.md`, `mqtt-development`-Skill.
+6. **UI/Realtime betroffen:** WebSocket-Events in `.claude/reference/api/WEBSOCKET_EVENTS.md` prüfen.
+7. **Tests:** Unit/Integration unter `tests/unit/` bzw. `tests/integration/`; `conftest.py` nutzt `dependency_overrides` für `get_db`.
 
 ---
 
@@ -365,8 +407,8 @@ poetry run python scripts/seed_wokwi_esp.py
 - Repository-Pattern für alle DB-Operationen
 - Pydantic-Schemas für Request/Response
 - Error-Codes aus `src/core/error_codes.py` (5000-5999)
-- Logging via `src/core/logging_config.py`
-- Circuit Breaker für externe Calls (MQTT, DB)
+- Logging via `src/core/logging_config.py` (strukturierte JSON-Logs; Request-ID über `middleware/request_id.py`, optional `traceparent` im Kontext)
+- Circuit Breaker für externe Calls (MQTT, DB) — siehe `core/resilience.py` / `db/session.py`
 - `datetime.now(timezone.utc)` statt `datetime.now()` für alle Zeitstempel
 - `DateTime(timezone=True)` für alle datetime-Spalten in SQLAlchemy Models
 
@@ -385,7 +427,7 @@ poetry run python scripts/seed_wokwi_esp.py
 
 | Service | Datei | Zeilen | Hauptmethoden |
 |---------|-------|--------|---------------|
-| **LogicEngine** | logic_engine.py | 1502 | `start()`, `stop()`, `evaluate_sensor_data()`, `evaluate_timer_triggered_rules()` |
+| **LogicEngine** | logic_engine.py | ~2100 | `start()`, `stop()`, `evaluate_sensor_data()`, `evaluate_timer_triggered_rules()`, `_enter_degraded_state()`, `_exit_degraded_state()` |
 | **SafetyService** | safety_service.py | 264 | `validate_actuator_command()`, `emergency_stop_all()` |
 | **SensorService** | sensor_service.py | 545 | `process_reading()`, `trigger_measurement()` |
 | **ActuatorService** | actuator_service.py | ~347 | `send_command()` → `ActuatorSendCommandResult` |
@@ -476,8 +518,35 @@ LogicEngine
 2. API PRÜFEN   → MODULE_REGISTRY.md für Details
 3. PATTERN      → Bestehenden Code als Vorlage
 4. IMPLEMENT    → 3-Schichten-Architektur beachten
-5. VERIFY       → poetry run pytest
+5. VERIFY       → poetry run pytest (+ ruff bei Backend-Änderung)
 ```
+
+---
+
+## 12. Coding-Agenten: typische Fehler und Soll-Verhalten
+
+Kurz-Checkliste für KI- und Menschen-Reviews — **kein** Ersatz für die Pflichtregeln in `.cursor/rules/backend.mdc` und `AGENTS.md`.
+
+### Typische Fehler (vermeiden)
+
+- Anderes Web-Framework, anderen async-DB-Stil oder synchrones ORM neben SQLAlchemy 2.0 Async einführen.
+- Nur REST entwerfen, obwohl **MQTT** (Topics, Payload, Handler) und/oder **WebSocket**-Events betroffen sind — führt zu Schema-Drift und fehlenden Realtime-Updates.
+- Geschäftslogik in `main.py` oder doppelt im Router statt in `services/` und Repositories.
+- `time.sleep` oder blockierende CPU-Arbeit im async-Request-/Handler-Pfad ohne `asyncio.to_thread` / Executor — Event-Loop blockieren.
+- Roh-SQL per String-Format statt parametrisierter Queries; Secrets hardcoden.
+- Alembic-Revision ohne Abgleich mit Models und ohne Review der generierten Migration; Downgrade ignorieren, wenn das Team Downgrades erwartet.
+- Observability schwächen: willkürliche Log-Formate, Request-/Korrelationsfelder ignorieren (`request_id`, bestehende Metrik-Labels).
+- Tests weglassen oder nur sync annehmen, obwohl das Projekt `pytest-asyncio`, SQLite-In-Memory und `dependency_overrides` nutzt.
+- Scope ausweiten: große Refactors oder neue Architektur-Schichten ohne Auftrag.
+
+### Soll-Verhalten (immer)
+
+- Zuerst im Repo **suchen** (`Glob`/`Grep`) nach dem nächstliegenden Pattern (Endpoint, Handler, Service).
+- **Minimal-invasiv** bleiben; Namensgebung und Fehlerbehandlung wie im Nachbarcode.
+- **Schemas** (`src/schemas/`) und **DB** konsistent halten; Schemaänderungen nur mit **Alembic** nach Projektkonvention.
+- **Tests** anpassen oder ergänzen (`tests/conftest.py`, Marker in `pyproject.toml`).
+- Bei Geräte-/Dashboard-Bezug: **MQTT**, **REST** und **WebSocket**-Verträge gegen Referenzdateien unter `.claude/reference/api/` abgleichen.
+- **Auth-Stufen** (`deps.py`: active user, operator, admin, API-Key-Stellen) und **Safety-Pfad** für Aktoren (`SafetyService`) respektieren.
 
 ---
 

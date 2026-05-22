@@ -309,6 +309,10 @@ class ActuatorService:
                         success=False,
                         issued_by=issued_by,
                         error_message=failure_reason,
+                metadata={
+                    "correlation_id": correlation_id,
+                    "reason_code": failure_code,
+                },
                     )
 
                 audit_repo = AuditLogRepository(session)
@@ -386,6 +390,10 @@ class ActuatorService:
                 success=False,
                 issued_by=issued_by,
                 error_message=error_message,
+                metadata={
+                    "correlation_id": correlation_id,
+                    "reason_code": "SAFETY_REJECTED",
+                },
             )
             audit_repo = AuditLogRepository(session)
             await audit_repo.log_actuator_command(
@@ -402,6 +410,7 @@ class ActuatorService:
     async def _persist_noop_skip(
         self,
         *,
+        esp_id: str,
         context: ActuatorCommandContext,
         gpio: int,
         command: str,
@@ -413,7 +422,39 @@ class ActuatorService:
         async with self._command_transaction(
             correlation_id=correlation_id,
             phase="persist_noop_skip",
-        ) as (_, actuator_repo, _):
+        ) as (session, actuator_repo, _):
+            contract_repo = CommandContractRepository(session)
+            try:
+                await contract_repo.record_intent_publish_sent(
+                    intent_id=correlation_id,
+                    correlation_id=correlation_id,
+                    esp_id=esp_id,
+                    flow="command",
+                )
+                await contract_repo.upsert_outcome(
+                    payload={
+                        "intent_id": correlation_id,
+                        "correlation_id": correlation_id,
+                        "flow": "command",
+                        "outcome": "applied",
+                        "code": "NOOP_DESIRED_EQUALS_CURRENT",
+                        "reason": "No-op command skipped because desired state already active",
+                        "semantic_mode": "target",
+                        "legacy_status": "processing",
+                        "target_status": "applied",
+                        "is_final": True,
+                        "retryable": False,
+                        "contract_version": 2,
+                    },
+                    esp_id=esp_id,
+                )
+            except Exception:
+                logger.warning(
+                    "No-op terminal contract persistence failed (continuing): correlation_id=%s esp_id=%s",
+                    correlation_id,
+                    esp_id,
+                    exc_info=True,
+                )
             await actuator_repo.log_command(
                 esp_id=context.esp_uuid,
                 gpio=gpio,
@@ -422,7 +463,26 @@ class ActuatorService:
                 value=value,
                 success=True,
                 issued_by=f"{issued_by}:noop_delta",
-                metadata={"skipped": "desired_equals_current"},
+                metadata={
+                    "skipped": "desired_equals_current",
+                    "reason_code": "NOOP_DESIRED_EQUALS_CURRENT",
+                    "correlation_id": correlation_id,
+                },
+            )
+            audit_repo = AuditLogRepository(session)
+            await audit_repo.log_device_event(
+                esp_id=esp_id,
+                event_type="actuator_command_noop",
+                status="skipped",
+                message=f"Skipped no-op actuator command '{command}' on GPIO {gpio}",
+                details={
+                    "gpio": gpio,
+                    "command": command,
+                    "value": value,
+                    "issued_by": issued_by,
+                    "reason_code": "NOOP_DESIRED_EQUALS_CURRENT",
+                },
+                correlation_id=correlation_id,
             )
 
     async def _persist_publish_failure(
@@ -450,6 +510,10 @@ class ActuatorService:
                 success=False,
                 issued_by=issued_by,
                 error_message="MQTT publish failed",
+                metadata={
+                    "correlation_id": correlation_id,
+                    "reason_code": "MQTT_PUBLISH_FAILED",
+                },
             )
             audit_repo = AuditLogRepository(session)
             await audit_repo.log_actuator_command(
@@ -509,6 +573,7 @@ class ActuatorService:
                 metadata={
                     "duration": duration,
                     "safety_warnings": safety_warnings,
+                    "correlation_id": correlation_id,
                 },
             )
             audit_repo = AuditLogRepository(session)
@@ -702,6 +767,7 @@ class ActuatorService:
                     value,
                 )
                 await self._persist_noop_skip(
+                    esp_id=esp_id,
                     context=context,
                     gpio=gpio,
                     command=command,

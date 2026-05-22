@@ -1,15 +1,12 @@
 # Log-System - AutomationOne
 
-<<<<<<< Updated upstream
-> **Version:** 4.11 | **Aktualisiert:** 2026-04-20
-> **Änderungen 4.11 (2026-04-20):** PKG-02 / PKG-06 (INC-2026-04-20-offline-mode-observability-hardening): Neue `event_class`-Labels (`rule_arbitration`, `CONFIG_GUARD`) dokumentiert in Sektion 2.3a; Loki-Filter-Beispiele ergänzt.
-=======
-> **Version:** 4.14 | **Aktualisiert:** 2026-04-10
-> **Änderungen 4.14:** Docker-Dev **Ground Truth**: Zwei Handler (`setup_logging`) — **Datei** unter Bind-Mount `logs/server/god_kaiser.log` = JSON (bei `LOG_FORMAT=json`), **Docker-stdout** = lesbarer Text; `docker compose … -f docker-compose.dev.yml` = **uvicorn --reload** (WatchFiles-Zeilen nur in `docker logs`, nicht 1:1 zur Datei); Host-Datei und `docker logs` sind **nicht** byte-identisch; Windows: Bind-Mount/`tail` kann verzoegern — Live-Triage bevorzugt `docker logs` / Loki §12.
-> **Änderungen 4.13:** Server: optionales JSON-Feld `failure_class` (Pilot I08, Whitelist in `core/logging_config.py`); Docker-**stdout** = Text mit Suffix `failure_class=…`, **Datei** `logs/server/god_kaiser.log` = JSON mit `"failure_class"`; LogQL: `docs/debugging/logql-queries.md` § failure_class (Docker: `|=`, Datei/JSON: `| json`)
-> **Änderungen 4.12:** Grafana `system-health.json`: Prometheus-Panels MQTT-Verarbeitungsfehler (`god_kaiser_mqtt_errors_total`) und WS-Contract-Mismatch (`god_kaiser_ws_contract_mismatch_total`); Verifikation am Stack: `localhost:9090/api/v1/query` (siehe §12.4 / §12.5)
-> **Änderungen 4.11:** Alloy/Loki: optionales Structured Metadata `correlation_id` für `el-servador`, extrahiert aus der Logzeile (`\bcorrelation_id=` in `message`, `docker/alloy/config.alloy`); kein Loki-Label — siehe `docs/debugging/logql-queries.md`
->>>>>>> Stashed changes
+> **Version:** 4.16 | **Aktualisiert:** 2026-05-22
+> **Änderungen 4.16:** Pi-5 Ist-Check ergänzt: Hardware-Serial-Container kann `Exited` sein; in diesem Fall ESP-Liveness über MQTT-Heartbeats + DB `esp_devices.last_seen` verifizieren, nicht nur über `automationone-esp32-serial` Logs.
+> **Änderungen 4.15:** OUTBOX-Trace Tags in ESP32-Serial erweitert (siehe §5.9, Changelog unten)
+> **Änderungen 4.14:** Docker-Dev Ground Truth: Zwei Handler (`setup_logging`) — Datei (`logs/server/god_kaiser.log`) JSON, Docker-stdout lesbarer Text; Host-Datei und `docker logs` sind nicht byte-identisch.
+> **Änderungen 4.13:** Optionales JSON-Feld `failure_class`; Docker-stdout als Text-Suffix, Datei als JSON-Feld.
+> **Änderungen 4.12:** Grafana `system-health.json` ergänzt um MQTT-/WS-Panels.
+> **Änderungen 4.11:** Optionales Structured Metadata `correlation_id` in Alloy/Loki.
 > **Änderungen 4.10:** Loki Windows: 127.0.0.1 + WebClient-Fallback (localhost-Timeout behoben)
 > **Änderungen 4.7:** Level-Normalisierung (uppercase) für loki, mqtt-broker, el-frontend in Alloy. Drop-Filter für Loki query-stats (metrics.go, engine.go, roundtrip.go). Volumen 57→24 MB/Tag
 > **Zweck:** Vollständige Dokumentation aller Log-Quellen, Speicherorte und Capture-Methoden
@@ -960,7 +957,7 @@ mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 30 | ts '[%Y-%m-%d %H:%M:%S
 | **Frontend** (el-frontend) | Ja | Ja (docker logs / Loki) | Ja, `compose_service=el-frontend` + level, component | Ja (JSON-Parser) | Nur stdout, kein Bind-Mount |
 | **MQTT-Broker** | Ja | Ja (docker logs / Loki) | Ja, `compose_service=mqtt-broker` + level | Ja (Regex + Level-Normalisierung uppercase) | Broker-Events; **MQTT-Payload** (kaiser/#) nicht in Loki, nur live z. B. `mosquitto_sub` / session.sh |
 | **PostgreSQL** | Ja | Ja (docker logs / Loki) | Ja, `compose_service=postgres` + level, query_duration_ms | Ja (Level-Extraktion, Slow-Query Metadata) | `logging_collector=off` → stderr → Docker → Alloy → Loki |
-| **ESP32 Serial** | Bedingt | Ja, wenn Pfad aktiv | Ja, wenn Profile `hardware` + Host-Bridge (ser2net/socat); `compose_service=esp32-serial-logger` + level, device_id, component | Ja (JSON-Parser) | Ohne Hardware-Bridge nur manuell: `logs/current/esp32_serial.log` |
+| **ESP32 Serial** | Bedingt | Ja, wenn Pfad aktiv | Ja, wenn Profile `hardware` + Host-Bridge (ser2net/socat); `compose_service=esp32-serial-logger` + level, device_id, component | Ja (JSON-Parser) | Falls `automationone-esp32-serial` nicht läuft (`Exited`), ESP-Liveness über Heartbeats (`kaiser/god/esp/+/system/heartbeat`) und DB `esp_devices.last_seen` prüfen; `logs/current/esp32_serial.log` ist optional. |
 
 **Zusammenfassung:** Alle Container-Logs sind erreichbar und bei laufendem Monitoring in Loki durchsuchbar (LogQL, Zeitfenster, Labels). Live-Zugriff immer über `docker compose logs -f <service>`. KI-optimal: Server, Frontend und (wenn aktiv) ESP32 haben strukturierte Labels; MQTT-Payload-Stream (Nachrichteninhalt) ist nicht in Loki. Einstieg Gesamtzustand: `debug-status.ps1`.
 
@@ -1059,9 +1056,10 @@ curl -sG "http://localhost:9090/api/v1/query" --data-urlencode "query=rate(god_k
 
 ---
 
-**Letzte Aktualisierung:** 2026-05-11
-**Version:** 4.15
+**Letzte Aktualisierung:** 2026-05-22
+**Version:** 4.16
 **Changelog:**
+- 4.16: Merge-Konfliktmarker entfernt; Header konsolidiert. Pi-5 Runtime-Hinweis ergänzt: Wenn `automationone-esp32-serial` `Exited` ist, ESP-Liveness via MQTT-Heartbeat und `esp_devices.last_seen` validieren; §12.0 ESP32-Zeile präzisiert.
 - 4.15: §5.9 OUTBOX-Trace Tags (INC-OUTBOX-2026-05-10): `[OUTBOX+1]` (QoS-1 enqueue), `[OUTBOX-1]` (PUBACK drain), `[OUTBOX-TRACE]` (non-crit drop, queue-drain full, drain throttle), `session_present` (Connect). Grep-Pattern-Tabelle + Serial-Grep-Beispiele.
 - 4.14: §2.1.1 Ground Truth Docker: zwei Handler (JSON-Datei vs. stdout-Text), Reload-Overlay, `docker logs` vs. Host-Datei; Quick-Reference + Tabellen Docker-Zeilen
 - 4.13: `failure_class` (I08): JSON-Datei vs. Docker-Text dokumentiert; §2.3 Beispiel; §12.0 Server-Zeile; LogQL in `docs/debugging/logql-queries.md`

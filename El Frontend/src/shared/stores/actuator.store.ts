@@ -19,6 +19,7 @@ import { reactive, computed } from 'vue'
 import { useToast } from '@/composables/useToast'
 import { createLogger } from '@/utils/logger'
 import { CONTRACT_OPERATOR_ACTION, extractCorrelationId, extractRequestId, validateContractEvent } from '@/utils/contractEventMapper'
+import { websocketService } from '@/services/websocket'
 import type { ESPDevice } from '@/api/esp'
 
 const logger = createLogger('ActuatorStore')
@@ -796,6 +797,13 @@ export const useActuatorStore = defineStore('actuator', () => {
       requestId: pendingIntent.requestId,
     })
     if (terminal.state !== 'terminal_success') return
+    if (correlationId) {
+      websocketService.sendClientStageObservation(correlationId, 't7_ui_applied', {
+        source: 'actuator_status',
+        esp_id: espId,
+        gpio,
+      })
+    }
 
     if (!canEmitTerminalToast(correlationId)) {
       logger.debug('Suppress duplicate terminal actuator_status toast for correlation_id', {
@@ -889,6 +897,13 @@ export const useActuatorStore = defineStore('actuator', () => {
       if (hadActuatorTimeout && normalizedCorrelation) {
         terminalToastCorrelations.delete(normalizedCorrelation)
       }
+      if (correlationId) {
+        websocketService.sendClientStageObservation(correlationId, 't7_ui_applied', {
+          source: 'actuator_response',
+          esp_id: espId,
+          gpio,
+        })
+      }
       if (!canEmitTerminalToast(correlationId)) {
         logger.debug('Suppress duplicate terminal actuator_response success toast for correlation_id', {
           subject_id: subjectId,
@@ -914,6 +929,13 @@ export const useActuatorStore = defineStore('actuator', () => {
         correlationId,
         requestId,
       })
+      if (correlationId) {
+        websocketService.sendClientStageObservation(correlationId, 't7_ui_applied', {
+          source: 'actuator_response',
+          esp_id: espId,
+          gpio,
+        })
+      }
       if (!canEmitTerminalToast(correlationId)) {
         logger.debug('Suppress duplicate terminal actuator_response failed toast for correlation_id', {
           subject_id: subjectId,
@@ -1076,6 +1098,13 @@ export const useActuatorStore = defineStore('actuator', () => {
       correlationId,
       requestId,
     })
+    if (correlationId) {
+      websocketService.sendClientStageObservation(correlationId, 't7_ui_applied', {
+        source: 'actuator_command_failed',
+        esp_id: espId,
+        gpio,
+      })
+    }
 
     if (!canEmitTerminalToast(correlationId)) {
       logger.debug('Suppress duplicate terminal actuator_command_failed toast for correlation_id', {

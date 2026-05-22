@@ -4,6 +4,10 @@ run_mode: artefact_improvement   # incident | artefact_improvement | both
 incident_id: ""                 # bei incident/both: z. B. INC-2026-04-09-001
 run_id: ""                      # optional: Slug fuer .claude/reports/current/auto-debugger-runs/<run_id>/
 order: incident_first           # bei both: incident_first | artefact_first
+# Optional — Coding-Disziplin / Kommunikation (siehe Agent auto-debugger §0, Skill §2)
+no_chat_questions: true         # dokumentiert die Norm: kein „Soll ich X oder Y?“ bei gültiger Steuerdatei (Details Agent §0); Ausnahme nur bei allow_user_escalation: true
+allow_user_escalation: false    # true: gezielte Rueckfragen an Menschen explizit erlaubt
+# konsolidierung_step: single   # optional aktivieren: max. ein Alt+Neu-Konsolidierungsschritt pro Lauf; Folgeschritte = Folge-PKGs
 target_docs:
   - docs/analysen/IST-observability-correlation-contracts-2026-04-09.md
 scope: |
@@ -39,6 +43,7 @@ linear_dedup_search_query: ""   # optional: Suchstring vor Issue-Erstellung (Ded
 | `forbidden` | ja | Verbotenes |
 | `done_criteria` | ja | Abnahme |
 | `order` | bei both | `incident_first` (Default) oder `artefact_first` |
+<<<<<<< Updated upstream
 | `linear_local_only` | nein | `true`: lokale Artefakte ohne Linear-Pflicht (Begruendung in `scope`) |
 | `linear_epic_issue_id` | nein | Epic oder grosses Parent-Issue (Identifier) |
 | `linear_parent_issue_id` | nein | Direktes Parent-Issue fuer Sub-Issues |
@@ -81,6 +86,11 @@ done_criteria: |
 ```
 
 **Checkliste (copy-paste in Incident-Notiz):** wie Abschnitt „Gate: db-inspector“ oben — Punkte 1–5 abhaken; bei Punkt 3 explizit `subzone_configs.esp_id` als `device_id`-String behandeln.
+=======
+| `no_chat_questions` | nein | `true`: dokumentiert die Norm „keine Standard-Rückfragen“ (siehe Agent §0); Ausnahme nur mit `allow_user_escalation: true` |
+| `konsolidierung_step` | nein | `single`: höchstens ein begrenzter Konsolidierungsschritt Alt+Neu; weiteres in Folge-PKGs |
+| `allow_user_escalation` | nein | `true`: Eskalation an Menschen nur wenn ausdrücklich gewünscht |
+>>>>>>> Stashed changes
 
 ## Inhaltliche Notizen (optional)
 

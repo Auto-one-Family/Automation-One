@@ -168,6 +168,11 @@ class CommandContractRepository:
         normalized = self._normalize_contract_fields(payload)
         now = datetime.now(timezone.utc)
 
+        incoming_outcome_str = str(normalized["outcome"]).lower()
+        incoming_is_terminal = bool(normalized["is_final"]) or (
+            incoming_outcome_str in _TERMINAL_OUTCOMES
+        )
+
         if existing is None:
             created = CommandOutcome(
                 intent_id=intent_id,
@@ -189,13 +194,14 @@ class CommandContractRepository:
                 ttl_ms=self._to_opt_int(payload.get("ttl_ms")),
                 ts=self._to_opt_int(payload.get("ts")),
                 first_seen_at=now,
-                terminal_at=now,
+                terminal_at=now if incoming_is_terminal else None,
             )
             try:
                 async with self.session.begin_nested():
                     self.session.add(created)
                     await self.session.flush()
                 await self.session.refresh(created)
+                self._log_t6_terminal_stage_if_applicable(created)
                 return created, False
             except IntegrityError:
                 # Parallel insert won the race. Continue deterministic dedup flow.
@@ -213,7 +219,7 @@ class CommandContractRepository:
         # If the stored outcome is already terminal and the incoming one is non-terminal,
         # the incoming message is a stale delivery and must be silently discarded.
         existing_outcome_str = str(existing.outcome).lower()
-        canonical_outcome_str = str(normalized["outcome"]).lower()
+        canonical_outcome_str = incoming_outcome_str
         if (
             existing_outcome_str in _TERMINAL_OUTCOMES
             and canonical_outcome_str not in _TERMINAL_OUTCOMES
@@ -259,9 +265,11 @@ class CommandContractRepository:
         existing.epoch = self._to_opt_int(payload.get("epoch"))
         existing.ttl_ms = self._to_opt_int(payload.get("ttl_ms"))
         existing.ts = self._to_opt_int(payload.get("ts"))
-        existing.terminal_at = now
+        if incoming_is_terminal and existing.terminal_at is None:
+            existing.terminal_at = now
         await self.session.flush()
         await self.session.refresh(existing)
+        self._log_t6_terminal_stage_if_applicable(existing)
         return existing, False
 
     async def upsert_terminal_event_authority(
@@ -381,6 +389,26 @@ class CommandContractRepository:
         await self.session.flush()
         await self.session.refresh(existing)
         return existing, False
+
+    def _log_t6_terminal_stage_if_applicable(self, outcome_row: CommandOutcome) -> None:
+        """Emit reproducible t6 stage marker for command-terminal outcomes."""
+        if str(outcome_row.flow).lower() != "command":
+            return
+        # Keep instrumentation aligned with persisted terminal_at semantics.
+        if outcome_row.terminal_at is None:
+            return
+        if not outcome_row.correlation_id:
+            return
+        terminal_at = outcome_row.terminal_at or datetime.now(timezone.utc)
+        observed_at_ms = int(terminal_at.timestamp() * 1000)
+        logger.warning(
+            "latency_stage stage=t6_db_terminal_at correlation_id=%s intent_id=%s flow=%s observed_at_ms=%s outcome=%s",
+            outcome_row.correlation_id,
+            outcome_row.intent_id,
+            outcome_row.flow,
+            observed_at_ms,
+            outcome_row.outcome,
+        )
 
     async def get_by_intent_id(self, intent_id: str) -> Optional[CommandOutcome]:
         stmt = select(CommandOutcome).where(CommandOutcome.intent_id == intent_id).limit(1)

@@ -1920,6 +1920,17 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
 
   function handleIntentOutcome(message: { data: Record<string, unknown> }): void {
     useIntentSignalsStore().ingestOutcome(message.data)
+    const correlationId = typeof message.data.correlation_id === 'string'
+      ? message.data.correlation_id.trim()
+      : ''
+    const isFinal = message.data.is_final === true
+    if (correlationId && isFinal) {
+      websocketService.sendClientStageObservation(correlationId, 't7_ui_applied', {
+        source: 'intent_outcome',
+        flow: message.data.flow,
+        outcome: message.data.outcome,
+      })
+    }
 
     // AUT-134 PKG-04: ESP32 (PKG-02) sendet Reject-Outcome via Server an Frontend.
     // Map flow='config' + code='PAYLOAD_TOO_LARGE' (terminal) → ConfigLastReject.

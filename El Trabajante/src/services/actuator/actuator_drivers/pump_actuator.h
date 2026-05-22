@@ -9,9 +9,7 @@ class PumpActuator : public IActuatorDriver {
 public:
   struct RuntimeProtection {
     unsigned long max_runtime_ms = 3600000UL;      // 1h continuous runtime cap
-    uint16_t max_activations_per_hour = 60;        // Duty-cycle protection
     unsigned long cooldown_ms = 30000UL;           // 30s cooldown after cutoff
-    unsigned long activation_window_ms = 3600000UL;
   };
 
   PumpActuator();
@@ -40,7 +38,6 @@ public:
 
 private:
   bool applyState(bool state, bool force);
-  void recordActivation(unsigned long now);
 
   ActuatorConfig config_;
   uint8_t gpio_;
@@ -54,8 +51,6 @@ private:
   unsigned long last_cycle_runtime_ms_;
 
   RuntimeProtection protection_;
-  static const uint8_t ACTIVATION_HISTORY = 60;
-  unsigned long activation_timestamps_[ACTIVATION_HISTORY];
   GPIOManager* gpio_manager_;
 };
 

@@ -54,6 +54,10 @@ static bool isRealtimeResponsePublishTopic(const String& topic) {
            topic.indexOf("/system/command/response") != -1;
 }
 
+static bool isIntentOutcomePublishTopic(const String& topic) {
+    return topic.indexOf("/system/intent_outcome") != -1;
+}
+
 #ifndef MQTT_USE_PUBSUBCLIENT
 static std::atomic<uint32_t> g_publish_outbox_noncritical_drops{0};
 // [FIX5-VERIFY] Total MQTT outbox-full events (msg_id == -2), all topic classes.
@@ -1475,10 +1479,12 @@ void MQTTClient::processPublishQueue() {
 
         const bool critical_topic = req.critical;
         const bool realtime_response_topic = isRealtimeResponsePublishTopic(String(req.topic));
+        const bool intent_outcome_topic = isIntentOutcomePublishTopic(String(req.topic));
         const uint8_t queue_fill_before_publish =
             static_cast<uint8_t>(uxQueueMessagesWaiting(g_publish_queue));
         if (critical_topic &&
             !realtime_response_topic &&
+            !intent_outcome_topic &&
             queue_fill_before_publish >= PUBLISH_QUEUE_SHED_WATERMARK) {
             // Keep this defer bounded. Unbounded requeue at high fill can keep the queue hot
             // indefinitely and starve non-critical sensor publishes after reconnect.

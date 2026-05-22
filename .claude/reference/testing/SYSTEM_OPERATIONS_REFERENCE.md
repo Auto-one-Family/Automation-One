@@ -1,7 +1,10 @@
 # SYSTEM_OPERATIONS_REFERENCE.md
 
-> **Version:** 2.15 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-28
+> **Version:** 2.18 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-05-22
 > **Zweck:** Vollständige Befehls-Referenz für Debug-Operations-Agent
+> **Änderungen 2.18:** Pi-5 Runtime-Check ergänzt (Docker Full-Stack healthy, 2 ESPs online via MQTT/DB), DB-Zugang in §1.1 auf Docker-PostgreSQL als Standard präzisiert, Hardware-Profile-Hinweis in §8.6 um `automationone-esp32-serial`-Fallback erweitert.
+> **Änderungen 2.17:** Windows `scripts/windows/ensure-dev-prerequisites.ps1` (externes Netzwerk `shared-infra-net`, optionale `.env` aus Vorlage); Frontend `El Frontend/.env.development` mit `VITE_API_URL` / `VITE_WS_URL`; §0.1.1 Playwright-Login-Fallback vs. CI
+> **Änderungen 2.16:** Grafana Operations-Dashboard (`system-health.json`): Prometheus-Panels für `god_kaiser_mqtt_errors_total` / `god_kaiser_ws_contract_mismatch_total`; §8.5 Beispielqueries ergänzt
 > **Änderungen 2.13:** Auth-Token-Pfad korrigiert (response.tokens.access_token statt response.access_token)
 > **Änderungen 2.12:** E2E Sensor-Test-Script (scripts/test_e2e_sensor_publish.py), ENVIRONMENT Bugfix (test→testing in CI/Test Compose)
 > **Änderungen 2.15:** Wokwi 178 Szenarien (15 Kategorien), Backend 27 Router in api/v1 (24 aktiv, 3 PLANNED: ai, kaiser, library), Frontend 137 .vue (13 Primitives), Logic sort fix
@@ -28,6 +31,10 @@
 | Username | Password | Rolle | Verwendung |
 |----------|----------|-------|------------|
 | admin | Admin123# | Admin | Production, Development & Testing |
+
+### 0.1.1 Abweichungen (lokal / Playwright)
+
+Die Curl-Beispiele nutzen **Admin123#** als Referenzpasswort; der tatsächliche Admin in der Datenbank kann davon abweichen. **Playwright** (`El Frontend/tests/e2e/global-setup.ts`): Fallback `admin` / `admin123`, wenn `E2E_TEST_USER` / `E2E_TEST_PASSWORD` nicht gesetzt sind; GitHub Actions setzt `E2E_TEST_PASSWORD=Admin123#` (siehe `El Frontend/tests/e2e/README.md`). **Vite (lokal):** `El Frontend/.env.development` enthält `VITE_API_URL` und `VITE_WS_URL` für `localhost:8000`.
 
 ### 0.2 Login (Bash)
 
@@ -63,6 +70,8 @@ $TOKEN = $response.tokens.access_token
 ```
 
 ### 0.4 Windows-Umgebung
+
+**Docker (einmalig):** externes Netzwerk `shared-infra-net` und optional `.env` aus Vorlage — `powershell -ExecutionPolicy Bypass -File scripts/windows/ensure-dev-prerequisites.ps1` (Projektroot, überschreibt keine bestehende `.env`). Siehe `AGENTS.md`.
 
 ```powershell
 # MQTT Tools Pfade (müssen im PATH sein oder vollständig angeben):
@@ -149,6 +158,17 @@ docker stats --no-stream
 | (stdout only) el-frontend | Vue/Vite → Loki `compose_service=el-frontend`; `docker compose logs el-frontend` |
 | Docker: `esp32-serial-logger` | ESP32 Serial via TCP-Bridge (stdout only, Profile: hardware) |
 
+### 0.5.1 Pi-5 Runtime Snapshot (verifiziert 2026-05-22)
+
+| Check | Ist-Stand |
+|-------|-----------|
+| Core Services | `postgres`, `mqtt-broker`, `el-servador`, `el-frontend` = `healthy` |
+| Monitoring Services | `loki`, `alloy`, `prometheus`, `grafana`, `cadvisor`, `node-exporter`, `postgres-exporter`, `mosquitto-exporter` laufen |
+| API Health | `/api/v1/health/live` = `alive: true`, `/api/v1/health/ready` = `ready: true` (DB + MQTT + Worker ok) |
+| ESP32 Live über MQTT/DB | `ESP_6B27C8`, `ESP_EA5484` senden Heartbeats und stehen in `esp_devices` auf `online` |
+| ESP32 Serial Container | `automationone-esp32-serial` kann `Exited` sein; fallback: Heartbeat + DB `last_seen` nutzen |
+| Session-Logs aktuell | `logs/current/server_now*.log`, `logs/current/mqtt_now*.log` vorhanden; `logs/current/esp32_serial.log` optional |
+
 ### .env Konfiguration
 
 **Datei:** `.env` (Projektroot)
@@ -177,12 +197,14 @@ MQTT_PASSWORD=
 
 | Eigenschaft | Wert |
 |-------------|------|
-| **Typ (Development)** | SQLite |
-| **Typ (Production)** | PostgreSQL |
-| **Pfad (SQLite)** | `El Servador/god_kaiser_server/god_kaiser_dev.db` |
+| **Typ (Docker Runtime / Pi)** | PostgreSQL |
+| **Typ (lokal ohne Docker, optional)** | SQLite |
+| **Pfad (SQLite, lokal optional)** | `El Servador/god_kaiser_server/god_kaiser_dev.db` |
 | **PostgreSQL URL** | `postgresql+asyncpg://god_kaiser:password@localhost:5432/god_kaiser_db` |
 
-#### Direkt-Zugang (SQLite CLI)
+**Pi-Hinweis (2026-05-22):** `python -m alembic heads` liefert `aut299_cal_session_metadata (head)`, aber Tabelle `alembic_version` kann in laufenden Runtime-DBs fehlen. In diesem Fall keine Migration erzwingen, sondern Zustand als Drift/Bootstrap-Befund dokumentieren.
+
+#### Direkt-Zugang (SQLite CLI, nur lokaler Non-Docker-Fall)
 
 ```bash
 # SQLite öffnen
@@ -1699,6 +1721,14 @@ curl -s http://localhost:8000/api/v1/health/metrics
 
 # Prometheus Targets pruefen
 curl -s http://localhost:9090/api/v1/targets | python -m json.tool
+
+# God-Kaiser: MQTT-Fehler / WS-Contract (Counter; gleiche Namen wie in metrics.py)
+curl -sG "http://localhost:9090/api/v1/query" --data-urlencode "query=god_kaiser_mqtt_errors_total"
+curl -sG "http://localhost:9090/api/v1/query" --data-urlencode "query=god_kaiser_ws_contract_mismatch_total"
+
+# PromQL wie im Grafana-Dashboard „Operations“ (5m-Rate)
+curl -sG "http://localhost:9090/api/v1/query" --data-urlencode "query=sum by (direction) (rate(god_kaiser_mqtt_errors_total[5m]))"
+curl -sG "http://localhost:9090/api/v1/query" --data-urlencode "query=rate(god_kaiser_ws_contract_mismatch_total[5m])"
 ```
 
 ### 8.6 Hardware-Profile (ESP32 Serial Logger)
@@ -1715,6 +1745,8 @@ docker logs automationone-esp32-serial --tail=100 -f
 ```
 
 **Voraussetzung:** socat TCP-Bridge muss auf dem Host laufen (WSL2: `socat TCP-LISTEN:3333,fork,reuseaddr,bind=0.0.0.0 /dev/ttyUSB0,raw,echo=0,b115200,local`)
+
+**Pi-Runtime-Hinweis (verifiziert 2026-05-22):** Wenn `automationone-esp32-serial` auf `Exited` steht, ist das kein harter Ausfall des Gesamtsystems. ESP-Liveness in diesem Fall über MQTT-Heartbeats (`kaiser/god/esp/+/system/heartbeat`) und `esp_devices.last_seen` verifizieren.
 
 **ENV-Variablen (.env):**
 
@@ -1749,9 +1781,9 @@ docker logs automationone-esp32-serial --tail=100 -f
 | **PostgreSQL Config** | `docker/postgres/postgresql.conf` |
 | **Mosquitto Config** | `docker/mosquitto/mosquitto.conf` |
 | **Loki Config** | `docker/loki/loki-config.yml` |
-| **Alloy Config** | `docker/alloy/config.alloy` (native River syntax) |
+| **Alloy Config** | `docker/alloy/config.alloy` (native River syntax; Structured Metadata u. a. `logger`, `request_id`, optional `correlation_id` aus Message-Regex für `el-servador`) |
 | **Prometheus Config** | `docker/prometheus/prometheus.yml` |
-| **Grafana Provisioning** | `docker/grafana/provisioning/` |
+| **Grafana Provisioning** | `docker/grafana/provisioning/` (Dashboards z. B. `dashboards/system-health.json` — u. a. MQTT-Fehlerrate + WS-Contract-Mismatch als Prometheus-Panels) |
 | **Session Script** | `scripts/debug/start_session.sh` (v4.0) |
 | **Playwright E2E Config** | `El Frontend/playwright.config.ts` |
 | **Playwright E2E Report** | `logs/frontend/playwright/playwright-report/` |
@@ -1772,4 +1804,4 @@ Wenn Cursor den Playwright MCP-Server nutzt (z. B. cursor-ide-browser), kann der
 
 ---
 
-*Erstellt: 2026-02-02 | Aktualisiert: 2026-02-25 | AutomationOne Debug-Operations-Reference*
+*Erstellt: 2026-02-02 | Aktualisiert: 2026-04-10 | AutomationOne Debug-Operations-Reference*

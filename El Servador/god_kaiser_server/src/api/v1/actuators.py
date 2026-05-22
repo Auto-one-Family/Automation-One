@@ -25,6 +25,7 @@ References:
 """
 
 import uuid
+import time
 from datetime import datetime, timezone
 from typing import Annotated, Optional
 
@@ -729,6 +730,7 @@ async def send_command(
     Returns:
         Command response
     """
+    t0_api_start_ms = int(time.time() * 1000)
     esp_repo = ESPRepository(db)
     actuator_repo = ActuatorRepository(db)
 
@@ -785,6 +787,21 @@ async def send_command(
         f"Actuator command sent: {esp_id} GPIO {gpio} {command.command} "
         f"value={command.value} by {current_user.username} "
         f"correlation_id={cmd_result.correlation_id} command_sent={cmd_result.command_sent}"
+    )
+    t1_api_return_ms = int(time.time() * 1000)
+    logger.warning(
+        "latency_stage stage=t0_api_start correlation_id=%s esp_id=%s gpio=%s observed_at_ms=%s",
+        cmd_result.correlation_id,
+        esp_id,
+        gpio,
+        t0_api_start_ms,
+    )
+    logger.warning(
+        "latency_stage stage=t1_api_return correlation_id=%s esp_id=%s gpio=%s observed_at_ms=%s",
+        cmd_result.correlation_id,
+        esp_id,
+        gpio,
+        t1_api_return_ms,
     )
 
     return ActuatorCommandResponse(
@@ -1275,8 +1292,8 @@ async def clear_emergency_legacy(
     },
     summary="Delete actuator configuration",
     description=(
-        "Entfernt die Konfiguration nach MQTT-OFF. **Finalität:** OFF wird ohne explizite "
-        "``correlation_id`` im Publisher-Aufruf gesendet (Default-Verhalten); HTTP wartet nicht "
+        "Entfernt die Konfiguration nach MQTT-OFF. **Finalität:** OFF wird mit expliziter "
+        "``correlation_id`` im Publisher-Aufruf gesendet; HTTP wartet nicht "
         "auf ESP-Bestätigung. Weitere Zustände wie bei normalen Actuator-Commands über MQTT/WS."
     ),
 )
@@ -1311,15 +1328,28 @@ async def delete_actuator(
     if not actuator:
         raise ActuatorNotFoundError(esp_id, gpio)
 
+    delete_correlation_id = str(uuid.uuid4())
+
     # Send OFF command before deleting
-    publisher.publish_actuator_command(
+    publish_success = publisher.publish_actuator_command(
         esp_id=esp_id,
         gpio=gpio,
         command="OFF",
         value=0.0,
         duration=0,
         retry=True,
+        correlation_id=delete_correlation_id,
+        issued_by="system:actuator_delete",
     )
+
+    if publish_success:
+        contract_repo = CommandContractRepository(db)
+        await contract_repo.record_intent_publish_sent(
+            intent_id=delete_correlation_id,
+            correlation_id=delete_correlation_id,
+            esp_id=esp_id,
+            flow="command",
+        )
 
     # Log OFF to history before deleting (Fix L4)
     # actuator_history.esp_id references esp_devices.id (SET NULL on delete) — not actuator_configs
@@ -1329,14 +1359,27 @@ async def delete_actuator(
         actuator_type=actuator.actuator_type,
         command_type="OFF",
         value=0.0,
-        success=True,
+        success=publish_success,
         issued_by="system:actuator_delete",
-        error_message=None,
+        error_message=None if publish_success else "MQTT publish failed",
         timestamp=datetime.now(timezone.utc),
         metadata={
             "trigger": "actuator_deleted",
             "deleted_by": current_user.username,
+            "correlation_id": delete_correlation_id,
+            "mqtt_publish_success": publish_success,
         },
+    )
+    audit_repo = AuditLogRepository(db)
+    await audit_repo.log_actuator_command(
+        esp_id=esp_id,
+        gpio=gpio,
+        command="OFF",
+        value=0.0,
+        issued_by="system:actuator_delete",
+        success=publish_success,
+        error_message=None if publish_success else "MQTT publish failed",
+        correlation_id=delete_correlation_id,
     )
     logger.info(
         "Actuator history logged",
@@ -1346,6 +1389,8 @@ async def delete_actuator(
             "command_type": "OFF",
             "issued_by": "system:actuator_delete",
             "trigger": "actuator_deleted",
+            "correlation_id": delete_correlation_id,
+            "mqtt_publish_success": publish_success,
         },
     )
 

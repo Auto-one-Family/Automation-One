@@ -68,6 +68,8 @@ class WebSocketService {
   private rateLimitWindowStart: number = Date.now()
   private listeners: Map<string, Set<(message: WebSocketMessage) => void>> = new Map()
   private visibilityHandler: (() => void) | null = null
+  private stageEmissionDedup: Map<string, number> = new Map()
+  private static readonly STAGE_DEDUP_TTL_MS = 60_000
 
   // NEW: Pending subscriptions queue for subscriptions during 'connecting' state
   private pendingSubscriptions: WebSocketFilters[] = []
@@ -402,6 +404,7 @@ class WebSocketService {
         correlationId: message.correlation_id,
         data: message.data,
       })
+      this.emitStageFromInboundMessage(message)
 
       // Rate limiting check (10 msg/sec)
       this.checkRateLimit()
@@ -416,6 +419,70 @@ class WebSocketService {
       }
     } catch (error) {
       logger.error('Failed to parse message', error)
+    }
+  }
+
+  private emitStageFromInboundMessage(message: WebSocketMessage): void {
+    const correlationId = typeof message.correlation_id === 'string' ? message.correlation_id.trim() : ''
+    if (!correlationId) return
+
+    const isTerminalOutcome =
+      message.type === 'intent_outcome' &&
+      (message.data?.is_final === true || String(message.data?.outcome || '').toLowerCase() === 'applied')
+    const isTrackedType =
+      message.type === 'actuator_response' ||
+      message.type === 'actuator_command_failed' ||
+      isTerminalOutcome
+    if (!isTrackedType) return
+
+    this.sendClientStageObservation(
+      correlationId,
+      't7_ws_arrival',
+      {
+        ws_message_type: message.type,
+      },
+      true
+    )
+  }
+
+  sendClientStageObservation(
+    correlationId: string,
+    stage: 't7_ws_arrival' | 't7_ui_applied',
+    extra?: Record<string, unknown>,
+    dedupe: boolean = false
+  ): void {
+    const normalizedCorrelation = correlationId.trim()
+    if (!normalizedCorrelation) return
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
+
+    const now = Date.now()
+    if (dedupe) {
+      const dedupeKey = `${stage}:${normalizedCorrelation}`
+      const lastSent = this.stageEmissionDedup.get(dedupeKey)
+      if (lastSent && now - lastSent < WebSocketService.STAGE_DEDUP_TTL_MS) return
+      this.stageEmissionDedup.set(dedupeKey, now)
+      if (this.stageEmissionDedup.size > 2000) {
+        for (const [key, ts] of this.stageEmissionDedup.entries()) {
+          if (now - ts > WebSocketService.STAGE_DEDUP_TTL_MS) {
+            this.stageEmissionDedup.delete(key)
+          }
+        }
+      }
+    }
+
+    try {
+      this.ws.send(
+        JSON.stringify({
+          action: 'client_stage',
+          stage,
+          correlation_id: normalizedCorrelation,
+          observed_at_ms: now,
+          client_id: this.clientId,
+          extra: extra ?? {},
+        })
+      )
+    } catch (error) {
+      logger.debug('Failed to emit client stage observation', error)
     }
   }
 

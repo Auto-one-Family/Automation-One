@@ -62,15 +62,22 @@ class IntentOutcomeHandler:
             esp_id = parsed_topic["esp_id"]
 
             if not str(payload.get("intent_id") or "").strip():
-                corr_seed = str(payload.get("correlation_id") or "").strip() or "missing-corr"
+                corr_seed = str(payload.get("correlation_id") or "").strip()
                 seq_seed = self._to_non_negative_int(payload.get("seq"), default=0)
                 ts_seed = self._to_non_negative_int(payload.get("ts"), default=int(time.time()))
-                payload["intent_id"] = f"missing-intent:{esp_id}:{corr_seed}:{seq_seed}:{ts_seed}"[
-                    :128
-                ]
-                payload["code"] = "CONTRACT_MISSING_INTENT_ID"
-                payload["reason"] = "Contract violation: missing intent_id"
-                payload["retryable"] = False
+                if corr_seed:
+                    # Preserve end-to-end trace continuity when firmware omitted intent_id
+                    # but still carried correlation_id.
+                    payload["intent_id"] = corr_seed[:128]
+                    payload.setdefault("_reconciliation", {})["intent_id_source"] = "correlation_id"
+                else:
+                    corr_seed = "missing-corr"
+                    payload["intent_id"] = f"missing-intent:{esp_id}:{corr_seed}:{seq_seed}:{ts_seed}"[
+                        :128
+                    ]
+                    payload["code"] = "CONTRACT_MISSING_INTENT_ID"
+                    payload["reason"] = "Contract violation: missing intent_id"
+                    payload["retryable"] = False
                 emit_tracing_degraded(
                     esp_id,
                     "intent_outcome_missing_intent_id",
@@ -153,6 +160,7 @@ class IntentOutcomeHandler:
             outcome = canonical.outcome
             flow = canonical.flow
             correlation_id = payload.get("correlation_id")
+            t4_seen_ms = int(time.time() * 1000)
             retry_count = self._to_non_negative_int(payload.get("retry_count"), default=0)
             recovered = bool(payload.get("recovered", False))
             drop_critical_total = self._to_non_negative_int(
@@ -167,6 +175,16 @@ class IntentOutcomeHandler:
                 intent_id,
                 outcome,
             )
+            if correlation_id:
+                logger.warning(
+                    "latency_stage stage=t4_outcome_seen correlation_id=%s esp_id=%s flow=%s observed_at_ms=%s intent_id=%s outcome=%s",
+                    correlation_id,
+                    esp_id,
+                    flow,
+                    t4_seen_ms,
+                    intent_id,
+                    outcome,
+                )
             if canonical.is_contract_violation and canonical.code == "CONTRACT_UNKNOWN_CODE":
                 increment_contract_unknown_code("intent_outcome")
                 emit_tracing_degraded(
@@ -237,6 +255,7 @@ class IntentOutcomeHandler:
                             "reconciliation": payload.get("_reconciliation"),
                         },
                         severity=self._severity_for_outcome(outcome_row.outcome),
+                        correlation_id=outcome_row.correlation_id,
                     )
                     await session.commit()
                     observe_config_commit_duration_ms((time.perf_counter() - tx_started) * 1000.0)
@@ -262,6 +281,18 @@ class IntentOutcomeHandler:
                     payload["legacy_status"] = outcome_row.legacy_status
                     payload["target_status"] = outcome_row.target_status
                     payload["is_final"] = bool(outcome_row.is_final)
+                    # Emit t5 whenever DB has a terminal timestamp (incl. applied terminals),
+                    # without changing outcome semantics.
+                    if correlation_id and outcome_row.terminal_at is not None:
+                        logger.warning(
+                            "latency_stage stage=t5_outcome_terminal correlation_id=%s esp_id=%s flow=%s observed_at_ms=%s intent_id=%s outcome=%s",
+                            correlation_id,
+                            esp_id,
+                            flow,
+                            int(time.time() * 1000),
+                            intent_id,
+                            outcome_row.outcome,
+                        )
             except Exception as audit_error:
                 logger.error("Failed to store intent_outcome in audit log: %s", audit_error)
                 # Critical path: do not acknowledge inbound message without persistence.
@@ -272,6 +303,16 @@ class IntentOutcomeHandler:
 
                 ws_manager = await WebSocketManager.get_instance()
                 contract_payload = serialize_intent_outcome_row(outcome_row)
+                if correlation_id:
+                    logger.warning(
+                        "latency_stage stage=t6b_ws_intent_outcome_emit correlation_id=%s esp_id=%s flow=%s observed_at_ms=%s ws_connections=%s outcome=%s",
+                        correlation_id,
+                        esp_id,
+                        flow,
+                        int(time.time() * 1000),
+                        ws_manager.connection_count,
+                        outcome_row.outcome,
+                    )
                 await ws_manager.broadcast(
                     "intent_outcome",
                     {
@@ -290,6 +331,16 @@ class IntentOutcomeHandler:
                     },
                     correlation_id=correlation_id,
                 )
+                if correlation_id:
+                    logger.warning(
+                        "latency_stage stage=t6c_ws_intent_outcome_broadcast_done correlation_id=%s esp_id=%s flow=%s observed_at_ms=%s ws_connections=%s outcome=%s",
+                        correlation_id,
+                        esp_id,
+                        flow,
+                        int(time.time() * 1000),
+                        ws_manager.connection_count,
+                        outcome_row.outcome,
+                    )
             except Exception as ws_error:
                 logger.warning("Failed to broadcast intent_outcome WebSocket event: %s", ws_error)
 
