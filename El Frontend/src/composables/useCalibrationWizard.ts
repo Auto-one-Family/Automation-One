@@ -206,6 +206,7 @@ interface CalibrationDraft {
 
 const DRAFT_STORAGE_KEY = 'calibration.wizard.draft.v2'
 const TERMINAL_SESSION_STATUSES = new Set(['applied', 'rejected', 'failed', 'expired'])
+const MEASUREMENT_EVENT_FALLBACK_WINDOW_MS = 10_000
 
 /** Mindestabstand nach Mess-HTTP wie SensorValueCard (ESP + MQTT). */
 const MEASUREMENT_TRIGGER_COOLDOWN_MS = 2000
@@ -292,6 +293,24 @@ export function useCalibrationWizard(
     return measurementCorrelationCandidates(message, data).some((id) => id === expected)
   }
 
+  /**
+   * Fallback when server event has no correlation/request IDs:
+   * accept only while we have an active measurement window on the same sensor/session.
+   */
+  function canFallbackMatchMeasurementByContext(data: Record<string, unknown>): boolean {
+    if (!isMeasuring.value) return false
+    if (measurementTriggerAt.value == null) return false
+    if (Date.now() - measurementTriggerAt.value > MEASUREMENT_EVENT_FALLBACK_WINDOW_MS) return false
+    if (
+      currentSessionId.value &&
+      data.session_id &&
+      data.session_id !== currentSessionId.value
+    ) {
+      return false
+    }
+    return true
+  }
+
   const unsubscribeMeasurement = ws.on('calibration_measurement_received', (message: WebSocketMessage) => {
     const data = message.data ?? {}
     if (
@@ -314,13 +333,16 @@ export function useCalibrationWizard(
 
     const ids = measurementCorrelationCandidates(message, data)
     if (ids.length === 0) {
-      isFreshMeasurement.value = false
-      lifecycleState.value = 'terminal_integration_issue'
-      lifecycleMessage.value = 'Messung ohne zuordenbare Request-ID (intent/correlation) erhalten und verworfen.'
-      return
+      if (!canFallbackMatchMeasurementByContext(data)) {
+        isFreshMeasurement.value = false
+        lifecycleState.value = 'terminal_integration_issue'
+        lifecycleMessage.value = 'Messung ohne zuordenbare Request-ID (intent/correlation) erhalten und verworfen.'
+        return
+      }
+      lifecycleMessage.value = 'Messung ohne Korrelation-ID empfangen (Fallback-Zuordnung aktiv).'
     }
 
-    if (!matchesActiveMeasurementRequest(message, data)) {
+    if (ids.length > 0 && !matchesActiveMeasurementRequest(message, data)) {
       return
     }
 
@@ -330,6 +352,7 @@ export function useCalibrationWizard(
       setLastRawValue(rawValue, String(data.quality ?? 'good'))
       lastMeasurementAt.value = eventReceivedAt
       isFreshMeasurement.value = true
+      measurementTriggerAt.value = null
       lifecycleState.value = 'pending'
       lifecycleMessage.value = 'Frische Messung empfangen.'
     }
@@ -350,17 +373,21 @@ export function useCalibrationWizard(
 
     const ids = measurementCorrelationCandidates(message, data)
     if (ids.length === 0) {
-      lifecycleState.value = 'terminal_integration_issue'
-      lifecycleMessage.value = 'Messfehler ohne zuordenbare Request-ID erhalten.'
-      return
+      if (!canFallbackMatchMeasurementByContext(data)) {
+        lifecycleState.value = 'terminal_integration_issue'
+        lifecycleMessage.value = 'Messfehler ohne zuordenbare Request-ID erhalten.'
+        return
+      }
+      lifecycleMessage.value = 'Messfehler ohne Korrelation-ID empfangen (Fallback-Zuordnung aktiv).'
     }
 
-    if (!matchesActiveMeasurementRequest(message, data)) {
+    if (ids.length > 0 && !matchesActiveMeasurementRequest(message, data)) {
       return
     }
 
     measurementQuality.value = 'error'
     isFreshMeasurement.value = false
+    measurementTriggerAt.value = null
     lifecycleState.value = 'terminal_failed'
     errorMessage.value = String(data.error ?? 'Messung fehlgeschlagen')
   })
@@ -738,6 +765,7 @@ export function useCalibrationWizard(
 
       if (targetSampleCount <= 1) {
         // Single measurement — original path (all non-EC sensors)
+        measurementTriggerAt.value = Date.now()
         const triggerResult = await sensorsApi.triggerMeasurement(selectedEspId.value, selectedGpio.value)
         measurementRequestId.value = triggerResult.request_id
         lifecycleState.value = 'pending'
@@ -753,6 +781,7 @@ export function useCalibrationWizard(
           lifecycleMessage.value = `Messung ${sampleIndex + 1}/${targetSampleCount} laeuft...`
 
           const prevMeasurementAt = lastMeasurementAt.value
+          measurementTriggerAt.value = Date.now()
           const triggerResult = await sensorsApi.triggerMeasurement(selectedEspId.value, selectedGpio.value)
           measurementRequestId.value = triggerResult.request_id
 

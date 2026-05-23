@@ -20,6 +20,7 @@ References:
 """
 
 import uuid
+from math import ceil
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -37,7 +38,8 @@ logger = get_logger(__name__)
 # Cooldown window (seconds) for on-demand measurement busy-guard (AUT-302).
 # A second /measure call within this window for the same (esp_id, gpio) is
 # rejected with HTTP 429 to prevent MQTT burst → ESP publish-queue overflow.
-_MEASURE_COOLDOWN_SECONDS: float = 10.0
+# Tuned for fast manual probing: allow one request every ~2 seconds.
+_MEASURE_COOLDOWN_SECONDS: float = 2.0
 # Module-level dict so the cooldown survives across FastAPI request-scoped SensorService instances.
 _measure_cooldown: Dict[tuple[str, int], float] = {}
 
@@ -601,15 +603,21 @@ class SensorService:
         now_ts = datetime.now(timezone.utc).timestamp()
         last_triggered = _measure_cooldown.get(cooldown_key)
         if last_triggered is not None and (now_ts - last_triggered) < _MEASURE_COOLDOWN_SECONDS:
+            elapsed = now_ts - last_triggered
+            retry_after_seconds = max(1, int(ceil(_MEASURE_COOLDOWN_SECONDS - elapsed)))
             logger.warning(
                 "trigger_measurement rejected — measurement busy: esp=%s gpio=%s "
                 "(%.1fs since last trigger, cooldown=%.1fs)",
                 esp_id,
                 gpio,
-                now_ts - last_triggered,
+                elapsed,
                 _MEASURE_COOLDOWN_SECONDS,
             )
-            raise MeasurementBusyError(esp_id=esp_id, gpio=gpio)
+            raise MeasurementBusyError(
+                esp_id=esp_id,
+                gpio=gpio,
+                retry_after_seconds=retry_after_seconds,
+            )
 
         # 4. Publish MQTT command via Publisher
         success, request_id = self.publisher.publish_sensor_command(

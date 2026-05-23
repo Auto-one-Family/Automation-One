@@ -286,6 +286,7 @@ const measureState = ref<'idle' | 'success' | 'error'>('idle')
 let measureTriggerTime = 0
 let preMeasureTriggerValue: number | null = null
 let preMeasureLastRead: string | null = null
+let preMeasureLastEventAt: string | null = null
 let measureTimeoutId: ReturnType<typeof setTimeout> | null = null
 const { success: toastSuccess, error: toastError, warning: toastWarning } = useToast()
 
@@ -303,6 +304,7 @@ function resolveMeasureSuccess(): void {
   measureTriggerTime = 0
   preMeasureTriggerValue = null
   preMeasureLastRead = null
+  preMeasureLastEventAt = null
   toastSuccess('Messwert empfangen')
   setTimeout(() => { measureState.value = 'idle' }, 2000)
 }
@@ -314,14 +316,15 @@ function resolveMeasureSuccess(): void {
 // Bug fixes: lastReadChanged detects any new timestamp; valueMutated without null-guard
 // detects null→value (first measurement) correctly.
 watch(
-  () => [props.sensor.last_read, props.sensor.raw_value] as const,
-  ([newLastRead, newRawValue]) => {
+  () => [props.sensor.last_read, props.sensor.raw_value, props.sensor.last_event_at] as const,
+  ([newLastRead, newRawValue, newLastEventAt]) => {
     if (!measureTriggerTime) return
     if (!isMeasuring.value && measureState.value !== 'error') return
     const timestampFresh = newLastRead != null && new Date(newLastRead).getTime() > measureTriggerTime
     const lastReadChanged = newLastRead !== preMeasureLastRead
     const valueMutated = newRawValue !== preMeasureTriggerValue
-    if (timestampFresh || lastReadChanged || valueMutated) {
+    const eventArrived = newLastEventAt != null && newLastEventAt !== preMeasureLastEventAt
+    if (timestampFresh || lastReadChanged || valueMutated || eventArrived) {
       resolveMeasureSuccess()
     }
   }
@@ -336,6 +339,7 @@ async function triggerMeasure(): Promise<void> {
   measureTriggerTime = Date.now()
   preMeasureTriggerValue = props.sensor.raw_value ?? null
   preMeasureLastRead = props.sensor.last_read ?? null
+  preMeasureLastEventAt = props.sensor.last_event_at ?? null
   try {
     await sensorsApi.triggerMeasurement(props.sensor.esp_id, props.sensor.gpio)
     // Command published to ESP — wait for WS sensor_data (finality via watch above)
@@ -349,17 +353,18 @@ async function triggerMeasure(): Promise<void> {
           measureTriggerTime = 0
           preMeasureTriggerValue = null
           preMeasureLastRead = null
+          preMeasureLastEventAt = null
         }
         measureState.value = 'idle'
       }, 2000)
-    }, 20_000)
+    }, 10_000)
   } catch (err: unknown) {
     clearMeasureTimeout()
     isMeasuring.value = false
-    // HTTP 409: MeasurementBusyError — sensor cooldown active
+    // HTTP 429 (legacy: 409): MeasurementBusyError — sensor cooldown active
     const axiosErr = err as { response?: { status?: number; data?: { retry_after_seconds?: number } } }
-    if (axiosErr?.response?.status === 409) {
-      const retryAfter = axiosErr.response.data?.retry_after_seconds ?? 10
+    if (axiosErr?.response?.status === 429 || axiosErr?.response?.status === 409) {
+      const retryAfter = axiosErr.response.data?.retry_after_seconds ?? 3
       toastWarning(`Sensor misst gerade — bitte ${retryAfter}s warten`)
       measureState.value = 'idle'
       return
@@ -368,6 +373,7 @@ async function triggerMeasure(): Promise<void> {
     measureTriggerTime = 0
     preMeasureTriggerValue = null
     preMeasureLastRead = null
+    preMeasureLastEventAt = null
     toastError('Messung fehlgeschlagen')
     setTimeout(() => { measureState.value = 'idle' }, 2000)
   }

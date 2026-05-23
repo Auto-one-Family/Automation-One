@@ -51,6 +51,8 @@ interface Sensor {
   sensor_kind?: SensorKind | null
   // AUT-313: Finality-Watch field (WS sensor_data event)
   last_read?: string | null
+  // Frontend-local marker updated on each sensor_data event.
+  last_event_at?: string | null
 }
 
 interface Props {
@@ -79,6 +81,7 @@ const measureState = ref<MeasureState>('idle')
 let measureTriggerTime = 0
 let preMeasureTriggerValue: number | null = null
 let preMeasureLastRead: string | null = null
+let preMeasureLastEventAt: string | null = null
 let measureTimeoutId: ReturnType<typeof setTimeout> | null = null
 
 function clearMeasureTimeout(): void {
@@ -95,19 +98,21 @@ function resolveMeasureSuccess(): void {
   measureTriggerTime = 0
   preMeasureTriggerValue = null
   preMeasureLastRead = null
+  preMeasureLastEventAt = null
   toast.success('Messwert empfangen')
   setTimeout(() => { measureState.value = 'idle' }, 2000)
 }
 
 watch(
-  () => [props.sensor.last_read, props.sensor.raw_value] as const,
-  ([newLastRead, newRawValue]) => {
+  () => [props.sensor.last_read, props.sensor.raw_value, props.sensor.last_event_at] as const,
+  ([newLastRead, newRawValue, newLastEventAt]) => {
     if (!measureTriggerTime) return
     if (!isMeasuring.value && measureState.value !== 'error') return
     const timestampFresh = newLastRead != null && new Date(newLastRead).getTime() > measureTriggerTime
     const lastReadChanged = newLastRead !== preMeasureLastRead
     const valueMutated = newRawValue !== preMeasureTriggerValue
-    if (timestampFresh || lastReadChanged || valueMutated) {
+    const eventArrived = newLastEventAt != null && newLastEventAt !== preMeasureLastEventAt
+    if (timestampFresh || lastReadChanged || valueMutated || eventArrived) {
       resolveMeasureSuccess()
     }
   }
@@ -134,6 +139,7 @@ async function handleTriggerMeasurement(): Promise<void> {
   measureTriggerTime = Date.now()
   preMeasureTriggerValue = props.sensor.raw_value ?? null
   preMeasureLastRead = props.sensor.last_read ?? null
+  preMeasureLastEventAt = props.sensor.last_event_at ?? null
   try {
     await sensorsApi.triggerMeasurement(props.espId, props.sensor.gpio)
     log.info('Measurement command sent, waiting for WS finality', { gpio: props.sensor.gpio })
@@ -146,10 +152,11 @@ async function handleTriggerMeasurement(): Promise<void> {
           measureTriggerTime = 0
           preMeasureTriggerValue = null
           preMeasureLastRead = null
+          preMeasureLastEventAt = null
         }
         measureState.value = 'idle'
       }, 2000)
-    }, 20_000)
+    }, 10_000)
   } catch (err: unknown) {
     clearMeasureTimeout()
     isMeasuring.value = false
@@ -157,6 +164,7 @@ async function handleTriggerMeasurement(): Promise<void> {
     measureTriggerTime = 0
     preMeasureTriggerValue = null
     preMeasureLastRead = null
+    preMeasureLastEventAt = null
     log.error('Measurement trigger failed', err)
     const errorMessage = (err as { response?: { data?: { detail?: string } } })
       .response?.data?.detail || 'Messung konnte nicht gestartet werden'

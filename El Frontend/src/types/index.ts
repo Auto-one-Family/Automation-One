@@ -270,6 +270,8 @@ export interface MockSensor {
   quality: QualityLevel
   raw_mode: boolean
   last_read: string | null
+  /** Last WS sensor_data event arrival time (frontend-local, for UI finality). */
+  last_event_at?: string | null
   // Phase 2E: Health-Status fields
   operating_mode?: SensorOperatingMode
   timeout_seconds?: number

@@ -163,6 +163,7 @@ export const useSensorStore = defineStore('sensor', () => {
     applyDevicePatch: ApplyDevicePatch,
   ): void {
     const data = message.data
+    const eventReceivedAtIso = new Date().toISOString()
     const espId = data.esp_id || data.device_id
     const gpio = data.gpio
     const sensorType = data.sensor_type
@@ -194,13 +195,14 @@ export const useSensorStore = defineStore('sensor', () => {
         if (data.unit) exactMatch.unit = data.unit
         const ts = normalizeRawTimestamp(data.timestamp)
         if (ts !== null) exactMatch.last_read = ts
+        exactMatch.last_event_at = eventReceivedAtIso
         return { ...device, sensors }
       }
 
       // Fallback: legacy multi-value merge for sensors not yet in array
       const knownDeviceType = getDeviceTypeFromSensorType(sensorType)
       if (knownDeviceType) {
-        handleKnownMultiValueSensor(sensors, data, knownDeviceType)
+        handleKnownMultiValueSensor(sensors, data, knownDeviceType, eventReceivedAtIso)
         return { ...device, sensors }
       }
 
@@ -211,12 +213,12 @@ export const useSensorStore = defineStore('sensor', () => {
         normalizeSensorType(existingSensor.sensor_type) !== normalizeSensorType(sensorType) &&
         !existingSensor.is_multi_value
       ) {
-        handleDynamicMultiValueSensor(existingSensor, data)
+        handleDynamicMultiValueSensor(existingSensor, data, eventReceivedAtIso)
         return { ...device, sensors }
       }
 
       // Single-value sensor (or first value of unknown multi-value)
-      handleSingleValueSensorData(sensors, data)
+      handleSingleValueSensorData(sensors, data, eventReceivedAtIso)
       return { ...device, sensors }
     })
 
@@ -231,7 +233,8 @@ export const useSensorStore = defineStore('sensor', () => {
   function handleKnownMultiValueSensor(
     sensors: MockSensor[],
     data: SensorDataPayload,
-    deviceType: string
+    deviceType: string,
+    eventReceivedAtIso: string,
   ): void {
     let sensor = sensors.find(s => s.gpio === data.gpio)
     const deviceConfig = getMultiValueDeviceConfigBySensorType(data.sensor_type)
@@ -246,6 +249,7 @@ export const useSensorStore = defineStore('sensor', () => {
         quality: data.quality ?? 'good',
         raw_mode: true,
         last_read: normalizeRawTimestamp(data.timestamp),
+        last_event_at: eventReceivedAtIso,
         device_type: deviceType,
         is_multi_value: true,
         multi_values: {}
@@ -279,6 +283,7 @@ export const useSensorStore = defineStore('sensor', () => {
     sensor.quality = getWorstQuality(Object.values(sensor.multi_values))
     const knownTs = normalizeRawTimestamp(data.timestamp)
     if (knownTs !== null) sensor.last_read = knownTs
+    sensor.last_event_at = eventReceivedAtIso
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -286,7 +291,8 @@ export const useSensorStore = defineStore('sensor', () => {
   // ════════════════════════════════════════════════════════════════════════════
   function handleDynamicMultiValueSensor(
     existingSensor: MockSensor,
-    data: SensorDataPayload
+    data: SensorDataPayload,
+    eventReceivedAtIso: string,
   ): void {
     if (!existingSensor.is_multi_value) {
       existingSensor.is_multi_value = true
@@ -317,12 +323,17 @@ export const useSensorStore = defineStore('sensor', () => {
     existingSensor.quality = getWorstQuality(Object.values(existingSensor.multi_values!))
     const dynTs = normalizeRawTimestamp(data.timestamp)
     if (dynTs !== null) existingSensor.last_read = dynTs
+    existingSensor.last_event_at = eventReceivedAtIso
   }
 
   // ════════════════════════════════════════════════════════════════════════════
   // HANDLER 3: SINGLE-VALUE (unchanged behavior)
   // ════════════════════════════════════════════════════════════════════════════
-  function handleSingleValueSensorData(sensors: MockSensor[], data: SensorDataPayload): void {
+  function handleSingleValueSensorData(
+    sensors: MockSensor[],
+    data: SensorDataPayload,
+    eventReceivedAtIso: string,
+  ): void {
     const sensor = sensors.find(s => matchSensorToEvent(s, data))
 
     if (sensor) {
@@ -331,6 +342,7 @@ export const useSensorStore = defineStore('sensor', () => {
       if (data.unit) sensor.unit = data.unit
       const singleTs = normalizeRawTimestamp(data.timestamp)
       if (singleTs !== null) sensor.last_read = singleTs
+      sensor.last_event_at = eventReceivedAtIso
     }
   }
 

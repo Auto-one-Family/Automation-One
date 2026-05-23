@@ -482,11 +482,19 @@ class MeasurementBusyError(GodKaiserException):
     status_code = 429
     error_code = "MEASUREMENT_BUSY"
 
-    def __init__(self, esp_id: str, gpio: int) -> None:
+    def __init__(
+        self,
+        esp_id: str,
+        gpio: int,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        details = {"esp_id": esp_id, "gpio": gpio}
+        if retry_after_seconds is not None:
+            details["retry_after_seconds"] = retry_after_seconds
         super().__init__(
             message=f"Measurement already in progress for {esp_id}/GPIO {gpio}",
             error_code="MEASUREMENT_BUSY",
-            details={"esp_id": esp_id, "gpio": gpio},
+            details=details,
             numeric_code=5404,  # ServiceErrorCode.RATE_LIMIT_EXCEEDED
         )
 
