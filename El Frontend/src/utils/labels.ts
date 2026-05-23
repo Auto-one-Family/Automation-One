@@ -362,6 +362,11 @@ export function getDeviceTypeLabel(type: string): string {
 export const SETTINGS_LABELS = {
   logout: 'Abmelden',
   logoutAllDevices: 'Auf allen Geraeten abmelden',
+  sheetsExportTitle: 'Sheets-Export',
+  sheetsExportSpreadsheetId: 'Spreadsheet-ID',
+  sheetsExportOpenLink: 'Spreadsheet in Google Sheets oeffnen',
+  sheetsExportHint:
+    'Server-seitiger Export schreibt Sensor- und Aktor-Daten in dieses Spreadsheet.',
 } as const
 
 // =============================================================================

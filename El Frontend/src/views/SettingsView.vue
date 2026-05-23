@@ -1,9 +1,17 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import { useUiStore } from '@/shared/stores'
 import { useRouter } from 'vue-router'
-import { Settings, User, LogOut, Server, UserPlus } from 'lucide-vue-next'
+import {
+  ExternalLink,
+  FileSpreadsheet,
+  LogOut,
+  Server,
+  Settings,
+  User,
+  UserPlus,
+} from 'lucide-vue-next'
 import { SETTINGS_LABELS } from '@/utils/labels'
 
 const authStore = useAuthStore()
@@ -11,6 +19,23 @@ const uiStore = useUiStore()
 const router = useRouter()
 
 const apiUrl = ref(window.location.origin)
+
+// AUT-450 (S8): Optionaler Sheets-Export-Hinweis.
+// Sichtbarkeit ueber Build-Time-Env (vgl. VITE_CALIBRATION_API_KEY-Pattern):
+// nur anzeigen, wenn die Server-seitige Pipeline tatsaechlich konfiguriert
+// ist und der Operator die Spreadsheet-ID im Frontend hinterlegt hat.
+const sheetsSpreadsheetId = computed<string>(() => {
+  const raw = import.meta.env.VITE_SHEETS_SPREADSHEET_ID
+  return typeof raw === 'string' ? raw.trim() : ''
+})
+const isSheetsExportConfigured = computed<boolean>(
+  () => sheetsSpreadsheetId.value.length > 0,
+)
+const sheetsSpreadsheetUrl = computed<string>(() =>
+  isSheetsExportConfigured.value
+    ? `https://docs.google.com/spreadsheets/d/${encodeURIComponent(sheetsSpreadsheetId.value)}/edit`
+    : '',
+)
 
 async function handleLogout() {
   await authStore.logout()
@@ -109,6 +134,51 @@ async function handleLogoutAll() {
         </div>
       </div>
     </div>
+
+    <!-- Sheets Export (AUT-450 S8, optional) -->
+    <section
+      v-if="isSheetsExportConfigured"
+      class="card"
+      aria-labelledby="settings-sheets-export-title"
+      data-testid="settings-sheets-export-card"
+    >
+      <div class="card-header flex items-center gap-3">
+        <FileSpreadsheet class="w-5 h-5 text-emerald-400" aria-hidden="true" />
+        <h3 id="settings-sheets-export-title" class="font-semibold text-dark-100">
+          {{ SETTINGS_LABELS.sheetsExportTitle }}
+        </h3>
+      </div>
+      <div class="card-body space-y-4">
+        <p class="text-sm text-dark-300">
+          {{ SETTINGS_LABELS.sheetsExportHint }}
+        </p>
+        <div>
+          <p class="text-sm text-dark-400" id="settings-sheets-export-id-label">
+            {{ SETTINGS_LABELS.sheetsExportSpreadsheetId }}
+          </p>
+          <p
+            class="text-dark-100 font-mono break-all"
+            aria-labelledby="settings-sheets-export-id-label"
+            data-testid="settings-sheets-export-id"
+          >
+            {{ sheetsSpreadsheetId }}
+          </p>
+        </div>
+        <div>
+          <a
+            :href="sheetsSpreadsheetUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn-secondary inline-flex items-center"
+            :aria-label="SETTINGS_LABELS.sheetsExportOpenLink"
+            data-testid="settings-sheets-export-link"
+          >
+            <ExternalLink class="w-4 h-4 mr-2" aria-hidden="true" />
+            {{ SETTINGS_LABELS.sheetsExportOpenLink }}
+          </a>
+        </div>
+      </div>
+    </section>
 
     <!-- About -->
     <div class="card">
