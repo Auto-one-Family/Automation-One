@@ -145,6 +145,30 @@ async def lifespan(app: FastAPI):
                 "Enable MQTT_USE_TLS for secure credential distribution."
             )
 
+        # AUT-443: Validate Google Sheets export auth configuration (no-op when disabled).
+        try:
+            from .integrations.sheets import SheetsAuthError, validate_credentials_config
+
+            sheets_metadata = validate_credentials_config(settings.sheets_export)
+            if sheets_metadata:
+                logger.info(
+                    "Sheets export auth ready (project_id=%s, client_email=%s, "
+                    "spreadsheet_configured=%s)",
+                    sheets_metadata["project_id"],
+                    sheets_metadata["client_email"],
+                    sheets_metadata["spreadsheet_id_configured"],
+                )
+        except SheetsAuthError as exc:
+            logger.critical(
+                "Sheets export configuration invalid: %s (numeric_code=%s)",
+                exc.message,
+                exc.numeric_code,
+            )
+            raise SystemExit(
+                "Cannot start server: Sheets export is enabled but configuration is "
+                f"invalid. {exc.message}"
+            ) from exc
+
         logger.info("Security validation complete")
 
         # Step 0.5: Initialize Resilience Patterns

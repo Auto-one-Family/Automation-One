@@ -901,6 +901,54 @@ class ResilienceSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 
+class SheetsExportSettings(BaseSettings):
+    """
+    Google Sheets Export configuration (AUT-442 / S1: AUT-443).
+
+    Provides the runtime configuration for the Service-Account based
+    Google Sheets export pipeline. Credentials are loaded from a path
+    on the host filesystem - NEVER committed to the repository.
+
+    Reference: docs/plans/BELEG-sheets-export-baseline-2026-05-23.md
+    """
+
+    enabled: bool = Field(
+        default=False,
+        alias="SHEETS_EXPORT_ENABLED",
+        description="Master switch for the Google Sheets export pipeline (Default: disabled).",
+    )
+    sa_credentials_path: Optional[str] = Field(
+        default=None,
+        alias="SHEETS_SA_CREDENTIALS_PATH",
+        description=(
+            "Absolute path to the Google Service-Account JSON credentials file. "
+            "MUST live outside the repository (e.g. /secrets/sheets_sa.json or a "
+            "Docker secret mount). Required when SHEETS_EXPORT_ENABLED=true."
+        ),
+    )
+    spreadsheet_id: Optional[str] = Field(
+        default=None,
+        alias="SHEETS_SPREADSHEET_ID",
+        description=(
+            "Target spreadsheet ID inside the 11grower workspace. Optional during "
+            "S1 (auth bootstrap); required from S2 onwards (export pipeline)."
+        ),
+    )
+    scopes: List[str] = Field(
+        default=[
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive.file",
+        ],
+        alias="SHEETS_SCOPES",
+        description=(
+            "OAuth scopes requested by the Service-Account. Default covers "
+            "Sheets read/write plus minimal Drive access for the SA-owned files."
+        ),
+    )
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+
 class Settings(BaseSettings):
     """Master settings class combining all configuration sections"""
 
@@ -931,6 +979,7 @@ class Settings(BaseSettings):
     maintenance: MaintenanceSettings = MaintenanceSettings()
     backup: DatabaseBackupSettings = DatabaseBackupSettings()
     resilience: ResilienceSettings = ResilienceSettings()
+    sheets_export: SheetsExportSettings = SheetsExportSettings()
 
     @property
     def cors_origins(self) -> list[str]:

@@ -159,6 +159,13 @@ certificates/*.key
 certificates/*.pem
 !certificates/.gitkeep
 
+# Google Sheets Service-Account credentials (AUT-443) — NEVER commit
+secrets/
+**/secrets/
+*.sa.json
+**/sheets_sa*.json
+**/service_account*.json
+
 # Alembic
 alembic/versions/*.pyc
 

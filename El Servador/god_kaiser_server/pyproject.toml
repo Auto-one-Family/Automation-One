@@ -62,6 +62,13 @@ psutil = "^5.9.0"
 apscheduler = "^3.11.2"
 requests = "^2.32.5"
 
+# Google Sheets Export (AUT-442 / S1: AUT-443)
+# google-auth is required for Service-Account credentials; gspread is the
+# Sheets client that the S2+ export pipeline will use. Both are optional at
+# runtime — guarded by SHEETS_EXPORT_ENABLED feature flag.
+google-auth = "^2.29.0"
+gspread = "^6.1.2"
+
 [tool.poetry.group.dev.dependencies]
 # Testing
 pytest = "^8.0.0"

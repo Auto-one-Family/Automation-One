@@ -141,6 +141,12 @@ services:
       LOG_FILE_PATH: /app/logs/god_kaiser.log
       # CORS (allow frontend)
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-'["http://localhost:5173","http://localhost:3000"]'}
+      # AUT-442 / S1 (AUT-443) — Google Sheets export (opt-in, default disabled).
+      # Provide the SA-JSON via a bind-mount or docker secret at
+      # SHEETS_SA_CREDENTIALS_PATH and keep the file OUTSIDE the repo.
+      SHEETS_EXPORT_ENABLED: ${SHEETS_EXPORT_ENABLED:-false}
+      SHEETS_SA_CREDENTIALS_PATH: ${SHEETS_SA_CREDENTIALS_PATH:-}
+      SHEETS_SPREADSHEET_ID: ${SHEETS_SPREADSHEET_ID:-}
     ports:
       - "0.0.0.0:8000:8000"
     volumes:
@@ -149,6 +155,12 @@ services:
       - ./logs/server:/app/logs
       # Persist database backups on host (Fix-T Block 2)
       - ./backups:/app/backups
+      # AUT-443 — Service-Account JSON for Google Sheets export.
+      # To enable, uncomment the following line in a local override file
+      # (e.g. docker-compose.override.yml — NEVER commit it) and point it
+      # to the SA-JSON path on the host. Set SHEETS_SA_CREDENTIALS_PATH=
+      # /run/secrets/sheets_sa.json in your .env to match the target path.
+      # - /srv/automationone/secrets/sheets_sa.json:/run/secrets/sheets_sa.json:ro
     depends_on:
       postgres:
         condition: service_healthy
