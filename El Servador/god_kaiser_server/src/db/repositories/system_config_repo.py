@@ -12,6 +12,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.system import SystemConfig
 
+# ---------------------------------------------------------------------------
+# Sheets-Export Cursor Constants (AUT-446 / S3)
+# ---------------------------------------------------------------------------
+
+SHEETS_CURSOR_SENSOR = "sheets_export_sensor_cursor"
+SHEETS_CURSOR_HISTORY = "sheets_export_history_cursor"
+SHEETS_CURSOR_LOGIC = "sheets_export_logic_cursor"
+
+ALLOWED_SHEETS_CURSOR_NAMES: frozenset[str] = frozenset(
+    {
+        SHEETS_CURSOR_SENSOR,
+        SHEETS_CURSOR_HISTORY,
+        SHEETS_CURSOR_LOGIC,
+    }
+)
+
 
 class SystemConfigRepository:
     """
@@ -142,6 +158,70 @@ class SystemConfigRepository:
             "password_hash": password_hash_val if password_hash_val else None,
             "last_configured": last_configured_dt,
         }
+
+    # =========================================================================
+    # Sheets-Export Cursor Methods (AUT-446 / S3)
+    # =========================================================================
+
+    async def get_sheets_export_cursor(self, cursor_name: str) -> Optional[str]:
+        """
+        Get the current value of a Sheets-Export cursor.
+
+        Cursors are persisted as ISO-8601 timestamp strings or integer IDs
+        stored in the ``sheets_export`` config_type bucket.
+
+        Args:
+            cursor_name: One of ALLOWED_SHEETS_CURSOR_NAMES.
+
+        Returns:
+            The cursor value string, or None when no cursor has been persisted yet.
+        """
+        entry = await self.get_by_key(cursor_name)
+        if entry is None:
+            return None
+        val = entry.config_value
+        if isinstance(val, dict) and "value" in val:
+            return str(val["value"]) if val["value"] is not None else None
+        return str(val) if val is not None else None
+
+    async def set_sheets_export_cursor(self, cursor_name: str, value: str) -> SystemConfig:
+        """
+        Atomically persist a Sheets-Export cursor value.
+
+        Creates the entry on first use; updates it on subsequent calls.
+        The value must be a non-empty string (ISO-8601 timestamp or integer ID).
+
+        Args:
+            cursor_name: One of ALLOWED_SHEETS_CURSOR_NAMES.
+            value: New cursor value (non-empty string).
+
+        Returns:
+            The created or updated SystemConfig entry.
+        """
+        return await self.set_config(
+            config_key=cursor_name,
+            config_value=value,
+            config_type="sheets_export",
+            description=f"Sheets-Export cursor: last successfully exported row ({cursor_name})",
+            is_secret=False,
+        )
+
+    async def reset_sheets_export_cursor(self, cursor_name: str) -> bool:
+        """
+        Delete a Sheets-Export cursor entry so the next export run starts from the beginning.
+
+        Args:
+            cursor_name: One of ALLOWED_SHEETS_CURSOR_NAMES.
+
+        Returns:
+            True if an entry existed and was deleted, False if it did not exist.
+        """
+        existing = await self.get_by_key(cursor_name)
+        if existing is None:
+            return False
+        await self.session.delete(existing)
+        await self.session.flush()
+        return True
 
     async def set_mqtt_auth_config(
         self,

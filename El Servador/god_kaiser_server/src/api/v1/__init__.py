@@ -37,6 +37,7 @@ from .diagnostics import router as diagnostics_router
 from .zone_context import router as zone_context_router
 from .calibration_sessions import router as calibration_sessions_router
 from .component_export import router as component_export_router
+from .admin_sheets_export import router as admin_sheets_export_router
 from .multispeq import router as multispeq_router
 from .scheduler import router as scheduler_router
 from .schema_registry import router as schema_registry_router
@@ -83,6 +84,7 @@ api_v1_router.include_router(schema_registry_router)  # Phase K4 L0.2 - Schema R
 api_v1_router.include_router(calibration_sessions_router)  # S-P3 - Calibration Sessions
 api_v1_router.include_router(multispeq_router)  # AUT-217 - MultispeQ Ingress
 api_v1_router.include_router(scheduler_router)  # AUT-194 - Scheduler Health Endpoint
+api_v1_router.include_router(admin_sheets_export_router)  # AUT-446 - Sheets-Export Cursor Admin
 
 # Export individual routers for direct access if needed
 __all__ = [
@@ -117,6 +119,7 @@ __all__ = [
     "backups_router",
     "diagnostics_router",
     "zone_context_router",
+    "admin_sheets_export_router",
     "component_export_router",
     "schema_registry_router",
 ]
