@@ -476,6 +476,39 @@ async def lifespan(app: FastAPI):
         _maintenance_service.start()  # Registriert alle Jobs
         logger.info("MaintenanceService initialized and started")
 
+        # Step 3.4.2b: Initialize SheetsExportService (AUT-442 — gated by feature flag)
+        # The service is constructed unconditionally so the dependency-injection
+        # singleton is available, but ``start()`` only registers the scheduler
+        # job when SHEETS_EXPORT_ENABLED=true AND SHEETS_SPREADSHEET_ID is set.
+        try:
+            from .services.sheets_export import init_sheets_export_service
+
+            sheets_export_service = init_sheets_export_service(
+                scheduler=_central_scheduler,
+                session_factory=get_session,
+                settings=settings.sheets_export,
+            )
+            registered = sheets_export_service.start()
+            if registered:
+                logger.info(
+                    "SheetsExportService started — interval=%d min",
+                    settings.sheets_export.export_interval_minutes,
+                )
+            else:
+                logger.info(
+                    "SheetsExportService initialised but inactive "
+                    "(enabled=%s, spreadsheet_configured=%s)",
+                    settings.sheets_export.enabled,
+                    bool(settings.sheets_export.spreadsheet_id),
+                )
+        except Exception as exc:
+            # Non-fatal: server must still come up if Sheets pipeline misconfigured.
+            logger.warning(
+                "SheetsExportService init failed (non-critical): %s",
+                exc,
+                exc_info=True,
+            )
+
         # Step 3.4.3: Register Prometheus metrics update job
         # Updates custom Gauges (uptime, CPU, memory, MQTT, ESP counts) every 15s.
         # Gauges are in the default prometheus_client registry and automatically

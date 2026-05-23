@@ -946,6 +946,64 @@ class SheetsExportSettings(BaseSettings):
         ),
     )
 
+    # Export pipeline runtime knobs (AUT-444 S2 / AUT-449 S7)
+    export_interval_minutes: int = Field(
+        default=5,
+        alias="SHEETS_EXPORT_INTERVAL_MINUTES",
+        ge=1,
+        le=60,
+        description="Interval in minutes for the SheetsExportService scheduler job.",
+    )
+    sensor_batch_size: int = Field(
+        default=2000,
+        alias="SHEETS_EXPORT_SENSOR_BATCH_SIZE",
+        ge=10,
+        le=20000,
+        description="Maximum rows fetched from sensor_data per export tick.",
+    )
+    history_batch_size: int = Field(
+        default=2000,
+        alias="SHEETS_EXPORT_HISTORY_BATCH_SIZE",
+        ge=10,
+        le=20000,
+        description="Maximum rows fetched from actuator_history per export tick.",
+    )
+    correlation_window_seconds: int = Field(
+        default=120,
+        alias="SHEETS_EXPORT_CORRELATION_WINDOW_SECONDS",
+        ge=1,
+        le=3600,
+        description="Time window (s) used to correlate actuator_history with "
+        "logic_execution_history when no correlation_id is present (D8 Option A).",
+    )
+    tab_granularity: str = Field(
+        default="monthly",
+        alias="SHEETS_TAB_GRANULARITY",
+        description="Tab rotation granularity for S6: 'monthly' (default) or 'weekly'.",
+    )
+    retry_max_attempts: int = Field(
+        default=7,
+        alias="SHEETS_RETRY_MAX_ATTEMPTS",
+        ge=1,
+        le=20,
+        description="Max retry attempts for retryable Sheets API errors (429/5xx).",
+    )
+    retry_max_backoff_seconds: float = Field(
+        default=64.0,
+        alias="SHEETS_RETRY_MAX_BACKOFF_SECONDS",
+        ge=1.0,
+        le=600.0,
+        description="Max single-backoff cap for exponential retry (seconds).",
+    )
+    batch_min_size_for_split: int = Field(
+        default=10,
+        alias="SHEETS_BATCH_MIN_SIZE_FOR_SPLIT",
+        ge=1,
+        le=1000,
+        description="Smallest batch size we will keep trying to split on 413 errors "
+        "before failing with SHEETS_BATCH_SPLIT_LIMIT_REACHED.",
+    )
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 
