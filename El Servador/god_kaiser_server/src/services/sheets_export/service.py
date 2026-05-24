@@ -105,7 +105,7 @@ class SheetsExportService:
             func=self._run_tick,
             seconds=max(60, self._settings.export_interval_minutes * 60),
             category=JobCategory.MAINTENANCE,
-            start_immediately=False,
+            start_immediately=True,
         )
         if ok:
             logger.info(
