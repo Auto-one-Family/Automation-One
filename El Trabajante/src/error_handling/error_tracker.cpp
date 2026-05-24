@@ -104,11 +104,20 @@ void ErrorTracker::trackError(uint16_t error_code, ErrorSeverity severity, const
   addToBuffer(error_code, severity, message);
   
   // Publish to MQTT (if enabled and not recursing)
-  publishErrorToMqtt(error_code, severity, message);
+  publishErrorToMqtt(error_code, severity, message, nullptr);
 }
 
 void ErrorTracker::trackError(uint16_t error_code, const char* message) {
   trackError(error_code, ERROR_SEVERITY_ERROR, message);
+}
+
+void ErrorTracker::trackErrorWithContext(uint16_t error_code,
+                                         ErrorSeverity severity,
+                                         const char* message,
+                                         const ErrorMqttContext& context) {
+  logErrorToLogger(error_code, severity, message);
+  addToBuffer(error_code, severity, message);
+  publishErrorToMqtt(error_code, severity, message, &context);
 }
 
 // ============================================
@@ -359,7 +368,10 @@ void ErrorTracker::clearMqttPublishCallback() {
   LOG_D(TAG, "ErrorTracker: MQTT error publishing disabled");
 }
 
-void ErrorTracker::publishErrorToMqtt(uint16_t error_code, ErrorSeverity severity, const char* message) {
+void ErrorTracker::publishErrorToMqtt(uint16_t error_code,
+                                      ErrorSeverity severity,
+                                      const char* message,
+                                      const ErrorMqttContext* context) {
   // Guard: Skip if disabled or already publishing (recursion prevention)
   if (!mqtt_publishing_enabled_ || mqtt_publish_in_progress_) {
     return;
@@ -407,12 +419,42 @@ void ErrorTracker::publishErrorToMqtt(uint16_t error_code, ErrorSeverity severit
   escaped_msg.replace("\"", "\\\"");
   escaped_msg.replace("\n", "\\n");
   payload += escaped_msg;
-  // ✅ Phase 0 Fix: Add context field (empty object for now, extensible)
+  // ✅ Phase 0 Fix: Add context field (extensible for per-error diagnostics)
   payload += "\",\"context\":{";
   payload += "\"esp_id\":\"";
   payload += mqtt_esp_id_;
   payload += "\",\"uptime_ms\":";
   payload += String(millis());
+  if (context != nullptr) {
+    if (context->topic != nullptr && context->topic[0] != '\0') {
+      String escaped_topic = String(context->topic);
+      escaped_topic.replace("\"", "\\\"");
+      escaped_topic.replace("\n", "\\n");
+      payload += ",\"topic\":\"";
+      payload += escaped_topic;
+      payload += "\"";
+    }
+    if (context->has_gpio) {
+      payload += ",\"gpio\":";
+      payload += String(context->gpio);
+    }
+    if (context->sensor_type != nullptr && context->sensor_type[0] != '\0') {
+      String escaped_sensor_type = String(context->sensor_type);
+      escaped_sensor_type.replace("\"", "\\\"");
+      escaped_sensor_type.replace("\n", "\\n");
+      payload += ",\"sensor_type\":\"";
+      payload += escaped_sensor_type;
+      payload += "\"";
+    }
+    if (context->reason_class != nullptr && context->reason_class[0] != '\0') {
+      String escaped_reason = String(context->reason_class);
+      escaped_reason.replace("\"", "\\\"");
+      escaped_reason.replace("\n", "\\n");
+      payload += ",\"reason_class\":\"";
+      payload += escaped_reason;
+      payload += "\"";
+    }
+  }
   payload += "}";
   payload += ",\"ts\":";
   payload += String((unsigned long)unix_ts);

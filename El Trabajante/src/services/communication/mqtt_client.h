@@ -48,6 +48,14 @@ struct MQTTConfig {
     int timeout;
 };
 
+enum class PublishFailureReasonClass : uint8_t {
+    None = 0,
+    CircuitBreakerOpen = 1,
+    QueueShed = 2,
+    OutboxFull = 3,
+    TransportError = 4,
+};
+
 // ============================================
 // MQTT MESSAGE (offline buffer — PubSubClient path only)
 // ============================================
@@ -96,6 +104,8 @@ public:
 
     // Publishing
     bool publish(const String& topic, const String& payload, uint8_t qos = 1);
+    PublishFailureReasonClass getLastPublishFailureReasonClass() const;
+    const char* getLastPublishFailureReasonClassName() const;
     bool safePublish(const String& topic, const String& payload, uint8_t qos = 1, uint8_t retries = 3);
     void setTestPublishHook(std::function<void(const String&, const String&)> hook);
     void clearTestPublishHook();
@@ -258,6 +268,7 @@ private:
 
     // AUT-57: cumulative retry count across all safePublish calls (telemetry only)
     uint32_t safe_publish_retry_count_;
+    PublishFailureReasonClass last_publish_failure_reason_;
 
     // ============================================
     // AUT-121: HEARTBEAT METRICS SPLIT

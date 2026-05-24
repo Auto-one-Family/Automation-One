@@ -40,6 +40,14 @@ struct ErrorEntry {
   }
 };
 
+struct ErrorMqttContext {
+  const char* topic = nullptr;
+  const char* sensor_type = nullptr;
+  const char* reason_class = nullptr;
+  int32_t gpio = -1;
+  bool has_gpio = false;
+};
+
 // ============================================
 // MQTT PUBLISH CALLBACK TYPE
 // ============================================
@@ -62,6 +70,10 @@ public:
   // Primary API: const char* (Guide-konform)
   void trackError(uint16_t error_code, ErrorSeverity severity, const char* message);
   void trackError(uint16_t error_code, const char* message);  // Default severity: ERROR
+  void trackErrorWithContext(uint16_t error_code,
+                             ErrorSeverity severity,
+                             const char* message,
+                             const ErrorMqttContext& context);
   
   // Convenience Methods — pass full codes from models/error_codes.h when available; small
   // numeric offsets still map via category base + code when outside the band (bands use
@@ -141,7 +153,10 @@ private:
   // Helper methods
   void addToBuffer(uint16_t error_code, ErrorSeverity severity, const char* message);
   void logErrorToLogger(uint16_t error_code, ErrorSeverity severity, const char* message);
-  void publishErrorToMqtt(uint16_t error_code, ErrorSeverity severity, const char* message);
+  void publishErrorToMqtt(uint16_t error_code,
+                          ErrorSeverity severity,
+                          const char* message,
+                          const ErrorMqttContext* context = nullptr);
 };
 
 // ============================================

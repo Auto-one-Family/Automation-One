@@ -1842,9 +1842,21 @@ bool SensorManager::publishSensorReading(const SensorReading& reading) {
     // AUT-54: QoS 0 — raw sensor stream is high-frequency telemetry; QoS-1 filled the IDF
     // OUTBOX alongside other traffic and contributed to write-timeout disconnects.
     if (!mqtt_client_->publish(topic, payload, 0)) {
-        LOG_E(TAG, "Sensor Manager: Failed to publish sensor data for GPIO " + String(reading.gpio));
-        errorTracker.trackError(ERROR_MQTT_PUBLISH_FAILED, ERROR_SEVERITY_ERROR,
-                               "Failed to publish sensor data");
+        const char* reason_class = mqtt_client_->getLastPublishFailureReasonClassName();
+        LOG_E(TAG, "Sensor Manager: Failed to publish sensor data for GPIO " +
+                   String(reading.gpio) + " reason=" + String(reason_class));
+
+        ErrorMqttContext context;
+        context.topic = topic.c_str();
+        context.gpio = static_cast<int32_t>(reading.gpio);
+        context.has_gpio = true;
+        context.sensor_type = reading.sensor_type.c_str();
+        context.reason_class = reason_class;
+
+        errorTracker.trackErrorWithContext(ERROR_MQTT_PUBLISH_FAILED,
+                                           ERROR_SEVERITY_ERROR,
+                                           "Failed to publish sensor data",
+                                           context);
         return false;
     }
     return true;

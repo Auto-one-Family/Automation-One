@@ -13,6 +13,7 @@
 #include <sdkconfig.h>
 #include <esp_system.h>
 #include <atomic>
+#include <cstring>
 #include <errno.h>
 
 #include "../../tasks/intent_contract.h"
@@ -57,6 +58,32 @@ static bool isRealtimeResponsePublishTopic(const String& topic) {
 static bool isIntentOutcomePublishTopic(const String& topic) {
     return topic.indexOf("/system/intent_outcome") != -1;
 }
+
+static const char* publishFailureReasonClassToString(PublishFailureReasonClass reason) {
+    switch (reason) {
+        case PublishFailureReasonClass::CircuitBreakerOpen:
+            return "cb_open";
+        case PublishFailureReasonClass::QueueShed:
+            return "queue_shed";
+        case PublishFailureReasonClass::OutboxFull:
+            return "outbox_full";
+        case PublishFailureReasonClass::TransportError:
+            return "transport_error";
+        case PublishFailureReasonClass::None:
+        default:
+            return "transport_error";
+    }
+}
+
+#ifndef MQTT_USE_PUBSUBCLIENT
+static PublishFailureReasonClass mapQueueEnqueueResultToFailureReason(PublishQueueEnqueueResult result) {
+    const char* reason = publishQueueEnqueueReasonClass(result);
+    if (reason != nullptr && strcmp(reason, "queue_shed") == 0) {
+        return PublishFailureReasonClass::QueueShed;
+    }
+    return PublishFailureReasonClass::TransportError;
+}
+#endif
 
 #ifndef MQTT_USE_PUBSUBCLIENT
 static std::atomic<uint32_t> g_publish_outbox_noncritical_drops{0};
@@ -291,7 +318,8 @@ MQTTClient::MQTTClient()
       pending_session_announce_msg_id_(-1),
 #endif
       publish_seq_(0),
-      safe_publish_retry_count_(0)
+      safe_publish_retry_count_(0),
+      last_publish_failure_reason_(PublishFailureReasonClass::None)
 #ifdef ENABLE_METRICS_SPLIT
       , last_metrics_{}
       , metrics_skip_count_(METRICS_MAX_SKIP_COUNT)
@@ -643,18 +671,32 @@ uint32_t MQTTClient::getSafePublishRetryCount() const {
     return safe_publish_retry_count_;
 }
 
+PublishFailureReasonClass MQTTClient::getLastPublishFailureReasonClass() const {
+    return last_publish_failure_reason_;
+}
+
+const char* MQTTClient::getLastPublishFailureReasonClassName() const {
+    return publishFailureReasonClassToString(last_publish_failure_reason_);
+}
+
 // ============================================
 // PUBLISHING (WITH CIRCUIT BREAKER)
 // ============================================
 bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos) {
+    auto set_reason = [this](PublishFailureReasonClass reason) {
+        last_publish_failure_reason_ = reason;
+    };
+
     if (test_publish_hook_) {
         test_publish_hook_(topic, payload);
+        set_reason(PublishFailureReasonClass::None);
         return true;
     }
 
     // Circuit Breaker: block publishes when broker is persistently down
     if (!circuit_breaker_.allowRequest()) {
         LOG_W(TAG, "MQTT publish blocked by Circuit Breaker (Service DOWN)");
+        set_reason(PublishFailureReasonClass::CircuitBreakerOpen);
         return false;
     }
 
@@ -684,10 +726,12 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
             }
             logAdmissionCorrelationBlockedPublish(topic, payload, "REGISTRATION_TIMEOUT");
             LOG_D(TAG, "Publish blocked (registration timeout, no ACK yet): " + topic);
+            set_reason(PublishFailureReasonClass::TransportError);
             return false;
         } else {
             logAdmissionCorrelationBlockedPublish(topic, payload, "REGISTRATION_PENDING");
             LOG_D(TAG, "Publish blocked (awaiting registration): " + topic);
+            set_reason(PublishFailureReasonClass::TransportError);
             return false;
         }
     }
@@ -696,12 +740,14 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
         LOG_E(TAG, "Empty payload blocked for topic: " + topic);
         errorTracker.logCommunicationError(ERROR_MQTT_PAYLOAD_INVALID,
                                            ("Empty payload for: " + topic).c_str());
+        set_reason(PublishFailureReasonClass::TransportError);
         return false;
     }
 
 #ifndef MQTT_USE_PUBSUBCLIENT
     if (mqtt_client_ == nullptr) {
         LOG_W(TAG, "MQTT client not initialized, dropping message: " + topic);
+        set_reason(PublishFailureReasonClass::TransportError);
         return false;
     }
 
@@ -722,20 +768,24 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
                                                        &metadata);
         if (pq == PublishQueueEnqueueResult::Enqueued) {
             circuit_breaker_.recordSuccess();
+            set_reason(PublishFailureReasonClass::None);
             return true;
         }
         if (pq == PublishQueueEnqueueResult::ShedBackpressure) {
             LOG_D(TAG, "[AUT-344] Publish shed (COMM backpressure), not a CB failure: " + topic);
+            set_reason(mapQueueEnqueueResultToFailureReason(pq));
             return false;
         }
         // Failed: queue full, oversize, null, or queue not initialised
         if (!critical) {
             LOG_W(TAG, "Publish queue enqueue failed (non-critical): " + topic);
+            set_reason(mapQueueEnqueueResultToFailureReason(pq));
             return false;
         }
         // Queue enqueue failures are local backpressure (Core handoff), not transport proof.
         // Do not open MQTT circuit breaker here; reserve CB failures for real MQTT transport errors.
         LOG_W(TAG, "Publish queue enqueue failed (critical, no CB failure): " + topic);
+        set_reason(mapQueueEnqueueResultToFailureReason(pq));
         return false;
     }
 
@@ -774,12 +824,14 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
                                 " watermark=" + String(PUBLISH_QUEUE_SHED_WATERMARK) +
                                 " topic=" + topic);
                 // #endregion
+                set_reason(PublishFailureReasonClass::None);
                 return true;
             }
             if (pq == PublishQueueEnqueueResult::ShedBackpressure) {
                 // Explicit shed under pressure: prefer dropping lower-value traffic over
                 // risking long blocking calls that hurt control responsiveness.
                 LOG_D(TAG, "[DBG5126ae] direct critical shed by queue pressure: " + topic);
+                set_reason(mapQueueEnqueueResultToFailureReason(pq));
                 return false;
             }
             LOG_W(TAG, "Direct critical defer enqueue failed, fallback to direct publish: " + topic);
@@ -815,6 +867,7 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
 
     if (msg_id >= 0) {
         circuit_breaker_.recordSuccess();
+        set_reason(PublishFailureReasonClass::None);
         if (qos > 0) {
             g_qos1_enqueue_count.fetch_add(1);
             // [OUTBOX+1]: QoS-1 message entered IDF OUTBOX — stays there until PUBACK.
@@ -870,6 +923,7 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
                      (unsigned)drop_cnt, topic.c_str(), (unsigned)ESP.getFreeHeap());
             LOG_D(TAG, drop_log);
         }
+        set_reason(PublishFailureReasonClass::OutboxFull);
         return false;
     } else {
         // msg_id == -1: error (not connected or internal failure)
@@ -882,6 +936,7 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
         } else {
             LOG_W(TAG, "Publish before MQTT connected, dropping: " + topic);
         }
+        set_reason(PublishFailureReasonClass::TransportError);
         return false;
     }
 
@@ -890,6 +945,7 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
     if (!isConnected()) {
         LOG_W(TAG, "MQTT not connected, adding to offline buffer");
         circuit_breaker_.recordFailure();
+        set_reason(PublishFailureReasonClass::TransportError);
         return addToOfflineBuffer(topic, payload, qos);
     }
 
@@ -897,12 +953,14 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
 
     if (success) {
         circuit_breaker_.recordSuccess();
+        set_reason(PublishFailureReasonClass::None);
         LOG_D(TAG, "Published: " + topic);
     } else {
         circuit_breaker_.recordFailure();
         LOG_E(TAG, "Publish failed: " + topic);
         errorTracker.logCommunicationError(ERROR_MQTT_PUBLISH_FAILED,
                                            ("Publish failed: " + topic).c_str());
+        set_reason(PublishFailureReasonClass::TransportError);
         if (circuit_breaker_.isOpen()) {
             LOG_W(TAG, "Circuit Breaker OPENED after failure threshold");
         }

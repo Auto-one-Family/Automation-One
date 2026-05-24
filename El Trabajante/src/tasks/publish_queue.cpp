@@ -176,6 +176,18 @@ static void updateHighWatermark(uint8_t current_fill) {
     }
 }
 
+const char* publishQueueEnqueueReasonClass(PublishQueueEnqueueResult result) {
+    switch (result) {
+        case PublishQueueEnqueueResult::ShedBackpressure:
+            return "queue_shed";
+        case PublishQueueEnqueueResult::Failed:
+            return "transport_error";
+        case PublishQueueEnqueueResult::Enqueued:
+        default:
+            return nullptr;
+    }
+}
+
 // ============================================
 // tryQueuePublish
 // ============================================

@@ -65,6 +65,10 @@ enum class PublishQueueEnqueueResult : uint8_t {
     Failed = 2,
 };
 
+// AUT-454: Canonical reason classes for queue enqueue outcomes.
+// Returns nullptr for successful enqueue.
+const char* publishQueueEnqueueReasonClass(PublishQueueEnqueueResult result);
+
 // Create the publish queue — call in setup() BEFORE createSafetyTask().
 void initPublishQueue();
 
