@@ -727,7 +727,7 @@ export function useCalibrationWizard(
    * processes it and broadcasts via WebSocket (S-P6).
    *
    * PKG-03 (EC sensors, sampleCount > 1): triggers N measurements sequentially,
-   * collects raw_values, and stores the arithmetic mean (rounded to integer) as
+   * collects raw_values, and stores the median (robust against outliers) as
    * lastRawValue. Progress is visible via sampleProgress / sampleTotal refs and
    * lifecycleMessage. All other sensor types use a single measurement (unchanged).
    *
@@ -775,7 +775,7 @@ export function useCalibrationWizard(
         lifecycleState.value = 'pending'
         lifecycleMessage.value = `Messung angefordert (Request-ID: ${triggerResult.request_id}).`
       } else {
-        // PKG-03: Multi-sample averaging path (EC: sampleCount=3)
+        // PKG-03: Multi-sample robust path (EC: sampleCount=3)
         const collectedRaw: number[] = []
         const SAMPLE_TIMEOUT_MS = 8_000
 
@@ -817,14 +817,19 @@ export function useCalibrationWizard(
           }
         }
 
-        // Arithmetic mean, rounded to integer (ADC raw values are integers)
+        // Use median as robust estimator so one noisy sample does not dominate.
+        const sortedRaw = [...collectedRaw].sort((a, b) => a - b)
+        const middleIndex = Math.floor(sortedRaw.length / 2)
+        const medianRaw = sortedRaw.length % 2 === 0
+          ? Math.round((sortedRaw[middleIndex - 1] + sortedRaw[middleIndex]) / 2)
+          : sortedRaw[middleIndex]
         const meanRaw = Math.round(
           collectedRaw.reduce((sum, v) => sum + v, 0) / collectedRaw.length,
         )
-        setLastRawValue(meanRaw, measurementQuality.value || 'good')
+        setLastRawValue(medianRaw, measurementQuality.value || 'good')
         isFreshMeasurement.value = true
         lifecycleState.value = 'pending'
-        lifecycleMessage.value = `Mittelwert aus ${targetSampleCount} Messungen: ${meanRaw} (Werte: ${collectedRaw.join(', ')})`
+        lifecycleMessage.value = `Median aus ${targetSampleCount} Messungen: ${medianRaw} (Mittelwert: ${meanRaw}, Werte: ${collectedRaw.join(', ')})`
         sampleProgress.value = targetSampleCount
       }
     } catch (err: unknown) {
