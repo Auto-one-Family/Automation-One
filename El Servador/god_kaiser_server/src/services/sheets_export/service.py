@@ -26,7 +26,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from collections import OrderedDict
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from ...core.config import SheetsExportSettings, get_settings
 from ...core.error_codes import ConfigErrorCode
@@ -35,6 +36,7 @@ from ...core.scheduler import CentralScheduler, JobCategory
 from .actuator_batcher import (
     ACTUATOR_HEADER,
     ActuatorBatch,
+    ActuatorRunRow,
     ActuatorExportBatcher,
 )
 from .batch_result import ExportBatchResult, ExportStatus
@@ -44,6 +46,7 @@ from .exceptions import NonRetryableSheetsError, RetryableSheetsError
 from .sensor_batcher import (
     SENSOR_HEADER,
     SensorBatch,
+    SensorRow,
     SensorExportBatcher,
 )
 from .tab_rotation import TabRotationManager
@@ -299,14 +302,15 @@ class SheetsExportService:
             result.cursor_after = cursor_before
             return result
 
-        tab_name = tab_mgr.current_sensor_tab(when=batch.last_row_timestamp)
-        await self._client.append_rows(
-            tab_name=tab_name,
-            header_row=SENSOR_HEADER,
-            rows=batch.to_sheet_values(),
-        )
+        sensor_buckets = self._group_sensor_rows_by_tab(batch.rows, tab_mgr)
+        for tab_name, rows in sensor_buckets:
+            await self._client.append_rows(
+                tab_name=tab_name,
+                header_row=SENSOR_HEADER,
+                rows=rows,
+            )
+            result.tabs_touched.append(tab_name)
         result.rows_written = len(batch.rows)
-        result.tabs_touched.append(tab_name)
 
         new_cursor = await cursor.set_sensor_cursor(
             last_row_id=str(batch.last_row_id) if batch.last_row_id else None,
@@ -359,14 +363,15 @@ class SheetsExportService:
             }
             return result
 
-        tab_name = tab_mgr.current_actuator_tab(when=batch.last_row_timestamp)
-        await self._client.append_rows(
-            tab_name=tab_name,
-            header_row=ACTUATOR_HEADER,
-            rows=batch.to_sheet_values(),
-        )
+        actuator_buckets = self._group_actuator_rows_by_tab(batch.rows, tab_mgr)
+        for tab_name, rows in actuator_buckets:
+            await self._client.append_rows(
+                tab_name=tab_name,
+                header_row=ACTUATOR_HEADER,
+                rows=rows,
+            )
+            result.tabs_touched.append(tab_name)
         result.rows_written = len(batch.rows)
-        result.tabs_touched.append(tab_name)
 
         new_cursor = await cursor.set_history_cursor(
             last_row_id=str(batch.last_row_id) if batch.last_row_id else None,
@@ -382,6 +387,28 @@ class SheetsExportService:
         return result
 
     # --- helpers ------------------------------------------------------------
+    def _group_sensor_rows_by_tab(
+        self,
+        rows: List[SensorRow],
+        tab_mgr: TabRotationManager,
+    ) -> List[Tuple[str, List[List[Any]]]]:
+        buckets: "OrderedDict[str, List[List[Any]]]" = OrderedDict()
+        for row in rows:
+            tab_name = tab_mgr.current_sensor_tab(when=row.timestamp_utc)
+            buckets.setdefault(tab_name, []).append(row.to_sheet_row())
+        return list(buckets.items())
+
+    def _group_actuator_rows_by_tab(
+        self,
+        rows: List[ActuatorRunRow],
+        tab_mgr: TabRotationManager,
+    ) -> List[Tuple[str, List[List[Any]]]]:
+        buckets: "OrderedDict[str, List[List[Any]]]" = OrderedDict()
+        for row in rows:
+            tab_when = row.run_end_utc or row.run_start_utc
+            tab_name = tab_mgr.current_actuator_tab(when=tab_when)
+            buckets.setdefault(tab_name, []).append(row.to_sheet_row())
+        return list(buckets.items())
 
     def _get_tab_manager(self, cursor: SheetsExportCursor) -> TabRotationManager:
         granularity = (

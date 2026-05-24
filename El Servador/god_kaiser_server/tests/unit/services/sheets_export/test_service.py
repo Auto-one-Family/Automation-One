@@ -98,12 +98,20 @@ def _enabled_settings(**overrides) -> SheetsExportSettings:
 # -----------------------------------------------------------------------------
 
 
-async def _seed_sensor_row(session: AsyncSession, ts: datetime) -> tuple[ESPDevice, SensorData]:
+async def _seed_sensor_row(
+    session: AsyncSession,
+    ts: datetime,
+    *,
+    device_id: str | None = None,
+) -> tuple[ESPDevice, SensorData]:
+    device_id = device_id or f"ESP_SVC_{uuid.uuid4().hex[:8]}"
+    suffix = uuid.uuid4().hex[:8]
+    mac = ":".join(suffix[i : i + 2] for i in range(0, 8, 2))
     esp = ESPDevice(
-        device_id="ESP_SVC",
+        device_id=device_id,
         name="svc test",
-        ip_address="1.2.3.4",
-        mac_address="00:11:22:33:44:55",
+        ip_address=f"10.0.{int(suffix[0:2], 16) % 255}.{int(suffix[2:4], 16) % 255}",
+        mac_address=f"02:00:{mac}",
         firmware_version="1.0",
         hardware_type="ESP32_WROOM",
         status="online",
@@ -294,6 +302,37 @@ class TestServiceSensorPath:
             assert stored["rows_exported"] == 0
             break
 
+    async def test_export_sensors_splits_mixed_month_batch(self, session_factory_pair):
+        session, factory = session_factory_pair
+        # Europe/Berlin month boundary at 2026-05-31 22:00:00 UTC.
+        ts_may = datetime(2026, 5, 31, 21, 59, 0, tzinfo=timezone.utc)
+        ts_june = datetime(2026, 5, 31, 22, 1, 0, tzinfo=timezone.utc)
+        await _seed_sensor_row(session, ts_may, device_id="ESP_SVC_MIX_1")
+        _, june_data = await _seed_sensor_row(session, ts_june, device_id="ESP_SVC_MIX_2")
+        await session.commit()
+
+        client = _StubClient()
+        svc = SheetsExportService(
+            scheduler=CentralScheduler(),
+            session_factory=factory,
+            settings=_enabled_settings(),
+            client=client,
+        )
+        result = await svc.export_sensors()
+        assert result.status == ExportStatus.SUCCESS
+        assert result.rows_written == 2
+        assert client.appended == [
+            ("sensoren-2026-05", 1),
+            ("sensoren-2026-06", 1),
+        ]
+
+        async for s in factory():
+            cursor = SheetsExportCursor(s)
+            stored = await cursor.get_sensor_cursor()
+            assert stored["last_row_id"] == str(june_data.id)
+            assert stored["rows_exported"] == 2
+            break
+
     async def test_dry_run_does_not_commit_cursor(self, session_factory_pair):
         session, factory = session_factory_pair
         ts = datetime(2026, 5, 23, 10, 0, 0, tzinfo=timezone.utc)
@@ -388,3 +427,34 @@ class TestServiceActuatorPath:
             open_runs = await cursor.get_open_runs()
             assert len(open_runs) == 1
             break
+
+    async def test_export_actor_history_splits_mixed_month_batch(
+        self,
+        session_factory_pair,
+    ):
+        session, factory = session_factory_pair
+        # Europe/Berlin month boundary at 2026-05-31 22:00:00 UTC.
+        ts0 = datetime(2026, 5, 31, 21, 58, 0, tzinfo=timezone.utc)
+        ts1 = datetime(2026, 5, 31, 21, 59, 0, tzinfo=timezone.utc)
+        ts2 = datetime(2026, 5, 31, 22, 0, 30, tzinfo=timezone.utc)
+        ts3 = datetime(2026, 5, 31, 22, 1, 0, tzinfo=timezone.utc)
+
+        esp, _ = await _seed_sensor_row(session, ts0, device_id="ESP_SVC_ACT_MIX")
+        await _seed_actuator_pair(session, esp, ts0, ts1)  # May bucket
+        await _seed_actuator_pair(session, esp, ts2, ts3)  # June bucket
+        await session.commit()
+
+        client = _StubClient()
+        svc = SheetsExportService(
+            scheduler=CentralScheduler(),
+            session_factory=factory,
+            settings=_enabled_settings(),
+            client=client,
+        )
+        result = await svc.export_actor_history()
+        assert result.status == ExportStatus.SUCCESS
+        assert result.rows_written == 2
+        assert client.appended == [
+            ("aktoren-2026-05", 1),
+            ("aktoren-2026-06", 1),
+        ]
