@@ -23,11 +23,17 @@ async def test_entered_pressure_logs_at_warning(caplog):
     with caplog.at_level(logging.WARNING):
         with patch(
             "src.mqtt.handlers.queue_pressure_handler.increment_queue_pressure_event"
-        ) as mock_inc:
+        ) as mock_inc, patch.object(
+            handler, "_persist_transition"
+        ) as mock_persist, patch.object(
+            handler, "_broadcast_transition"
+        ) as mock_broadcast:
             ok = await handler.handle_queue_pressure(topic, payload)
 
     assert ok is True
     mock_inc.assert_called_once_with("ESP_TEST", "entered_pressure")
+    mock_persist.assert_called_once()
+    mock_broadcast.assert_called_once()
     assert any(r.levelno == logging.WARNING for r in caplog.records)
     assert "Queue pressure event" in caplog.text
     assert "entered_pressure" in caplog.text
@@ -48,6 +54,10 @@ async def test_recovered_logs_at_info(caplog):
     with caplog.at_level(logging.INFO):
         with patch(
             "src.mqtt.handlers.queue_pressure_handler.increment_queue_pressure_event"
+        ), patch.object(
+            handler, "_persist_transition"
+        ), patch.object(
+            handler, "_broadcast_transition"
         ):
             ok = await handler.handle_queue_pressure(topic, payload)
 
@@ -64,3 +74,8 @@ async def test_parse_failure_returns_false(caplog):
 
     assert ok is False
     assert "Failed to parse queue_pressure topic" in caplog.text
+
+
+def test_normalize_recovered_to_exited_pressure():
+    assert QueuePressureHandler._normalize_event("recovered") == "exited_pressure"
+    assert QueuePressureHandler._normalize_event("entered_pressure") == "entered_pressure"

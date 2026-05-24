@@ -1,36 +1,16 @@
 """
-MQTT Handler: ESP32 Publish-Queue Pressure Events (PKG-01b)
+MQTT Handler: ESP32 Publish-Queue Pressure Events (PKG-01b / AUT-456)
 
-Pure observability handler for queue-pressure lifecycle events published by
+Observability handler for queue-pressure lifecycle events published by
 El Trabajante (ESP32) on ``kaiser/{kaiser_id}/esp/{esp_id}/system/queue_pressure``.
 
 Scope:
 - Parse the topic to extract the ESP identifier.
 - Increment a Prometheus counter labelled by (esp_id, event).
 - Emit a structured log line for Loki/Grafana correlation.
-  ``entered_pressure`` uses **WARNING** so entries remain visible when the
-  process root logger is set to WARNING (e.g. Pi/production); ``recovered``
-  stays at INFO.
-
-Explicitly NOT in scope:
-- No database writes.
-- No WebSocket broadcasts.
-- No derived state changes (e.g. no ESP status updates).
-
-The ESP32 firmware publishes at least the following payload fields (additional
-fields are tolerated):
-
-    {
-        "event": "entered_pressure" | "recovered",
-        "fill_level": <int>,          # current queue depth
-        "high_watermark": <int>,      # highest recorded depth in window
-        "shed_count": <int>,          # number of messages shed/rejected
-        "drop_count": <int>,          # number of messages dropped
-        "ts": <int>                    # optional unix timestamp (ms/s)
-    }
-
-Error Codes:
-- Uses ValidationErrorCode for topic parse failures.
+- Mirror transition events into audit logs for SQL-level correlation with
+  `mqtt_error` context data.
+- Broadcast lightweight `queue_pressure` WebSocket events (best effort).
 """
 
 from typing import Optional
@@ -38,6 +18,8 @@ from typing import Optional
 from ...core.error_codes import ValidationErrorCode
 from ...core.logging_config import get_logger
 from ...core.metrics import increment_queue_pressure_event
+from ...db.repositories import AuditLogRepository
+from ...db.session import resilient_session
 from ..topics import TopicBuilder
 
 logger = get_logger(__name__)
@@ -53,6 +35,67 @@ class QueuePressureHandler:
     3. Increment Prometheus counter for (esp_id, event).
     4. Emit structured log for downstream analysis.
     """
+
+    @staticmethod
+    def _normalize_event(event: str) -> str:
+        if event == "recovered":
+            return "exited_pressure"
+        return event
+
+    async def _persist_transition(
+        self,
+        esp_id: str,
+        topic: str,
+        event: str,
+        payload: dict,
+    ) -> None:
+        normalized_event = self._normalize_event(event)
+        severity = "warning" if normalized_event == "entered_pressure" else "info"
+        details = {
+            "topic": topic,
+            "event": normalized_event,
+            "raw_event": event,
+            "fill_level": payload.get("fill_level"),
+            "high_watermark": payload.get("high_watermark"),
+            "shed_count": payload.get("shed_count"),
+            "drop_count": payload.get("drop_count"),
+            "ts": payload.get("ts"),
+        }
+        try:
+            async with resilient_session() as session:
+                audit_repo = AuditLogRepository(session)
+                await audit_repo.log_device_event(
+                    esp_id=esp_id,
+                    event_type="queue_pressure_transition",
+                    status="observed",
+                    message=f"queue_pressure:{normalized_event}",
+                    details=details,
+                    severity=severity,
+                )
+                await session.commit()
+        except Exception as exc:
+            logger.warning("Failed queue_pressure audit mirror: %s", exc)
+
+    async def _broadcast_transition(self, esp_id: str, event: str, payload: dict) -> None:
+        try:
+            from ...websocket.manager import WebSocketManager
+
+            ws_manager = await WebSocketManager.get_instance()
+            await ws_manager.broadcast(
+                "queue_pressure",
+                {
+                    "esp_id": esp_id,
+                    "event": self._normalize_event(event),
+                    "raw_event": event,
+                    "fill_level": payload.get("fill_level"),
+                    "high_watermark": payload.get("high_watermark"),
+                    "shed_count": payload.get("shed_count"),
+                    "drop_count": payload.get("drop_count"),
+                    "timestamp": payload.get("ts"),
+                },
+            )
+        except Exception as exc:
+            logger.warning("Failed queue_pressure websocket broadcast: %s", exc)
 
     async def handle_queue_pressure(self, topic: str, payload: dict) -> bool:
         """
@@ -109,6 +152,9 @@ class QueuePressureHandler:
                 logger.warning(log_msg, *log_args, extra=log_extra)
             else:
                 logger.info(log_msg, *log_args, extra=log_extra)
+
+            await self._persist_transition(esp_id, topic, event, safe_payload)
+            await self._broadcast_transition(esp_id, event, safe_payload)
             return True
 
         except Exception as e:

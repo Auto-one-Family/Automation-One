@@ -68,6 +68,23 @@ class ErrorEventHandler:
     - Enrichment only for user-friendly messages
     """
 
+    @staticmethod
+    def _extract_context_fields(payload_context: object) -> dict:
+        """
+        Extract AUT-456 correlation fields from payload context.
+
+        Backwards compatibility:
+        - Missing/non-dict context returns an empty mapping.
+        """
+        if not isinstance(payload_context, dict):
+            return {}
+        return {
+            "topic": payload_context.get("topic"),
+            "gpio": payload_context.get("gpio"),
+            "sensor_type": payload_context.get("sensor_type"),
+            "reason_class": payload_context.get("reason_class"),
+        }
+
     async def handle_error_event(self, topic: str, payload: dict) -> bool:
         """
         Handle error event message.
@@ -165,33 +182,39 @@ class ErrorEventHandler:
                         else payload.get("message", f"Unknown ESP32 error: {error_code_int}")
                     )
 
+                    context_payload = payload.get("context", {})
+                    context_fields = self._extract_context_fields(context_payload)
+                    details = {
+                        "error_code": error_code_int,
+                        "category": payload.get("category"),
+                        "context": context_payload if isinstance(context_payload, dict) else {},
+                        "context_topic": context_fields.get("topic"),
+                        "context_gpio": context_fields.get("gpio"),
+                        "context_sensor_type": context_fields.get("sensor_type"),
+                        "context_reason_class": context_fields.get("reason_class"),
+                        "troubleshooting": (error_info["troubleshooting"] if error_info else []),
+                        "docs_link": error_info["docs_link"] if error_info else None,
+                        "user_action_required": (
+                            error_info["user_action_required"] if error_info else False
+                        ),
+                        "recoverable": error_info["recoverable"] if error_info else True,
+                        # IMPORTANT: Store RAW ESP message for debugging
+                        "esp_raw_message": payload.get("message"),
+                        "esp_severity": payload.get("severity"),
+                        "esp_severity_label": severity,
+                        "esp_timestamp": payload.get("timestamp"),
+                        "contract_violation": canonical.is_contract_violation,
+                        "contract_code": canonical.contract_code,
+                        "contract_reason": canonical.contract_reason,
+                        "raw_severity": canonical.raw_fields.get("raw_severity"),
+                        "raw_category": canonical.raw_fields.get("raw_category"),
+                    }
+
                     error_log = await audit_repo.log_mqtt_error(
                         source_id=esp_id_str,
                         error_code=str(canonical.contract_code or error_code_int),
                         error_description=error_description,
-                        details={
-                            "error_code": error_code_int,
-                            "category": payload.get("category"),
-                            "context": payload.get("context", {}),
-                            "troubleshooting": (
-                                error_info["troubleshooting"] if error_info else []
-                            ),
-                            "docs_link": error_info["docs_link"] if error_info else None,
-                            "user_action_required": (
-                                error_info["user_action_required"] if error_info else False
-                            ),
-                            "recoverable": error_info["recoverable"] if error_info else True,
-                            # IMPORTANT: Store RAW ESP message for debugging
-                            "esp_raw_message": payload.get("message"),
-                            "esp_severity": payload.get("severity"),
-                            "esp_severity_label": severity,
-                            "esp_timestamp": payload.get("timestamp"),
-                            "contract_violation": canonical.is_contract_violation,
-                            "contract_code": canonical.contract_code,
-                            "contract_reason": canonical.contract_reason,
-                            "raw_severity": canonical.raw_fields.get("raw_severity"),
-                            "raw_category": canonical.raw_fields.get("raw_category"),
-                        },
+                        details=details,
                     )
 
                     # Commit transaction
