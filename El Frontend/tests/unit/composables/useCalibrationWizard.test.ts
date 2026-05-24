@@ -32,6 +32,8 @@ const uiStoreMock = vi.hoisted(() => ({
 
 vi.mock('@/api/calibration', () => ({
   calibrationApi: calibrationApiMock,
+  normalizeCalibrationSensorType: (sensorType: string) =>
+    String(sensorType ?? '').trim().toLowerCase(),
 }))
 
 vi.mock('@/shared/stores/ui.store', () => ({
@@ -61,7 +63,14 @@ describe('useCalibrationWizard', () => {
     sensorsApiMock.triggerMeasurement.mockResolvedValue({ request_id: 'req-1' })
   })
 
-  it('verarbeitet calibration_measurement_received und setzt lastRawValue', () => {
+  it('verarbeitet calibration_measurement_received und setzt lastRawValue', async () => {
+    calibrationApiMock.startSession.mockResolvedValue({
+      id: 'session-measure-1',
+      status: 'pending',
+      method: 'linear_2point',
+      sensor_type: 'moisture',
+      calibration_points: { points: [] },
+    })
     const wizard = useCalibrationWizard({
       skipSelect: true,
       espId: 'ESP_TEST_001',
@@ -70,6 +79,7 @@ describe('useCalibrationWizard', () => {
     })
 
     wizard.selectSensor('ESP_TEST_001', 4, 'moisture')
+    await wizard.triggerLiveMeasurement()
     const handler = wsHandlers.get('calibration_measurement_received')
     expect(handler).toBeDefined()
 
@@ -79,7 +89,7 @@ describe('useCalibrationWizard', () => {
         gpio: 4,
         raw_value: 1111.5,
         quality: 'good',
-        intent_id: 'intent-1',
+        intent_id: 'req-1',
       },
     })
 
@@ -490,16 +500,15 @@ describe('useCalibrationWizard', () => {
       sensorType: 'ec',
     })
 
-    // EC: Phase 1 Capture -> directly to Confirm (no point2)
+    // EC: Phase 1 Capture -> now directly finalize/apply (no point2, no extra confirm click)
     expect(wizard.phase.value).toBe('point1')
     await wizard.onPoint1Captured({ raw: 1413, reference: 1413 })
-    expect(wizard.phase.value).toBe('confirm')
+    expect(wizard.phase.value).toBe('done')
     expect(wizard.points.value[0]).toEqual(
       expect.objectContaining({ point_role: 'reference' }),
     )
 
-    // Submit: Should call with ec_1point method and expected_points=1
-    await wizard.submitCalibration()
+    // Auto-submit should call ec_1point flow
     expect(calibrationApiMock.startSession).toHaveBeenCalledWith(
       expect.objectContaining({
         method: 'ec_1point',

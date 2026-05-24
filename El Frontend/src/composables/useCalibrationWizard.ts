@@ -90,6 +90,7 @@ export interface UseCalibrationWizardReturn {
 
   // AUT-299: Calibration temperature for ATC
   calibrationTemperature: Ref<number>
+  calibrationTemperatureSource: Ref<string>
 
   // Presets
   sensorTypePresets: Record<string, SensorTypePreset>
@@ -106,6 +107,7 @@ export interface UseCalibrationWizardReturn {
   onPoint2Captured: (point: CalibrationPoint) => Promise<void>
   submitCalibration: () => Promise<void>
   triggerLiveMeasurement: () => Promise<void>
+  setCalibrationTemperature: (value: number, source?: string) => void
   setLastRawValue: (rawValue: number | null, quality?: string) => void
   overwritePoint: (role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference', point: CalibrationPoint) => Promise<void>
   deletePoint: (role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference') => Promise<void>
@@ -254,6 +256,7 @@ export function useCalibrationWizard(
 
   // AUT-299: Calibration temperature for temperature compensation
   const calibrationTemperature = ref<number>(25.0)
+  const calibrationTemperatureSource = ref<string>('manual')
 
   function clearMeasureCooldownTimer(): void {
     if (measureCooldownTimerId.value !== null) {
@@ -509,6 +512,7 @@ export function useCalibrationWizard(
       method: preset.calibrationMethod,
       expected_points: preset.expectedPoints,
       calibration_temperature: calibrationTemperature.value,
+      calibration_temperature_source: calibrationTemperatureSource.value,
     })
     currentSessionId.value = session.id
     return session.id
@@ -589,7 +593,7 @@ export function useCalibrationWizard(
       // EC 1-point: go directly to confirm
       // pH & Moisture 2-point: go to point2
       if (preset?.expectedPoints === 1) {
-        phase.value = 'confirm'
+        await submitCalibration()
       } else {
         phase.value = 'point2'
       }
@@ -844,6 +848,11 @@ export function useCalibrationWizard(
     measurementQuality.value = quality
   }
 
+  function setCalibrationTemperature(value: number, source = 'manual'): void {
+    calibrationTemperature.value = value
+    calibrationTemperatureSource.value = source
+  }
+
   async function overwritePoint(role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference', point: CalibrationPoint): Promise<void> {
     if (!currentSessionId.value) {
       throw new Error('Keine aktive Kalibrier-Session vorhanden')
@@ -1073,6 +1082,7 @@ export function useCalibrationWizard(
     sampleProgress.value = 0
     sampleTotal.value = 0
     calibrationTemperature.value = 25.0
+    calibrationTemperatureSource.value = 'manual'
     clearDraft()
   }
 
@@ -1120,6 +1130,7 @@ export function useCalibrationWizard(
 
     // AUT-299: Calibration temperature for ATC
     calibrationTemperature,
+    calibrationTemperatureSource,
 
     // Presets
     sensorTypePresets: SENSOR_TYPE_PRESETS,
@@ -1136,6 +1147,7 @@ export function useCalibrationWizard(
     onPoint2Captured,
     submitCalibration,
     triggerLiveMeasurement,
+    setCalibrationTemperature,
     setLastRawValue,
     overwritePoint,
     deletePoint,

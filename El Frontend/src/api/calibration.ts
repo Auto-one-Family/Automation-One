@@ -68,6 +68,8 @@ export interface StartSessionRequest {
   expected_points?: number
   /** AUT-299: Solution temperature in °C for temperature compensation. Default: 25.0 */
   calibration_temperature?: number
+  /** Optional provenance for calibration_temperature (manual/config:auto-discovery). */
+  calibration_temperature_source?: string
 }
 
 export interface AddPointRequest {

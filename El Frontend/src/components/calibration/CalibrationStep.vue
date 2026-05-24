@@ -25,6 +25,10 @@ interface Props {
   /** Loading state while measurement request is in-flight */
   isMeasuring?: boolean
   isFreshMeasurement?: boolean
+  /** Label for the capture action button. */
+  captureLabel?: string
+  /** Require quality === "good" before allowing capture. */
+  requireGoodQuality?: boolean
 }
 
 const props = defineProps<Props>()
@@ -57,7 +61,8 @@ const readError = ref<string | null>(null)
 const canCapture = computed(() =>
   rawValue.value !== null &&
   referenceValue.value !== undefined &&
-  props.isFreshMeasurement === true,
+  props.isFreshMeasurement === true &&
+  (!props.requireGoodQuality || String(props.measurementQuality ?? '').toLowerCase() === 'good'),
 )
 
 watch(
@@ -99,6 +104,10 @@ function capture() {
   }
   if (rawValue.value === null) {
     readError.value = 'Bitte zuerst einen Messwert aufnehmen'
+    return
+  }
+  if (props.requireGoodQuality && String(props.measurementQuality ?? '').toLowerCase() !== 'good') {
+    readError.value = 'Messqualitaet ist nicht "good". Bitte Messung wiederholen.'
     return
   }
   emit('captured', { raw: rawValue.value, reference: referenceValue.value })
@@ -175,7 +184,7 @@ onUnmounted(() => {
       :disabled="!canCapture"
       @click="capture"
     >
-      Punkt uebernehmen
+      {{ captureLabel || 'Punkt uebernehmen' }}
     </button>
   </div>
 </template>

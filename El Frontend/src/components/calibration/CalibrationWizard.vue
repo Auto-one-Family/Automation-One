@@ -68,6 +68,8 @@ const {
   sampleProgress,
   sampleTotal,
   calibrationTemperature,
+  calibrationTemperatureSource,
+  setCalibrationTemperature,
   skipCurrentPoint,
 } = useCalibrationWizard({
   skipSelect: props.skipSelect,
@@ -113,6 +115,33 @@ const selectedSensorContext = computed(() => {
   )
   return sensor ?? null
 })
+const allSensors = computed(() =>
+  espStore.devices.flatMap((device) => Array.isArray(device.sensors) ? device.sensors : []),
+)
+const linkedTemperatureSensor = computed(() => {
+  const linkedConfigId = (selectedSensorContext.value as any)?.temp_sensor_config_id as string | null | undefined
+  if (!linkedConfigId) return null
+  return allSensors.value.find((sensor: any) => String(sensor.config_id ?? '') === linkedConfigId) ?? null
+})
+const linkedTemperatureValue = computed<number | null>(() => {
+  const sensor: any = linkedTemperatureSensor.value
+  if (!sensor) return null
+  const candidate = Number(sensor.processed_value ?? sensor.raw_value)
+  return Number.isFinite(candidate) ? candidate : null
+})
+const isEcCalibration = computed(() =>
+  (currentPreset.value?.calibrationMethod ?? '').startsWith('ec_'),
+)
+const usesLinkedTemperature = computed(() =>
+  isEcCalibration.value && linkedTemperatureValue.value != null,
+)
+const calibrationTemperatureHint = computed(() => {
+  if (usesLinkedTemperature.value) {
+    const source = calibrationTemperatureSource.value || 'config:auto'
+    return `Automatisch aus verknuepftem Temperatursensor (${source}).`
+  }
+  return 'Wird fuer die Temperaturkompensation des Kalibrierwerts verwendet.'
+})
 
 const deviceConnectivity = computed(() => {
   if (!selectedDevice.value) return 'offline'
@@ -155,6 +184,25 @@ const qualityLabel = computed(() => {
   if (qualityStatus.value === 'good') return 'Good'
   if (qualityStatus.value === 'error') return 'Error'
   return 'Suspect'
+})
+
+const ecCellFactor = computed<number | null>(() => {
+  const candidate = Number(ecDerived.value?.cell_factor)
+  return Number.isFinite(candidate) ? candidate : null
+})
+
+const ecCellFactorHint = computed(() => {
+  const factor = ecCellFactor.value
+  if (factor == null) return ''
+  if (factor >= 1.0 && factor <= 4.0) return 'Gut'
+  if (factor >= 0.5 && factor <= 10.0) return 'Ausserhalb DFR-Richtwert, bitte Referenz und Sonde pruefen'
+  return 'Stark abweichend: Messaufbau, Referenzloesung und Sonde pruefen'
+})
+
+const ecValidationWarnings = computed<string[]>(() => {
+  const candidate = ecDerived.value?.validation_warnings
+  if (!Array.isArray(candidate)) return []
+  return candidate.filter((item): item is string => typeof item === 'string' && item.length > 0)
 })
 
 type MasteryStageId = 'prep' | 'capture' | 'validate' | 'finalize' | 'terminal'
@@ -218,6 +266,16 @@ watch(lifecycleState, (state) => {
     }, 200)
   }
 })
+
+watch(
+  [usesLinkedTemperature, linkedTemperatureValue, linkedTemperatureSensor],
+  ([autoLinked, tempValue, sensor]) => {
+    if (!autoLinked || tempValue == null || !sensor) return
+    const source = `config:${String((sensor as any).config_id ?? '')}`
+    setCalibrationTemperature(Number(tempValue), source)
+  },
+  { immediate: true },
+)
 
 onUnmounted(() => {
   if (feedbackTimer) {
@@ -370,7 +428,16 @@ defineExpose({
         <label class="calibration-wizard__temp-label">
           Lösungstemperatur (°C)
         </label>
+        <template v-if="usesLinkedTemperature">
+          <div class="calibration-wizard__temp-linked">
+            <span class="calibration-wizard__temp-linked-value">{{ calibrationTemperature.toFixed(2) }} °C</span>
+            <span class="calibration-wizard__temp-linked-sensor">
+              {{ (linkedTemperatureSensor as any)?.name || (linkedTemperatureSensor as any)?.sensor_type || 'Temperatursensor' }}
+            </span>
+          </div>
+        </template>
         <input
+          v-else
           v-model.number="calibrationTemperature"
           type="number"
           min="0"
@@ -380,7 +447,7 @@ defineExpose({
           placeholder="25.0"
         />
         <span class="calibration-wizard__temp-hint">
-          Wird für die Temperaturkompensation des Kalibrierwerts verwendet.
+          {{ calibrationTemperatureHint }}
         </span>
       </div>
 
@@ -427,6 +494,8 @@ defineExpose({
         :is-measuring="isMeasuring"
         :measurement-quality="measurementQuality"
         :is-fresh-measurement="isFreshMeasurement"
+        :capture-label="currentPreset?.expectedPoints === 1 ? 'Kalibrierung uebernehmen' : 'Punkt uebernehmen'"
+        :require-good-quality="isEcCalibration"
         @captured="onPoint1Captured"
         @request-measurement="triggerLiveMeasurement"
       />
@@ -458,6 +527,7 @@ defineExpose({
         :is-measuring="isMeasuring"
         :measurement-quality="measurementQuality"
         :is-fresh-measurement="isFreshMeasurement"
+        :require-good-quality="isEcCalibration"
         @captured="onPoint2Captured"
         @request-measurement="triggerLiveMeasurement"
       />
@@ -667,16 +737,17 @@ defineExpose({
         <div class="calibration-wizard__result-grid">
           <div v-if="ecDerived.cell_factor !== undefined" class="calibration-wizard__result-item">
             <div class="calibration-wizard__result-label">Zellfaktor</div>
-            <div class="calibration-wizard__result-value">{{ Number(ecDerived.cell_factor).toFixed(3) }}</div>
-            <div class="calibration-wizard__result-hint">
-              {{
-                Number(ecDerived.cell_factor) >= 1.0 && Number(ecDerived.cell_factor) <= 4.0
-                  ? 'Gut'
-                  : Number(ecDerived.cell_factor) >= 0.5 && Number(ecDerived.cell_factor) <= 5.0
-                  ? 'Reinigen empfohlen'
-                  : 'Sonde ersetzen'
-              }}
-            </div>
+            <div class="calibration-wizard__result-value">{{ ecCellFactor != null ? ecCellFactor.toFixed(3) : '—' }}</div>
+            <div class="calibration-wizard__result-hint">{{ ecCellFactorHint }}</div>
+          </div>
+        </div>
+        <div
+          v-if="ecValidationWarnings.length > 0"
+          class="calibration-wizard__validation-warnings"
+        >
+          <div v-for="(warning, i) in ecValidationWarnings" :key="`ec-warning-${i}`" class="calibration-wizard__validation-warning">
+            <AlertCircle :size="13" class="calibration-wizard__warning-icon" />
+            <span>{{ warning }}</span>
           </div>
         </div>
       </template>
@@ -1394,6 +1465,24 @@ defineExpose({
 }
 
 .calibration-wizard__temp-hint {
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+
+.calibration-wizard__temp-linked {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.calibration-wizard__temp-linked-value {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.calibration-wizard__temp-linked-sensor {
   font-size: 0.6875rem;
   color: var(--color-text-muted);
 }

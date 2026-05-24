@@ -43,10 +43,15 @@ class StartSessionRequest(BaseModel):
     # AUT-299: Solution temperature at calibration time for temperature-compensated
     # coefficient calculation.  Default 25.0°C = NIST reference temperature.
     calibration_temperature: Optional[float] = Field(
-        25.0,
+        None,
         ge=-10.0,
         le=50.0,
-        description="Solution temperature at calibration time (°C). Used for temperature-compensated coefficient calculation. Default: 25.0 (NIST reference).",
+        description="Solution temperature at calibration time (°C). If omitted, server tries linked DS18B20/temperature sensor and falls back to 25.0°C.",
+    )
+    calibration_temperature_source: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="Optional provenance marker for temperature value (e.g. manual, config:<uuid>).",
     )
 
 
@@ -179,9 +184,13 @@ async def start_session(
     """
     service = CalibrationService(db)
     try:
-        # AUT-299: persist calibration_temperature in session_metadata so finalize()
-        # can apply temperature-compensated EC coefficient calculation.
-        cal_temperature = request.calibration_temperature if request.calibration_temperature is not None else 25.0
+        # AUT-299: Session metadata is resolved by CalibrationService:
+        # explicit frontend value > linked temp sensor > 25.0°C fallback.
+        session_metadata: dict[str, object] = {}
+        if request.calibration_temperature is not None:
+            session_metadata["calibration_temperature"] = request.calibration_temperature
+        if request.calibration_temperature_source:
+            session_metadata["calibration_temperature_source"] = request.calibration_temperature_source
         session = await service.start_session(
             esp_id=request.esp_id,
             gpio=request.gpio,
@@ -190,7 +199,7 @@ async def start_session(
             expected_points=request.expected_points,
             initiated_by=current_user.username if current_user else None,
             correlation_id=request.correlation_id,
-            session_metadata={"calibration_temperature": cal_temperature},
+            session_metadata=session_metadata,
         )
         await db.commit()
         return _session_to_response(session)

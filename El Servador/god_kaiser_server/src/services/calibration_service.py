@@ -13,7 +13,7 @@ Responsibilities:
 import asyncio
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from math import isfinite
 from typing import Optional
 
@@ -174,6 +174,60 @@ class CalibrationService:
         except Exception as e:
             logger.debug("CalibrationService WS broadcast failed: %s", e)
 
+    async def _resolve_calibration_temperature(
+        self,
+        sensor_config,
+        esp_device_id: Optional[uuid.UUID],
+        session_metadata: dict,
+    ) -> tuple[float, str]:
+        """
+        Resolve calibration temperature with strict priority:
+          1) Explicit value from session_metadata (frontend/manual input)
+          2) Linked temperature sensor via temp_sensor_config_id
+          3) Same-ESP temperature auto-discovery
+          4) Default 25.0°C
+        """
+        explicit_temp = session_metadata.get("calibration_temperature")
+        if explicit_temp is not None:
+            try:
+                value = float(explicit_temp)
+                if isfinite(value):
+                    source = str(session_metadata.get("calibration_temperature_source") or "manual")
+                    return value, source
+            except (TypeError, ValueError):
+                logger.warning("Invalid explicit calibration_temperature in session metadata: %s", explicit_temp)
+
+        sensor_repo = SensorRepository(self.session)
+        now_utc = datetime.now(timezone.utc)
+        max_age = timedelta(minutes=5)
+
+        if sensor_config is not None and sensor_config.temp_sensor_config_id is not None:
+            linked = await sensor_repo.get_by_id(sensor_config.temp_sensor_config_id)
+            if linked is not None:
+                reading = await sensor_repo.get_latest_reading(
+                    esp_id=linked.esp_id,
+                    gpio=linked.gpio,
+                    sensor_type=linked.sensor_type,
+                )
+                if reading is not None and reading.processed_value is not None:
+                    ts = reading.timestamp if reading.timestamp.tzinfo else reading.timestamp.replace(tzinfo=timezone.utc)
+                    if now_utc - ts <= max_age:
+                        return float(reading.processed_value), f"config:{sensor_config.temp_sensor_config_id}"
+
+        if esp_device_id is not None:
+            for temp_type in ("temperature", "sht31_temp"):
+                reading = await sensor_repo.get_latest_reading_for_esp(
+                    esp_id=esp_device_id,
+                    sensor_type=temp_type,
+                )
+                if reading is None or reading.processed_value is None:
+                    continue
+                ts = reading.timestamp if reading.timestamp.tzinfo else reading.timestamp.replace(tzinfo=timezone.utc)
+                if now_utc - ts <= max_age:
+                    return float(reading.processed_value), f"same_esp:{temp_type}"
+
+        return 25.0, "default_25c"
+
     async def start_session(
         self,
         esp_id: str,
@@ -215,6 +269,7 @@ class CalibrationService:
 
             # Find sensor config (optional — may not exist yet for unconfigured sensors)
             sensor_config_id = None
+            sensor = None
             esp_device = await self.esp_repo.get_by_device_id(esp_id)
             if esp_device:
                 sensor = await self.sensor_repo.get_by_esp_gpio_and_type(
@@ -224,6 +279,19 @@ class CalibrationService:
                 )
                 if sensor:
                     sensor_config_id = sensor.id
+
+            # Resolve calibration temperature metadata (AUT-299):
+            # explicit frontend input > linked DS18B20/temp sensor > same-ESP fallback > 25.0°C.
+            metadata = dict(session_metadata or {})
+            resolved_temp, resolved_source = await self._resolve_calibration_temperature(
+                sensor_config=sensor,
+                esp_device_id=esp_device.id if esp_device else None,
+                session_metadata=metadata,
+            )
+            metadata["calibration_temperature"] = resolved_temp
+            metadata["calibration_temperature_source"] = resolved_source
+            if sensor and sensor.temp_sensor_config_id:
+                metadata["linked_temp_sensor_config_id"] = str(sensor.temp_sensor_config_id)
 
             # Create session
             cal_session = await self.repo.create(
@@ -235,7 +303,7 @@ class CalibrationService:
                 expected_points=expected_points,
                 initiated_by=initiated_by,
                 correlation_id=correlation_id,
-                session_metadata=session_metadata or {},
+                session_metadata=metadata,
             )
 
         logger.info(
