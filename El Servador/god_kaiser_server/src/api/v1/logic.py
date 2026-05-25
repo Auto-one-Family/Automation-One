@@ -100,19 +100,17 @@ async def _push_config_to_affected_esps(db: DBSession, esp_ids: set[str], contex
     for esp_id in esp_ids:
         try:
             combined_config = await config_builder.build_combined_config(esp_id, db)
-            config_sent = await esp_service.send_config(
-                esp_id,
-                combined_config,
+            schedule_result = await esp_service.send_config_coalesced(
+                device_id=esp_id,
+                config=combined_config,
                 reason_code="logic_config_change",
             )
-            if config_sent.get("success"):
-                logger.info("Config published to ESP %s after %s", esp_id, context)
-            else:
-                logger.warning(
-                    "Config publish failed for ESP %s after %s (DB save was successful)",
-                    esp_id,
-                    context,
-                )
+            logger.info(
+                "Config push coalesced for ESP %s after %s (merged=%s)",
+                esp_id,
+                context,
+                schedule_result.get("merged", False),
+            )
         except Exception as exc:
             logger.warning(
                 "Failed to publish config to ESP %s after %s: %s",

@@ -254,6 +254,8 @@ class MQTTClient:
                 clean_session=True,
                 protocol=mqtt.MQTTv311,
             )
+            # Prevent unbounded reconnect amplification under config-push bursts.
+            self.client.max_queued_messages_set(50)
 
             # Set callbacks
             self.client.on_connect = self._on_connect

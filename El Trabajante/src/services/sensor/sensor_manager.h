@@ -216,6 +216,10 @@ private:
 
     // Internal: measurement with known config (avoids GPIO-only re-lookup for multi-sensor GPIOs)
     bool performMeasurementForConfig(SensorConfig* config, SensorReading& reading_out);
+
+    // AUT-441: Canonical median-based analog probe measurement (shared by continuous + manual paths)
+    bool measureAnalogProbeMedian(SensorConfig* config, SensorReading& reading_out,
+                                  uint8_t sample_count = 3, uint16_t sample_delay_ms = 200);
     
     // Publish sensor reading via MQTT
     bool publishSensorReading(const SensorReading& reading);

@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <atomic>
 #include "../../models/offline_rule.h"
 
 // ============================================
@@ -84,10 +85,11 @@ public:
     // STATUS
     // ============================================
     bool isOfflineActive() const {
-        return mode_ == OfflineMode::OFFLINE_ACTIVE || mode_ == OfflineMode::RECONNECTING;
+        OfflineMode mode = loadMode();
+        return mode == OfflineMode::OFFLINE_ACTIVE || mode == OfflineMode::RECONNECTING;
     }
-    bool isAdopting() const { return mode_ == OfflineMode::ADOPTING; }
-    OfflineMode getMode() const { return mode_; }
+    bool isAdopting() const { return loadMode() == OfflineMode::ADOPTING; }
+    OfflineMode getMode() const { return loadMode(); }
     uint8_t getOfflineRuleCount() const { return offline_rule_count_; }
 
     // AUT-66: Check whether an enabled offline rule covers this actuator GPIO
@@ -118,12 +120,18 @@ private:
     void deactivateOfflineMode();
     void setPersistenceDrift(const char* reason);
     void clearPersistenceDrift();
+    OfflineMode loadMode() const {
+        return static_cast<OfflineMode>(mode_.load(std::memory_order_acquire));
+    }
+    void storeMode(OfflineMode mode) {
+        mode_.store(static_cast<uint8_t>(mode), std::memory_order_release);
+    }
     static bool isInsideTimeWindow(uint8_t now_h, uint8_t now_m,
                                     uint8_t start_h, uint8_t start_m,
                                     uint8_t end_h,   uint8_t end_m);
 
     // State
-    OfflineMode    mode_                  = OfflineMode::ONLINE;
+    std::atomic<uint8_t> mode_            {static_cast<uint8_t>(OfflineMode::ONLINE)};
     unsigned long  disconnect_timestamp_ms_ = 0;
     unsigned long  adoption_started_ms_   = 0;
     uint32_t       active_handover_epoch_ = 0;

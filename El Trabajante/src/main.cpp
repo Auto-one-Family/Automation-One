@@ -4286,7 +4286,11 @@ bool handleActuatorConfig(JsonObject doc, const String& correlationId) {
 // SAFETY-P4: Offline Rules Config Handler
 // ============================================
 bool handleOfflineRulesConfig(JsonObject doc, const String& correlationId) {
-  (void)correlationId;
+  if (offlineModeManager.isAdopting()) {
+    LOG_W(TAG, String("[CONFIG] Offline-rules update deferred during ADOPTING (correlation_id=") +
+               correlationId + ")");
+    return true;
+  }
   // CP-F2: Pass pre-parsed root doc — parseOfflineRules extracts "offline_rules" key internally.
   return offlineModeManager.parseOfflineRules(doc);
 }

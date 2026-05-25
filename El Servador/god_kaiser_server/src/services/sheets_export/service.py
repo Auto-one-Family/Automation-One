@@ -302,15 +302,16 @@ class SheetsExportService:
             result.cursor_after = cursor_before
             return result
 
-        sensor_buckets = self._group_sensor_rows_by_tab(batch.rows, tab_mgr)
-        for tab_name, rows in sensor_buckets:
+        tabs_touched: List[str] = []
+        for tab_name, rows in self._chunk_sensor_rows_by_tab(batch, tab_mgr):
             await self._client.append_rows(
                 tab_name=tab_name,
                 header_row=SENSOR_HEADER,
                 rows=rows,
             )
-            result.tabs_touched.append(tab_name)
+            tabs_touched.append(tab_name)
         result.rows_written = len(batch.rows)
+        result.tabs_touched.extend(tabs_touched)
 
         new_cursor = await cursor.set_sensor_cursor(
             last_row_id=str(batch.last_row_id) if batch.last_row_id else None,
@@ -363,15 +364,16 @@ class SheetsExportService:
             }
             return result
 
-        actuator_buckets = self._group_actuator_rows_by_tab(batch.rows, tab_mgr)
-        for tab_name, rows in actuator_buckets:
+        tabs_touched: List[str] = []
+        for tab_name, rows in self._chunk_actuator_rows_by_tab(batch, tab_mgr):
             await self._client.append_rows(
                 tab_name=tab_name,
                 header_row=ACTUATOR_HEADER,
                 rows=rows,
             )
-            result.tabs_touched.append(tab_name)
+            tabs_touched.append(tab_name)
         result.rows_written = len(batch.rows)
+        result.tabs_touched.extend(tabs_touched)
 
         new_cursor = await cursor.set_history_cursor(
             last_row_id=str(batch.last_row_id) if batch.last_row_id else None,
@@ -417,6 +419,37 @@ class SheetsExportService:
             else "monthly"
         )
         return TabRotationManager(cursor, granularity=granularity)
+
+    def _chunk_sensor_rows_by_tab(
+        self,
+        batch: SensorBatch,
+        tab_mgr: TabRotationManager,
+    ) -> List[Tuple[str, List[List[Any]]]]:
+        chunks: List[Tuple[str, List[List[Any]]]] = []
+        for row in batch.rows:
+            tab_name = tab_mgr.current_sensor_tab(when=row.timestamp_utc)
+            sheet_row = row.to_sheet_row()
+            if chunks and chunks[-1][0] == tab_name:
+                chunks[-1][1].append(sheet_row)
+            else:
+                chunks.append((tab_name, [sheet_row]))
+        return chunks
+
+    def _chunk_actuator_rows_by_tab(
+        self,
+        batch: ActuatorBatch,
+        tab_mgr: TabRotationManager,
+    ) -> List[Tuple[str, List[List[Any]]]]:
+        chunks: List[Tuple[str, List[List[Any]]]] = []
+        for row in batch.rows:
+            anchor = row.run_end_utc or row.run_start_utc
+            tab_name = tab_mgr.current_actuator_tab(when=anchor)
+            sheet_row = row.to_sheet_row()
+            if chunks and chunks[-1][0] == tab_name:
+                chunks[-1][1].append(sheet_row)
+            else:
+                chunks.append((tab_name, [sheet_row]))
+        return chunks
 
 
 # -----------------------------------------------------------------------------

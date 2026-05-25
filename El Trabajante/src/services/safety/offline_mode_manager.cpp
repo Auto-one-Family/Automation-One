@@ -239,15 +239,15 @@ void OfflineModeManager::clearPersistenceDrift() {
 // ============================================
 
 void OfflineModeManager::onDisconnect() {
-    if (mode_ == OfflineMode::ONLINE) {
-        mode_ = OfflineMode::DISCONNECTED;
+    if (loadMode() == OfflineMode::ONLINE) {
+        storeMode(OfflineMode::DISCONNECTED);
         disconnect_timestamp_ms_ = millis();
         adoption_started_ms_ = 0;
         LOG_W(TAG, String("[SAFETY-P4] Disconnect — 30s grace timer started (t_ms=") +
                        String(millis()) + ")");
-    } else if (mode_ == OfflineMode::RECONNECTING) {
+    } else if (loadMode() == OfflineMode::RECONNECTING) {
         // Reconnect handover failed before ACK: return immediately to local autonomy.
-        mode_ = OfflineMode::OFFLINE_ACTIVE;
+        storeMode(OfflineMode::OFFLINE_ACTIVE);
         disconnect_timestamp_ms_ = 0;
         adoption_started_ms_ = 0;
         handover_abort_count_++;
@@ -261,9 +261,9 @@ void OfflineModeManager::onDisconnect() {
                              handover_contract_reject_count_,
                              active_handover_epoch_,
                              handover_completed_epoch_);
-    } else if (mode_ == OfflineMode::ADOPTING) {
+    } else if (loadMode() == OfflineMode::ADOPTING) {
         // Adoption interrupted by new transport loss: restart the offline timer.
-        mode_ = OfflineMode::DISCONNECTED;
+        storeMode(OfflineMode::DISCONNECTED);
         disconnect_timestamp_ms_ = millis();
         adoption_started_ms_ = 0;
         handover_abort_count_++;
@@ -281,14 +281,14 @@ void OfflineModeManager::onDisconnect() {
 }
 
 void OfflineModeManager::onReconnect() {
-    if (mode_ == OfflineMode::OFFLINE_ACTIVE) {
-        mode_ = OfflineMode::RECONNECTING;
+    if (loadMode() == OfflineMode::OFFLINE_ACTIVE) {
+        storeMode(OfflineMode::RECONNECTING);
         active_handover_epoch_++;
         LOG_I(TAG, String("[SAFETY-P4] Reconnected - waiting for server ACK to return ONLINE (epoch=") +
                    String(active_handover_epoch_) + ")");
-    } else if (mode_ == OfflineMode::DISCONNECTED) {
+    } else if (loadMode() == OfflineMode::DISCONNECTED) {
         // Reconnected before grace period expired — no rules were active
-        mode_ = OfflineMode::ONLINE;
+        storeMode(OfflineMode::ONLINE);
         disconnect_timestamp_ms_ = 0;
         LOG_I(TAG, "[SAFETY-P4] Reconnected during grace period - back ONLINE");
     }
@@ -302,18 +302,20 @@ bool OfflineModeManager::validateServerAckContract(uint32_t incoming_handover_ep
         return false;
     }
 
-    if (mode_ == OfflineMode::ONLINE) {
+    OfflineMode mode = loadMode();
+
+    if (mode == OfflineMode::ONLINE) {
         return true;
     }
 
-    if (mode_ == OfflineMode::DISCONNECTED) {
+    if (mode == OfflineMode::DISCONNECTED) {
         // Grace-cancel ACK: epoch matching is irrelevant in this state.
         return true;
     }
 
-    if (mode_ == OfflineMode::RECONNECTING ||
-        mode_ == OfflineMode::OFFLINE_ACTIVE ||
-        mode_ == OfflineMode::ADOPTING) {
+    if (mode == OfflineMode::RECONNECTING ||
+        mode == OfflineMode::OFFLINE_ACTIVE ||
+        mode == OfflineMode::ADOPTING) {
         if (active_handover_epoch_ == 0) {
             if (reject_code != nullptr) {
                 *reject_code = "MISSING_ACTIVE_SESSION_EPOCH";
@@ -337,7 +339,9 @@ bool OfflineModeManager::validateServerAckContract(uint32_t incoming_handover_ep
 }
 
 void OfflineModeManager::onServerAckReceived(uint32_t incoming_handover_epoch) {
-    if (mode_ == OfflineMode::RECONNECTING || mode_ == OfflineMode::OFFLINE_ACTIVE) {
+    OfflineMode mode = loadMode();
+
+    if (mode == OfflineMode::RECONNECTING || mode == OfflineMode::OFFLINE_ACTIVE) {
         if (incoming_handover_epoch == 0) {
             onServerAckContractMismatch("MISSING_HANDOVER_EPOCH");
             return;
@@ -380,7 +384,7 @@ void OfflineModeManager::onServerAckReceived(uint32_t incoming_handover_epoch) {
         handover_completed_epoch_ = expected_epoch;
         adoption_delta_count_++;
         enterAdoptingMode();
-    } else if (mode_ == OfflineMode::ADOPTING) {
+    } else if (mode == OfflineMode::ADOPTING) {
         // Duplicate ACK during adoption window: ignore but keep it observable.
         adoption_noop_count_++;
         LOG_D(TAG, "[SAFETY-P4] Duplicate server ACK while ADOPTING");
@@ -393,9 +397,9 @@ void OfflineModeManager::onServerAckReceived(uint32_t incoming_handover_epoch) {
                              handover_contract_reject_count_,
                              active_handover_epoch_,
                              handover_completed_epoch_);
-    } else if (mode_ == OfflineMode::DISCONNECTED) {
+    } else if (mode == OfflineMode::DISCONNECTED) {
         // ACK received before grace period — cancel timer
-        mode_ = OfflineMode::ONLINE;
+        storeMode(OfflineMode::ONLINE);
         disconnect_timestamp_ms_ = 0;
         adoption_started_ms_ = 0;
         LOG_D(TAG, "[SAFETY-P4] Server ACK during grace period - timer cancelled");
@@ -423,7 +427,7 @@ void OfflineModeManager::onServerAckContractMismatch(const char* reject_code) {
 
 void OfflineModeManager::onEmergencyStop() {
     LOG_W(TAG, "[SAFETY-P4] Emergency stop - offline mode cleared");
-    mode_ = OfflineMode::ONLINE;
+    storeMode(OfflineMode::ONLINE);
     disconnect_timestamp_ms_ = 0;
     adoption_started_ms_ = 0;
     active_handover_epoch_ = 0;
@@ -443,7 +447,7 @@ void OfflineModeManager::onEmergencyStop() {
 // ============================================
 
 void OfflineModeManager::checkDelayTimer() {
-    if (mode_ == OfflineMode::ADOPTING) {
+    if (loadMode() == OfflineMode::ADOPTING) {
         if (adoption_started_ms_ > 0 &&
             (millis() - adoption_started_ms_) >= ADOPTION_SETTLE_MS) {
             finalizeAdoptingMode();
@@ -451,7 +455,7 @@ void OfflineModeManager::checkDelayTimer() {
         return;
     }
 
-    if (mode_ != OfflineMode::DISCONNECTED) {
+    if (loadMode() != OfflineMode::DISCONNECTED) {
         return;
     }
 
@@ -1151,7 +1155,7 @@ void OfflineModeManager::activateOfflineMode() {
     unsigned long grace_ms = millis() - disconnect_timestamp_ms_;
     LOG_W(TAG, String("[SAFETY-P4] Grace period elapsed (") + String(grace_ms) +
                "ms) → OFFLINE_ACTIVE");
-    mode_ = OfflineMode::OFFLINE_ACTIVE;
+    storeMode(OfflineMode::OFFLINE_ACTIVE);
     offline_enter_count_++;
     memset(warmup_valid_samples_, 0, sizeof(warmup_valid_samples_));
 
@@ -1264,7 +1268,7 @@ void OfflineModeManager::activateOfflineMode() {
 }
 
 void OfflineModeManager::enterAdoptingMode() {
-    mode_ = OfflineMode::ADOPTING;
+    storeMode(OfflineMode::ADOPTING);
     disconnect_timestamp_ms_ = 0;
     adoption_started_ms_ = millis();
     adopting_enter_count_++;
@@ -1289,14 +1293,14 @@ void OfflineModeManager::enterAdoptingMode() {
 }
 
 void OfflineModeManager::finalizeAdoptingMode() {
-    if (mode_ != OfflineMode::ADOPTING) {
+    if (loadMode() != OfflineMode::ADOPTING) {
         return;
     }
     deactivateOfflineMode();
 }
 
 void OfflineModeManager::deactivateOfflineMode() {
-    mode_ = OfflineMode::ONLINE;
+    storeMode(OfflineMode::ONLINE);
     disconnect_timestamp_ms_ = 0;
     adoption_started_ms_ = 0;
 

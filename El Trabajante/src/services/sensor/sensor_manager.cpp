@@ -50,6 +50,15 @@ private:
 };
 
 static constexpr uint32_t kManualSensorMutexWaitMs = 10000;  // bounded wait vs portMAX_DELAY in autonomous path
+
+bool isAnalogProbeSensorType(const String& sensor_type) {
+    String lower = sensor_type;
+    lower.toLowerCase();
+    return lower.indexOf("ph") >= 0 ||
+           lower.indexOf("ec") >= 0 ||
+           lower.indexOf("moisture") >= 0 ||
+           lower.indexOf("soil") >= 0;
+}
 }  // namespace
 
 // ============================================
@@ -838,6 +847,68 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
     return performMeasurementForConfig(config, reading_out);
 }
 
+bool SensorManager::measureAnalogProbeMedian(SensorConfig* config, SensorReading& reading_out,
+                                             uint8_t sample_count, uint16_t sample_delay_ms) {
+    if (!initialized_ || !config || sample_count == 0) {
+        reading_out.valid = false;
+        reading_out.error_message = "Analog median measurement not possible";
+        return false;
+    }
+
+    struct AnalogSample {
+        uint32_t raw_value;
+        const char* quality;
+    };
+
+    // Keep bounded stack usage (firmware task stack is limited)
+    static constexpr uint8_t MAX_ANALOG_MEDIAN_SAMPLES = 5;
+    uint8_t bounded_count = sample_count > MAX_ANALOG_MEDIAN_SAMPLES ? MAX_ANALOG_MEDIAN_SAMPLES : sample_count;
+    AnalogSample samples[MAX_ANALOG_MEDIAN_SAMPLES];
+
+    for (uint8_t i = 0; i < bounded_count; i++) {
+        if (i > 0 && sample_delay_ms > 0) {
+            delay(sample_delay_ms);
+        }
+        uint32_t raw = readRawAnalog(config->gpio);
+        samples[i].raw_value = raw;
+        samples[i].quality = validateAdcReading(raw, config->gpio);
+    }
+
+    // Bubble-sort by raw value, then pick median.
+    for (uint8_t i = 0; i < bounded_count - 1; i++) {
+        for (uint8_t j = 0; j < bounded_count - 1 - i; j++) {
+            if (samples[j].raw_value > samples[j + 1].raw_value) {
+                AnalogSample tmp = samples[j];
+                samples[j] = samples[j + 1];
+                samples[j + 1] = tmp;
+            }
+        }
+    }
+
+    AnalogSample median = samples[bounded_count / 2];
+    String server_sensor_type = getServerSensorType(config->sensor_type);
+    LocalConversion conv = applyLocalConversion(server_sensor_type, median.raw_value);
+
+    reading_out.gpio = config->gpio;
+    reading_out.sensor_type = server_sensor_type;
+    reading_out.subzone_id = config->subzone_id;
+    reading_out.raw_value = median.raw_value;
+    reading_out.processed_value = conv.value;
+    reading_out.unit = conv.unit;
+    reading_out.quality = String(median.quality);
+    reading_out.timestamp = millis();
+    reading_out.valid = true;
+    reading_out.error_message = "";
+    reading_out.i2c_address = config->i2c_address;
+
+    config->last_raw_value = median.raw_value;
+    config->last_reading = millis();
+
+    LOG_I(TAG, "SensorManager: Analog median " + String(bounded_count) + " samples, raw=" +
+               String(median.raw_value) + " (GPIO " + String(config->gpio) + ")");
+    return true;
+}
+
 // R20-P2: Internal measurement with known config (avoids GPIO-only re-lookup)
 // Used by performAllMeasurements() which iterates sensors_[] directly
 bool SensorManager::performMeasurementForConfig(SensorConfig* config, SensorReading& reading_out) {
@@ -1057,6 +1128,9 @@ bool SensorManager::performMeasurementForConfig(SensorConfig* config, SensorRead
                          ", quality=" + reading_out.quality + ")");
             } else {
                 // Analog sensor (pH, EC, Moisture, etc.)
+                if (isAnalogProbeSensorType(config->sensor_type)) {
+                    return measureAnalogProbeMedian(config, reading_out);
+                }
                 raw_value = readRawAnalog(gpio);
                 // E-P2: ADC quality check for analog sensors
                 reading_out.quality = String(validateAdcReading(raw_value, gpio));
@@ -1070,6 +1144,9 @@ bool SensorManager::performMeasurementForConfig(SensorConfig* config, SensorRead
         if (lower_type.indexOf("ph") >= 0 || lower_type.indexOf("ec") >= 0 ||
             lower_type.indexOf("moisture") >= 0) {
             // Likely analog sensor
+            if (isAnalogProbeSensorType(config->sensor_type)) {
+                return measureAnalogProbeMedian(config, reading_out);
+            }
             raw_value = readRawAnalog(gpio);
             // E-P2: ADC quality check
             reading_out.quality = String(validateAdcReading(raw_value, gpio));
@@ -1560,44 +1637,15 @@ ManualMeasurementResult SensorManager::triggerManualMeasurement(uint8_t gpio, ui
         }
 
         // Single-value sensor
-        // AUT-314: 3-sample median for analog probes (pH, EC, moisture) — reduces settling noise.
-        // Delay 200ms between samples; total overhead ~400ms, well within 5s timeout.
-        String lower_type_aut314 = String(config->sensor_type);
-        lower_type_aut314.toLowerCase();
-        bool is_analog_probe = (lower_type_aut314.indexOf("ph") >= 0 ||
-                                 lower_type_aut314.indexOf("ec") >= 0 ||
-                                 lower_type_aut314.indexOf("moisture") >= 0 ||
-                                 lower_type_aut314.indexOf("soil") >= 0);
-
         SensorReading reading;
-        if (is_analog_probe) {
-            SensorReading samples[3];
-            uint8_t valid_count = 0;
-            for (uint8_t i = 0; i < 3; i++) {
-                if (i > 0) delay(200);
-                if (performMeasurement(gpio, samples[valid_count])) {
-                    valid_count++;
-                }
-            }
-            if (valid_count == 0) {
-                LOG_E(TAG, "SensorManager: Manual measurement failed (all 3 samples) for GPIO " + String(gpio));
+        if (isAnalogProbeSensorType(config->sensor_type)) {
+            // AUT-441: Continuous and manual paths share exactly one median implementation.
+            if (!measureAnalogProbeMedian(config, reading)) {
+                LOG_E(TAG, "SensorManager: Manual analog median measurement failed for GPIO " + String(gpio));
                 result.reason_code = "MEASUREMENT_FAILED";
                 manual_measure_busy_[sensor_index] = false;  // AUT-303: release busy flag
                 return result;
             }
-            // Bubble-sort by raw_value, pick median
-            for (uint8_t i = 0; i < valid_count - 1; i++) {
-                for (uint8_t j = 0; j < valid_count - 1 - i; j++) {
-                    if (samples[j].raw_value > samples[j + 1].raw_value) {
-                        SensorReading tmp = samples[j];
-                        samples[j] = samples[j + 1];
-                        samples[j + 1] = tmp;
-                    }
-                }
-            }
-            reading = samples[valid_count / 2];
-            LOG_I(TAG, "SensorManager: Manual multi-sample: " + String(valid_count) +
-                      "/3 valid, median raw=" + String(reading.raw_value) + " (GPIO " + String(gpio) + ")");
         } else {
             if (!performMeasurement(gpio, reading)) {
                 LOG_E(TAG, "SensorManager: Manual measurement failed for GPIO " + String(gpio));

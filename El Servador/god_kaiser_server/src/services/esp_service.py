@@ -49,7 +49,6 @@ CONFIG_PUSH_COALESCE_SECONDS = 5.0
 # CRUD-initiated config pushes are coalesced per device to avoid burst floods.
 # Heartbeat-triggered pushes intentionally bypass this state machine.
 _pending_config_pushes: Dict[str, asyncio.Task] = {}
-_pending_config_push_handles: Dict[str, str] = {}
 _pending_config_payloads: Dict[str, Dict[str, Any]] = {}
 _pending_config_reasons: Dict[str, str] = {}
 _pending_config_generations: Dict[str, Optional[int]] = {}
@@ -172,82 +171,29 @@ class ESPService:
         reason_code: str = "crud_config_change",
     ) -> dict[str, Any]:
         """
-        Coalesce multiple CRUD-triggered config pushes per ESP into one push.
+        Legacy entrypoint for CRUD-triggered config pushes.
 
-        Heartbeat-initiated pushes must keep using their existing cooldown path and
-        should not call this method.
+        Delegates to send_config_coalesced() so all coalescing behavior has a
+        single source of truth.
         """
-        existing = _pending_config_pushes.get(device_id)
-        if existing is not None and not existing.done():
-            existing_correlation_id = _pending_config_push_handles.get(device_id)
-            if not existing_correlation_id:
-                existing_correlation_id = str(uuid.uuid4())
-                _pending_config_push_handles[device_id] = existing_correlation_id
-            logger.warning(
-                "config_push_coalesce esp_id=%s reason=%s (merged)",
-                device_id,
-                reason_code,
+        session_maker = get_session_maker()
+        async with session_maker() as session:
+            from ..db.repositories import ActuatorRepository, SensorRepository
+            from .config_builder import ConfigPayloadBuilder
+
+            esp_repo = ESPRepository(session)
+            config_builder = ConfigPayloadBuilder(
+                sensor_repo=SensorRepository(session),
+                actuator_repo=ActuatorRepository(session),
+                esp_repo=esp_repo,
             )
-            return {
-                "scheduled": True,
-                "merged": True,
-                "correlation_id": existing_correlation_id,
-                "request_id": existing_correlation_id,
-            }
-
-        reserved_correlation_id = str(uuid.uuid4())
-        _pending_config_push_handles[device_id] = reserved_correlation_id
-
-        async def _delayed_push() -> None:
-            try:
-                await asyncio.sleep(CONFIG_PUSH_COALESCE_SECONDS)
-                session_maker = get_session_maker()
-                async with session_maker() as session:
-                    from ..db.repositories import ActuatorRepository, SensorRepository
-                    from .config_builder import ConfigPayloadBuilder
-
-                    esp_repo = ESPRepository(session)
-                    config_builder = ConfigPayloadBuilder(
-                        sensor_repo=SensorRepository(session),
-                        actuator_repo=ActuatorRepository(session),
-                        esp_repo=esp_repo,
-                    )
-                    combined_config = await config_builder.build_combined_config(device_id, session)
-                    service = ESPService(esp_repo, self.publisher)
-                    await service.send_config(
-                        device_id,
-                        combined_config,
-                        reason_code=f"coalesced:{reason_code}",
-                        forced_correlation_id=reserved_correlation_id,
-                    )
-            except Exception as exc:
-                logger.error(
-                    "config_push_coalesced_failed esp_id=%s reason=%s error=%s",
-                    device_id,
-                    reason_code,
-                    exc,
-                    exc_info=True,
-                )
-            finally:
-                current = _pending_config_pushes.get(device_id)
-                if current is asyncio.current_task():
-                    _pending_config_pushes.pop(device_id, None)
-                    _pending_config_push_handles.pop(device_id, None)
-
-        task = asyncio.create_task(_delayed_push())
-        _pending_config_pushes[device_id] = task
-        logger.warning(
-            "config_push_scheduled esp_id=%s reason=%s delay=%.1fs",
-            device_id,
-            reason_code,
-            CONFIG_PUSH_COALESCE_SECONDS,
-        )
-        return {
-            "scheduled": True,
-            "merged": False,
-            "correlation_id": reserved_correlation_id,
-            "request_id": reserved_correlation_id,
-        }
+            combined_config = await config_builder.build_combined_config(device_id, session)
+            delegated_service = ESPService(esp_repo, self.publisher)
+            return await delegated_service.send_config_coalesced(
+                device_id=device_id,
+                config=combined_config,
+                reason_code=reason_code,
+            )
 
     # =========================================================================
     # Device Registration

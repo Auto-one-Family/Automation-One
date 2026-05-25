@@ -145,6 +145,7 @@ services:
       # Provide the SA-JSON via a bind-mount or docker secret at
       # SHEETS_SA_CREDENTIALS_PATH and keep the file OUTSIDE the repo.
       SHEETS_EXPORT_ENABLED: ${SHEETS_EXPORT_ENABLED:-false}
+      SHEETS_EXPORT_INTERVAL_MINUTES: ${SHEETS_EXPORT_INTERVAL_MINUTES:-5}
       SHEETS_SA_CREDENTIALS_PATH: ${SHEETS_SA_CREDENTIALS_PATH:-}
       SHEETS_SPREADSHEET_ID: ${SHEETS_SPREADSHEET_ID:-}
     ports:
@@ -155,6 +156,7 @@ services:
       - ./logs/server:/app/logs
       # Persist database backups on host (Fix-T Block 2)
       - ./backups:/app/backups
+      - /secrets:/secrets:ro
       # AUT-443 — Service-Account JSON for Google Sheets export.
       # To enable, uncomment the following line in a local override file
       # (e.g. docker-compose.override.yml — NEVER commit it) and point it

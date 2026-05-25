@@ -67,7 +67,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools && \
     pip install --no-cache-dir --upgrade \
         "python-multipart>=0.0.22" \
         "fastapi>=0.115.0" \
-        "starlette>=0.40.0" \
+        "starlette>=0.40.0,<1.0.0" \
         "jaraco.context>=6.1.0" \
         "wheel>=0.46.2"
 

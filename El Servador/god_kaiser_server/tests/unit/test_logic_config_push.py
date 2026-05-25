@@ -169,20 +169,21 @@ async def test_toggle_rule_triggers_config_push():
 
 
 @pytest.mark.asyncio
-async def test_push_config_logs_failure_on_unsuccessful_send_config():
-    """Config push helper treats success=False as failure (not truthy dict)."""
+async def test_push_config_uses_coalesced_scheduler():
+    """Config push helper always routes via coalesced scheduler."""
     db = AsyncMock()
     builder = MagicMock()
     builder.build_combined_config = AsyncMock(return_value={"sensors": [], "actuators": []})
     esp_service = MagicMock()
-    esp_service.send_config = AsyncMock(
-        return_value={"success": False, "message": "publish failed"}
+    esp_service.send_config_coalesced = AsyncMock(
+        return_value={"scheduled": True, "merged": True}
     )
 
     with (
         patch("src.api.v1.logic.get_config_builder", return_value=builder),
         patch("src.api.v1.logic.get_esp_service", return_value=esp_service),
-        patch("src.api.v1.logic.logger.warning") as warning_mock,
+        patch("src.api.v1.logic.logger.info") as info_mock,
     ):
         await _push_config_to_affected_esps(db, {"ESP_FAIL_001"}, context="unit-test")
-        warning_mock.assert_called()
+        esp_service.send_config_coalesced.assert_awaited_once()
+        info_mock.assert_called()

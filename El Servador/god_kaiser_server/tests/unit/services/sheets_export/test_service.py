@@ -355,6 +355,43 @@ class TestServiceSensorPath:
             assert stored["rows_exported"] == 0
             break
 
+    async def test_export_sensors_splits_batch_by_monthly_tab(
+        self,
+        session_factory_pair,
+    ):
+        session, factory = session_factory_pair
+        may_ts = datetime(2026, 5, 31, 23, 59, 30, tzinfo=timezone.utc)
+        june_ts = datetime(2026, 6, 1, 0, 0, 30, tzinfo=timezone.utc)
+        esp, _ = await _seed_sensor_row(session, may_ts)
+        row_june = SensorData(
+            esp_id=esp.id,
+            gpio=4,
+            sensor_type="ds18b20",
+            raw_value=23.0,
+            processed_value=23.0,
+            unit="C",
+            processing_mode="raw",
+            quality="good",
+            timestamp=june_ts,
+            data_source="test",
+        )
+        session.add(row_june)
+        await session.commit()
+
+        client = _StubClient()
+        svc = SheetsExportService(
+            scheduler=CentralScheduler(),
+            session_factory=factory,
+            settings=_enabled_settings(),
+            client=client,
+        )
+        result = await svc.export_sensors()
+
+        assert result.status == ExportStatus.SUCCESS
+        assert result.rows_written == 2
+        assert client.appended == [("sensoren-2026-05", 1), ("sensoren-2026-06", 1)]
+        assert result.tabs_touched == ["sensoren-2026-05", "sensoren-2026-06"]
+
 
 @pytest.mark.asyncio
 class TestServiceActuatorPath:
@@ -428,20 +465,19 @@ class TestServiceActuatorPath:
             assert len(open_runs) == 1
             break
 
-    async def test_export_actor_history_splits_mixed_month_batch(
+    async def test_export_actor_history_splits_batch_by_monthly_tab(
         self,
         session_factory_pair,
     ):
         session, factory = session_factory_pair
-        # Europe/Berlin month boundary at 2026-05-31 22:00:00 UTC.
-        ts0 = datetime(2026, 5, 31, 21, 58, 0, tzinfo=timezone.utc)
-        ts1 = datetime(2026, 5, 31, 21, 59, 0, tzinfo=timezone.utc)
-        ts2 = datetime(2026, 5, 31, 22, 0, 30, tzinfo=timezone.utc)
-        ts3 = datetime(2026, 5, 31, 22, 1, 0, tzinfo=timezone.utc)
+        may_on = datetime(2026, 5, 31, 23, 59, 0, tzinfo=timezone.utc)
+        may_off = datetime(2026, 5, 31, 23, 59, 30, tzinfo=timezone.utc)
+        june_on = datetime(2026, 6, 1, 0, 0, 0, tzinfo=timezone.utc)
+        june_off = datetime(2026, 6, 1, 0, 0, 30, tzinfo=timezone.utc)
 
-        esp, _ = await _seed_sensor_row(session, ts0, device_id="ESP_SVC_ACT_MIX")
-        await _seed_actuator_pair(session, esp, ts0, ts1)  # May bucket
-        await _seed_actuator_pair(session, esp, ts2, ts3)  # June bucket
+        esp, _ = await _seed_sensor_row(session, may_on)
+        await _seed_actuator_pair(session, esp, may_on, may_off)
+        await _seed_actuator_pair(session, esp, june_on, june_off)
         await session.commit()
 
         client = _StubClient()
@@ -452,9 +488,8 @@ class TestServiceActuatorPath:
             client=client,
         )
         result = await svc.export_actor_history()
+
         assert result.status == ExportStatus.SUCCESS
         assert result.rows_written == 2
-        assert client.appended == [
-            ("aktoren-2026-05", 1),
-            ("aktoren-2026-06", 1),
-        ]
+        assert client.appended == [("aktoren-2026-05", 1), ("aktoren-2026-06", 1)]
+        assert result.tabs_touched == ["aktoren-2026-05", "aktoren-2026-06"]

@@ -235,15 +235,20 @@ class CentralScheduler:
             return False
 
         # Job hinzufügen
-        self._scheduler.add_job(
-            func,
-            trigger=IntervalTrigger(seconds=seconds),
-            id=full_job_id,
-            args=args or [],
-            kwargs=kwargs or {},
-            replace_existing=True,
-            next_run_time=datetime.now(timezone.utc) if start_immediately else None,
-        )
+        # WICHTIG: next_run_time=None paust den Job in APScheduler.
+        # Für reguläre Intervall-Jobs darf das Feld daher nur gesetzt werden,
+        # wenn ein Sofort-Start explizit gewünscht ist.
+        add_job_kwargs: Dict[str, Any] = {
+            "trigger": IntervalTrigger(seconds=seconds),
+            "id": full_job_id,
+            "args": args or [],
+            "kwargs": kwargs or {},
+            "replace_existing": True,
+        }
+        if start_immediately:
+            add_job_kwargs["next_run_time"] = datetime.now(timezone.utc)
+
+        self._scheduler.add_job(func, **add_job_kwargs)
 
         # Stats initialisieren
         self._job_stats[full_job_id] = JobStats(job_id=full_job_id, category=category)
