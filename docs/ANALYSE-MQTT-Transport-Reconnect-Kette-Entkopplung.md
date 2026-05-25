@@ -72,8 +72,8 @@ Bei `MQTT_EVENT_DATA`: Nach Reassembly → `g_in_mqtt_event_callback = true` →
 
 `processPublishQueue()`:
 
-- Pro Comm-Tick: Budget **`PUBLISH_DRAIN_BUDGET_PER_TICK` (3)**, nach Write-Timeout-Signal am Transport oft **1** (PKG-18).
-- Ziel: **Micro-Bursts** vermeiden, die `errno=11` / Schreibstaus begünstigen.
+- Pro Comm-Tick: Budget **1** (Default) bzw. **2** bei fill≥3 und gesundem Transport (`computeAdaptivePublishDrainBudget`, AUT-481 P3); **kein** Boost bei CB OPEN, Write-Timeout oder `pauseForAnnounceAck`.
+- Ziel: Bursts entlasten ohne Micro-Burst-Staus (`errno=11`) — früher fix 1/Tick (AUT-54); davor historisch 3/Tick.
 
 **Hinweis Konsistenz:** In der Queue wird `esp_mqtt_client_publish(..., len=0, ...)` genutzt; der direkte `publish()`-Pfad setzt explizit `payload.length()` (PKG-16). Für nullterminierte Queue-Payloads ist das faktisch konsistent mit `strlen`, aber **formal asymmetrisch** — für eine spätere Härtung (nicht Gegenstand der Transport-Spitze) dokumentiert.
 

@@ -241,7 +241,7 @@ extern ConfigManager& configManager;
 
 **Backends:** **Standard (ohne Define, `esp32_dev`):** ESP-IDF MQTT (`esp_mqtt_client_handle_t`, `g_mqtt_connected`, Event-Handler `MQTT_EVENT_*`). **`MQTT_USE_PUBSUBCLIENT=1`** (seeed_xiao, Wokwi): PubSubClient + `offline_buffer_`, `setCallback`. Partition/SDK: optional `sdkconfig.defaults` (`CONFIG_MQTT_TASK_CORE_SELECTION_*`) für MQTT-Task auf Core 0.
 
-**SAFETY-RTOS M3 (nur ESP-IDF):** `void processPublishQueue()` leert `g_publish_queue` (Core 1 → Core 0); Aufruf aus `communication_task.cpp` nach `loop()`. `publish()` auf Core 1 enqueued.
+**SAFETY-RTOS M3 (nur ESP-IDF):** `void processPublishQueue()` leert `g_publish_queue` (Core 1 → Core 0, **10** Slots / Shed **5** — `publish_queue_constants.h`); adaptive Drain 1–2/Tick (`publish_queue_policy.h`); Aufruf aus `communication_task.cpp` nach `loop()`. `publish()` auf Core 1 enqueued.
 
 **Dependencies:** WiFiManager, CircuitBreaker, TopicBuilder
 ```cpp
