@@ -170,6 +170,7 @@ def _model_to_schema_response(
         updated_at=actuator.updated_at,
         subzone_id=subzone_id,
         subzone_warning=subzone_warning,
+        fail_safe_on_disconnect=actuator.fail_safe_on_disconnect,
     )
 
 
@@ -223,6 +224,11 @@ def _schema_to_model_fields(
         fields["assigned_zones"] = request.assigned_zones
     # AUT-227: assigned_subzones is DEPRECATED (read-only API).
     # Writes from clients are ignored; column is not modified.
+    if request.fail_safe_on_disconnect is not None:
+        fields["fail_safe_on_disconnect"] = request.fail_safe_on_disconnect
+    elif existing is None:
+        # AUT-482: product default — manual actuators without offline rule → OFF on disconnect
+        fields["fail_safe_on_disconnect"] = True
 
     return fields
 

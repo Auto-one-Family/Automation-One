@@ -295,12 +295,11 @@ class ConfigPayloadBuilder:
         - actuator_metadata.default_state → default_state (default: false)
         - actuator_metadata.default_pwm → default_pwm (default: 0)
 
-        AUT-120 — fail_safe_on_disconnect:
-            The optional ``fail_safe_on_disconnect`` column is added to the
-            payload only when it is set on the DB row (``is not None``). A
-            ``None`` value means "server has no opinion" so the ESP32 keeps
-            its built-in default (true for critical actuators). This keeps
-            the payload backward compatible for existing devices.
+        AUT-120 / AUT-482 — fail_safe_on_disconnect:
+            Included in the payload when set on the DB row (``is not None``).
+            Product default on create: ``True`` (manual actuator without offline
+            rule must turn OFF on MQTT disconnect). ``False`` = explicit hold.
+            ``None`` = omit field (legacy rows only; ESP NVS default applies).
 
         Args:
             actuator: ActuatorConfig model instance

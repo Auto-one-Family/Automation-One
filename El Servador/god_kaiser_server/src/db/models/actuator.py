@@ -135,6 +135,16 @@ class ActuatorConfig(Base, TimestampMixin):
         doc="Safety constraints (max_runtime, cooldown_period, emergency_stop_priority)",
     )
 
+    # AUT-120 / AUT-482: Server override for ESP fail-safe-on-disconnect.
+    # True = force OFF on MQTT disconnect (uncovered actuators without offline rule).
+    # False = keep last state. NULL = omit from config push (legacy rows only).
+    fail_safe_on_disconnect: Mapped[Optional[bool]] = mapped_column(
+        Boolean,
+        nullable=True,
+        default=True,
+        doc="AUT-482: Force OFF on disconnect when true (product default for manual actuators)",
+    )
+
     # Metadata
     actuator_metadata: Mapped[dict] = mapped_column(
         JSON,
