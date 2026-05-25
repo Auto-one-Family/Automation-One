@@ -276,6 +276,37 @@ export const useActuatorStore = defineStore('actuator', () => {
     return undefined
   }
 
+  function isFirmwareFallbackCorrelationId(correlationId: string): boolean {
+    return correlationId.startsWith('fw_')
+  }
+
+  /** Single pending config intent for an ESP (heartbeat auto-push vs fw_* response). */
+  function findSinglePendingConfigForEsp(espId: string): IntentRecord | undefined {
+    const matches: IntentRecord[] = []
+    for (const intent of intents.values()) {
+      if (intent.intentType !== 'config') continue
+      if (isTerminalState(intent.state)) continue
+      const subject = intent.subjectId
+      const linkedToEsp =
+        subject.startsWith(`${espId}:`) ||
+        subject.startsWith(`rest:${espId}:`) ||
+        subject === espId
+      if (!linkedToEsp) continue
+      matches.push(intent)
+    }
+    if (matches.length === 1) {
+      return matches[0]
+    }
+    // REST-registered intents use correlation UUID as subjectId — allow single pending fallback.
+    const allPending: IntentRecord[] = []
+    for (const intent of intents.values()) {
+      if (intent.intentType !== 'config') continue
+      if (isTerminalState(intent.state)) continue
+      allPending.push(intent)
+    }
+    return allPending.length === 1 ? allPending[0] : undefined
+  }
+
   function saveIntent(intent: IntentRecord): void {
     intents.set(intent.key, intent)
     if (intents.size <= MAX_INTENT_HISTORY) return
@@ -1225,8 +1256,31 @@ export const useActuatorStore = defineStore('actuator', () => {
       })
       return
     }
-    const existing = findIntentByCorrelation('config', correlationId)
+    let existing = findIntentByCorrelation('config', correlationId)
       ?? (requestId ? findIntentByRequest('config', requestId) : undefined)
+
+    const espId = typeof data.esp_id === 'string' ? data.esp_id : undefined
+    if (!existing && espId && isFirmwareFallbackCorrelationId(correlationId)) {
+      const pending = findSinglePendingConfigForEsp(espId)
+      if (pending) {
+        logger.warn('config_response fw_* correlation mapped to pending server config intent', {
+          esp_id: espId,
+          ws_correlation_id: correlationId,
+          intent_correlation_id: pending.correlationId,
+          status,
+        })
+        existing = pending
+      } else {
+        logger.warn('config_response fw_* without pending config intent — suppressed integration toast', {
+          esp_id: espId,
+          correlation_id: correlationId,
+          status,
+          message: data.message,
+        })
+        return
+      }
+    }
+
     if (!existing) {
       if (status === 'success' || status === 'partial_success') {
         logger.info('Late config_response without tracked intent ignored (already resolved or missed start event)', {

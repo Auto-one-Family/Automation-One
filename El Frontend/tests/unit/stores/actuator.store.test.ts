@@ -358,6 +358,36 @@ describe('actuator.store', () => {
     expect(store.isActuatorCommandInCooldown('ESP_2', 14)).toBe(false)
   })
 
+  it('mappt fw_* config_response auf einziges pending Config-Intent pro ESP', () => {
+    const store = useActuatorStore()
+    const subjectId = store.registerConfigIntentFromRest({
+      espId: 'ESP_698EB4',
+      scope: 'offline_rules',
+      correlationId: '3f0735f0-ab11-4fbf-aa7b-6eafcf15fa92',
+      requestId: '3f0735f0-ab11-4fbf-aa7b-6eafcf15fa92',
+    })
+
+    store.handleConfigResponse({
+      data: {
+        esp_id: 'ESP_698EB4',
+        status: 'failed',
+        correlation_id: 'fw_ESP_698EB4_65170_1',
+        message: 'Config contract violation: required correlation_id missing',
+        error_code: 'CONTRACT_UNKNOWN_CODE',
+      },
+    })
+
+    const intent = store.findConfigIntentBySubject(
+      subjectId,
+      '3f0735f0-ab11-4fbf-aa7b-6eafcf15fa92',
+    )
+    expect(intent?.state).toBe('terminal_failed')
+    expect(mockToast.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Integrationsstoerung (config_response)'),
+      expect.anything(),
+    )
+  })
+
   it('reconciliert pending config-intents nach reconnect ohne timeout-toast', async () => {
     const store = useActuatorStore()
     const subjectId = store.registerConfigIntentFromRest({
