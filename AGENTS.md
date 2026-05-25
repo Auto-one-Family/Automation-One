@@ -91,6 +91,33 @@ AutomationOne ist ein IoT-Framework mit 3 Schichten:
 - ESP32 firmware (`El Trabajante/`) is optional for dev — Mock ESPs can be created via the Debug API.
 - `vue-tsc --noEmit` may show a few pre-existing type issues (unused imports, type cast) — verify whether your change introduced new errors before treating as regressions.
 
+### ESP32 Build, Flash & Monitor (Linux / Raspberry Pi Host)
+
+`pio` ist auf dem Pi **nicht** im globalen PATH. Kanonische Binary und Projektroot:
+
+| Was | Absoluter Pfad |
+|-----|----------------|
+| PlatformIO CLI | `/home/robin/autoone/El Trabajante/.venv-pio/bin/pio` |
+| Firmware-Projekt | `/home/robin/autoone/El Trabajante` |
+| USB-Serial (typisch) | `/dev/ttyUSB0` |
+| Monitor-Log (PIO) | `El Trabajante/logs/device-monitor-*.log` |
+
+```bash
+PIO="/home/robin/autoone/El Trabajante/.venv-pio/bin/pio"
+FW="/home/robin/autoone/El Trabajante"
+PORT="/dev/ttyUSB0"
+
+cd "$FW"
+$PIO run -e esp32_dev                                                    # Build
+docker stop automationone-esp32-serial 2>/dev/null || true               # Port frei (optional)
+$PIO run -e esp32_dev -t upload --upload-port "$PORT"                     # Flash
+$PIO device monitor -e esp32_dev --port "$PORT"                           # Serial (Ctrl+C)
+$PIO device list                                                          # Ports prüfen
+```
+
+- **Env-Name:** `esp32_dev` (ESP32 WROOM-32), nicht `seeed` — `seeed_xiao_esp32c3` nur für XIAO C3.
+- **Port belegt:** `automationone-esp32-serial` oder laufender `pio device monitor` stoppen, sonst Upload schlägt fehl.
+
 ---
 
 ## Verifikationskriterien
@@ -99,7 +126,7 @@ Nach JEDER Code-Aenderung die passenden Checks ausfuehren:
 
 | Bereich | Befehl | Erfolgskriterium |
 |---------|--------|-----------------|
-| ESP32 Firmware | `cd "El Trabajante" && pio run -e seeed` | Exit-Code 0, keine Errors |
+| ESP32 Firmware | `cd "/home/robin/autoone/El Trabajante" && .venv-pio/bin/pio run -e esp32_dev` | Exit-Code 0, keine Errors |
 | Server Backend | `cd "/workspace/El Servador/god_kaiser_server" && poetry run pytest tests/ --timeout=120 --tb=short -q` | Alle Tests gruen |
 | Server Lint | `cd "/workspace/El Servador/god_kaiser_server" && poetry run ruff check src/` | Keine Errors |
 | Frontend Build | `cd "/workspace/El Frontend" && npx vite build` | Exit-Code 0, keine TS-Errors |

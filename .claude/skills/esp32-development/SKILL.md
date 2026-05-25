@@ -123,9 +123,27 @@ El Trabajante/
 
 **Wichtig:** PlatformIO-Befehle müssen aus `El Trabajante/` ausgeführt werden (dort liegt `platformio.ini`).
 
-- **Umgebungsnamen exakt:** In `platformio.ini` heißen die Envs u. a. `esp32_dev` (ESP32 DevKit / WROOM-32), `seeed_xiao_esp32c3` (Seeed XIAO ESP32-C3), `wokwi_simulation`, `wokwi_esp01` … `wokwi_esp03`, `native`. Der Kurzname `seeed` als `-e`-Ziel existiert **nicht** — siehe `.claude/CLAUDE.md` Verifikationstabelle.
-- **Git Bash (Agent):** `pio` oft nicht im PATH → typisch `~/.platformio/penv/Scripts/pio.exe` (Windows) bzw. `pio` nach PATH-Setup.
+- **Umgebungsnamen exakt:** In `platformio.ini` heißen die Envs u. a. `esp32_dev` (ESP32 DevKit / WROOM-32), `seeed_xiao_esp32c3` (Seeed XIAO ESP32-C3), `wokwi_simulation`, `wokwi_esp01` … `wokwi_esp03`, `native`. Der Kurzname `seeed` als `-e`-Ziel existiert **nicht** — siehe `AGENTS.md` Verifikationstabelle.
+- **Linux / Pi (Repo-Host, kanonisch):** `pio` nicht im PATH → **`El Trabajante/.venv-pio/bin/pio`** (absolut: `/home/robin/autoone/El Trabajante/.venv-pio/bin/pio`). USB typisch **`/dev/ttyUSB0`**. Vor Flash: `docker stop automationone-esp32-serial` falls der Serial-Logger den Port hält.
+- **Git Bash (Windows):** `pio` oft nicht im PATH → `~/.platformio/penv/Scripts/pio.exe`.
 - **PowerShell:** `&&` in PS 5.x unzuverlässig → Befehle mit `;` trennen oder Zeilenweise.
+
+### Linux / Raspberry Pi (Build, Flash, Monitor)
+
+```bash
+PIO="/home/robin/autoone/El Trabajante/.venv-pio/bin/pio"
+FW="/home/robin/autoone/El Trabajante"
+PORT="/dev/ttyUSB0"
+
+cd "$FW"
+$PIO run -e esp32_dev
+$PIO run -e esp32_dev -t upload --upload-port "$PORT"
+$PIO device monitor -e esp32_dev --port "$PORT"
+$PIO run -e seeed_xiao_esp32c3 -t upload --upload-port /dev/ttyACM0   # XIAO C3 falls anderes Board
+$PIO test -e native -vvv
+```
+
+Monitor schreibt optional nach `El Trabajante/logs/device-monitor-YYMMDD-HHMMSS.log` (PIO `log2file`).
 
 ### Git Bash / Shell (Build, Flash, kurzer Monitor)
 

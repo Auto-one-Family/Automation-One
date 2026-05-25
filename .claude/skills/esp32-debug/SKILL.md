@@ -374,15 +374,33 @@ Alle Queries via: `docker exec automationone-postgres psql -U god_kaiser -d god_
 
 ---
 
-## 13. Wokwi Quick-Reference
+## 13. Hardware Flash & Serial (Linux / Pi)
 
-- **Build:** `pio run -e wokwi_simulation`
+| Was | Pfad |
+|-----|------|
+| PIO CLI | `/home/robin/autoone/El Trabajante/.venv-pio/bin/pio` |
+| Upload-Port | `/dev/ttyUSB0` (typisch) |
+| Logs | `El Trabajante/logs/device-monitor-*.log` |
+
+```bash
+PIO="/home/robin/autoone/El Trabajante/.venv-pio/bin/pio"
+cd "/home/robin/autoone/El Trabajante"
+docker stop automationone-esp32-serial 2>/dev/null || true
+$PIO run -e esp32_dev -t upload --upload-port /dev/ttyUSB0
+$PIO device monitor -e esp32_dev --port /dev/ttyUSB0
+```
+
+Details: `esp32-development/SKILL.md` § Build Commands, `LOG_LOCATIONS.md` §5.0.
+
+## 14. Wokwi Quick-Reference
+
+- **Build:** `/home/robin/autoone/El Trabajante/.venv-pio/bin/pio run -e wokwi_simulation`
 - **Config:** `El Trabajante/wokwi.toml`, Serial: `rfc2217://localhost:4000`
 - **Szenarien:** 173 YAML in 14 Kategorien (`El Trabajante/tests/wokwi/scenarios/`)
 
 ---
 
-## 14. Referenzen
+## 15. Referenzen
 
 | Wann | Datei | Zweck |
 |------|-------|-------|
