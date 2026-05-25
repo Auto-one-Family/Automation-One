@@ -464,3 +464,64 @@ async def test_send_command_post_dispatch_exception_persists_transport_fail_auth
     assert transport_row.outcome == "failed"
     assert transport_row.is_final is True
     assert transport_row.code == "SEND_COMMAND_EXCEPTION_POST_DISPATCH"
+
+
+@pytest.mark.asyncio
+async def test_send_command_serializes_manual_and_logic_on_same_gpio(
+    db_session, test_engine, cmd_test_esp_actuator
+):
+    """Manual REST and logic_engine must not publish MQTT concurrently on one GPIO."""
+    esp, _ac = cmd_test_esp_actuator
+    actuator_repo = ActuatorRepository(db_session)
+    safety = MagicMock()
+    safety.validate_actuator_command = AsyncMock(
+        return_value=SafetyCheckResult(valid=True, warnings=None)
+    )
+    publisher = MagicMock()
+    publish_trace: list[str] = []
+    first_started = asyncio.Event()
+    second_may_finish = asyncio.Event()
+
+    async def _serialized_publish(**_kwargs):
+        publish_trace.append("enter")
+        if len(publish_trace) == 1:
+            first_started.set()
+            await asyncio.wait_for(second_may_finish.wait(), timeout=2.0)
+        publish_trace.append("leave")
+        return True
+
+    publisher.publish_actuator_command = AsyncMock(side_effect=_serialized_publish)
+    svc = ActuatorService(
+        actuator_repo,
+        safety,
+        publisher,
+        session_factory=_test_session_factory(test_engine),
+    )
+
+    with _patch_ws():
+        task_manual = asyncio.create_task(
+            svc.send_command(
+                esp.device_id,
+                5,
+                "ON",
+                issued_by="user:robin",
+            )
+        )
+        await asyncio.wait_for(first_started.wait(), timeout=2.0)
+        task_logic = asyncio.create_task(
+            svc.send_command(
+                esp.device_id,
+                5,
+                "OFF",
+                issued_by="logic_engine",
+            )
+        )
+        await asyncio.sleep(0.05)
+        assert publish_trace == ["enter"], (
+            f"expected single in-flight publish, got trace={publish_trace}"
+        )
+        second_may_finish.set()
+        await asyncio.gather(task_manual, task_logic)
+
+    assert publish_trace == ["enter", "leave", "enter", "leave"]
+    assert publisher.publish_actuator_command.await_count == 2

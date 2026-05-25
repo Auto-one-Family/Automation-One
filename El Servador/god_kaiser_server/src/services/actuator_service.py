@@ -4,6 +4,7 @@ Actuator Business Logic Service
 Business logic for actuator control, safety checks, command validation.
 """
 
+import asyncio
 import uuid
 import json
 import time
@@ -97,6 +98,17 @@ class ActuatorService:
 
     Handles actuator command execution with safety validation.
     """
+
+    # Serialize manual + logic commands per physical actuator (ConflictManager
+    # only arbitrates between logic rules, not cross-source bursts).
+    _command_mutexes: dict[str, asyncio.Lock] = {}
+
+    @classmethod
+    def _get_command_mutex(cls, esp_id: str, gpio: int) -> asyncio.Lock:
+        key = f"{esp_id}:{gpio}"
+        if key not in cls._command_mutexes:
+            cls._command_mutexes[key] = asyncio.Lock()
+        return cls._command_mutexes[key]
 
     def __init__(
         self,
@@ -617,6 +629,27 @@ class ActuatorService:
             ActuatorSendCommandResult with success, correlation_id, command_sent (MQTT publish),
             and safety_warnings from SafetyService when valid=True.
         """
+        mutex = self._get_command_mutex(esp_id, gpio)
+        async with mutex:
+            return await self._send_command_locked(
+                esp_id=esp_id,
+                gpio=gpio,
+                command=command,
+                value=value,
+                duration=duration,
+                issued_by=issued_by,
+            )
+
+    async def _send_command_locked(
+        self,
+        esp_id: str,
+        gpio: int,
+        command: str,
+        value: float = 1.0,
+        duration: int = 0,
+        issued_by: str = "logic_engine",
+    ) -> ActuatorSendCommandResult:
+        """Internal send_command body — must run under per-actuator mutex."""
         correlation_id = str(uuid.uuid4())
         context: ActuatorCommandContext | None = None
         command_sent = False
