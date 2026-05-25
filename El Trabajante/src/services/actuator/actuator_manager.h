@@ -97,6 +97,9 @@ private:
                                ConfigErrorCode& error_code) const;
   String buildStatusPayload(const ActuatorStatus& status, const ActuatorConfig& config) const;
   String buildResponsePayload(const ActuatorCommand& command, bool success, const String& message) const;
+  static void preserveSoftPolicyFromRegistered(ActuatorConfig& merged, const ActuatorConfig& policy);
+  static void syncRegisteredConfigFromDriver(RegisteredActuator& slot);
+  static void syncDriverSoftPolicyFromRegistered(RegisteredActuator& slot);
   // AUT-117: QoS 0 telemetry for disconnect latch decisions
   void publishLatchedOffline(uint8_t gpio, const char* reason, bool pre_disconnect_state) const;
 

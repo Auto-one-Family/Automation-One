@@ -219,5 +219,13 @@ void PumpActuator::setRuntimeProtection(const RuntimeProtection& protection) {
 void PumpActuator::syncRuntimeLimitsFromConfig(const ActuatorConfig& cfg) {
   config_.runtime_protection = cfg.runtime_protection;
   protection_.max_runtime_ms = cfg.runtime_protection.max_runtime_ms;
+  config_.fail_safe_on_disconnect = cfg.fail_safe_on_disconnect;
+  config_.has_fail_safe_override  = cfg.has_fail_safe_override;
+  config_.critical                = cfg.critical;
+  config_.actuator_name           = cfg.actuator_name;
+  config_.subzone_id              = cfg.subzone_id;
+  config_.inverted_logic          = cfg.inverted_logic;
+  config_.default_state           = cfg.default_state;
+  config_.default_pwm             = cfg.default_pwm;
 }
 
