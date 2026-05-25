@@ -3,6 +3,8 @@
 #include <memory>
 
 #include "../../tasks/rtos_globals.h"  // SAFETY-RTOS M4: g_actuator_mutex
+#include "../../tasks/publish_queue.h"
+#include "../../tasks/publish_queue_policy.h"
 #include "../../drivers/gpio_manager.h"
 #include "../../error_handling/error_tracker.h"
 #include "../../models/config_types.h"
@@ -1053,6 +1055,14 @@ String ActuatorManager::buildStatusPayload(const ActuatorStatus& status, const A
 void ActuatorManager::publishActuatorStatus(uint8_t gpio) {
   RegisteredActuator* actuator = findActuator(gpio);
   if (!actuator || !actuator->driver) {
+    return;
+  }
+
+  const PublishQueuePressureStats pq_stats = getPublishQueuePressureStats();
+  if (shouldDeferActuatorStatusPublish(pq_stats.fill_level)) {
+    LOG_D(TAG, "[AUT-481] Deferring actuator status publish (fill=" +
+              String(pq_stats.fill_level) + "/" + String(PUBLISH_QUEUE_SIZE) +
+              " gpio=" + String(gpio) + ")");
     return;
   }
 

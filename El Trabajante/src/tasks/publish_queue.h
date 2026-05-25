@@ -1,4 +1,6 @@
 #pragma once
+
+#include "publish_queue_constants.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
@@ -15,9 +17,8 @@
 
 // Memory guard (ESP32 without PSRAM):
 // 15 slots consumed ~33 KB heap and repeatedly prevented CommTask creation on real devices.
-// 8 slots still absorb short bursts while preserving headroom for Core-0 network task startup.
+// 10 slots (AUT-481 P3): +2 headroom for 4-msg actuator toggle bursts without hitting shed watermark.
 // (AUT-344: older docs may still say 15 — single queue `g_publish_queue`, depth is PUBLISH_QUEUE_SIZE.)
-static const uint8_t  PUBLISH_QUEUE_SIZE      = 8;      // 8 * ~2180 B = ~18 KB heap
 static const uint16_t PUBLISH_TOPIC_MAX_LEN   = 128;
 // AUT-134: Heartbeat payload can exceed 1KB during reconnect/config bursts.
 // 1536 B provides headroom without materially impacting heap safety.
@@ -33,7 +34,6 @@ static const uint16_t PUBLISH_PAYLOAD_MAX_LEN = 1536;
 // Lower watermark = earlier pressure handling:
 // - reduces risk of blocking publish bursts
 // - favors control-path responsiveness over telemetry completeness under stress
-static const uint8_t  PUBLISH_QUEUE_SHED_WATERMARK = 4;  // 50% of 8 slots
 
 struct PublishRequest {
     char    topic[PUBLISH_TOPIC_MAX_LEN];

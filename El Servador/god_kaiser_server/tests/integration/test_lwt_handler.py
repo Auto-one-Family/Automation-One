@@ -20,6 +20,29 @@ def mock_terminal_authority_repo():
     with patch("src.mqtt.handlers.lwt_handler.CommandContractRepository") as mock_repo_class:
         mock_repo = MagicMock()
         mock_repo.upsert_terminal_event_authority = AsyncMock(return_value=(MagicMock(), False))
+        mock_repo.list_open_intents_for_esp = AsyncMock(return_value=[])
+        mock_outcome_row = MagicMock()
+        mock_outcome_row.intent_id = "intent-1"
+        mock_outcome_row.correlation_id = "corr-1"
+        mock_outcome_row.esp_id = "ESP_TEST"
+        mock_outcome_row.flow = "command"
+        mock_outcome_row.outcome = "failed"
+        mock_outcome_row.contract_version = 2
+        mock_outcome_row.semantic_mode = "target"
+        mock_outcome_row.legacy_status = "failed"
+        mock_outcome_row.target_status = "failed"
+        mock_outcome_row.is_final = True
+        mock_outcome_row.code = "ESP_DISCONNECTED_BEFORE_OUTCOME"
+        mock_outcome_row.reason = "ESP disconnected before terminal outcome"
+        mock_outcome_row.retryable = False
+        mock_outcome_row.generation = None
+        mock_outcome_row.seq = None
+        mock_outcome_row.epoch = None
+        mock_outcome_row.ttl_ms = None
+        mock_outcome_row.ts = int(datetime.now(timezone.utc).timestamp())
+        mock_outcome_row.first_seen_at = datetime.now(timezone.utc)
+        mock_outcome_row.terminal_at = datetime.now(timezone.utc)
+        mock_repo.upsert_outcome = AsyncMock(return_value=(mock_outcome_row, False))
         mock_repo_class.return_value = mock_repo
         yield mock_repo
 
@@ -206,6 +229,82 @@ class TestLWTInstantOffline:
                         assert call_args.args[0] == "esp_health"
                         assert call_args.args[1]["status"] == "offline"
                         assert call_args.args[1]["source"] == "lwt"
+
+    @pytest.mark.asyncio
+    async def test_lwt_sweeps_open_intents_and_broadcasts_intent_outcome(
+        self,
+        handler,
+        valid_lwt_payload,
+        mock_terminal_authority_repo,
+    ):
+        topic = "kaiser/god/esp/ESP_SWEEP/system/will"
+        open_intent = MagicMock()
+        open_intent.intent_id = "intent-open-1"
+        open_intent.correlation_id = "corr-open-1"
+        open_intent.flow = "command"
+        mock_terminal_authority_repo.list_open_intents_for_esp = AsyncMock(
+            return_value=[open_intent]
+        )
+
+        mock_outcome_row = MagicMock()
+        mock_outcome_row.intent_id = "intent-open-1"
+        mock_outcome_row.correlation_id = "corr-open-1"
+        mock_outcome_row.esp_id = "ESP_SWEEP"
+        mock_outcome_row.flow = "command"
+        mock_outcome_row.outcome = "failed"
+        mock_outcome_row.contract_version = 2
+        mock_outcome_row.semantic_mode = "target"
+        mock_outcome_row.legacy_status = "failed"
+        mock_outcome_row.target_status = "failed"
+        mock_outcome_row.is_final = True
+        mock_outcome_row.code = "ESP_DISCONNECTED_BEFORE_OUTCOME"
+        mock_outcome_row.reason = "ESP disconnected before terminal outcome"
+        mock_outcome_row.retryable = False
+        mock_outcome_row.generation = None
+        mock_outcome_row.seq = None
+        mock_outcome_row.epoch = None
+        mock_outcome_row.ttl_ms = None
+        mock_outcome_row.ts = int(datetime.now(timezone.utc).timestamp())
+        mock_outcome_row.first_seen_at = datetime.now(timezone.utc)
+        mock_outcome_row.terminal_at = datetime.now(timezone.utc)
+        mock_terminal_authority_repo.upsert_outcome = AsyncMock(
+            return_value=(mock_outcome_row, False)
+        )
+
+        with patch("src.mqtt.handlers.lwt_handler.resilient_session") as mock_session:
+            mock_db = MagicMock()
+            mock_db.commit = AsyncMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            with patch("src.mqtt.handlers.lwt_handler.ESPRepository") as mock_repo_class:
+                mock_device = MagicMock()
+                mock_device.device_id = "ESP_SWEEP"
+                mock_device.status = "online"
+                mock_device.device_metadata = {}
+                mock_device.last_seen = datetime.now(timezone.utc)
+
+                mock_repo = MagicMock()
+                mock_repo.get_by_device_id = AsyncMock(return_value=mock_device)
+                mock_repo.update_status = AsyncMock()
+                mock_repo_class.return_value = mock_repo
+
+                with patch("src.mqtt.handlers.lwt_handler.AuditLogRepository") as mock_audit:
+                    mock_audit.return_value.log_device_event = AsyncMock()
+
+                    with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
+                        mock_ws = AsyncMock()
+                        mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
+
+                        result = await handler.handle_lwt(topic, valid_lwt_payload)
+
+        assert result is True
+        mock_terminal_authority_repo.upsert_outcome.assert_awaited()
+        intent_calls = [
+            call for call in mock_ws.broadcast.call_args_list if call.args and call.args[0] == "intent_outcome"
+        ]
+        assert len(intent_calls) == 1
+        assert intent_calls[0].args[1]["code"] == "ESP_DISCONNECTED_BEFORE_OUTCOME"
 
 
 class TestLWTIdempotency:

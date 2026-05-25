@@ -1963,12 +1963,23 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     value?: number
   ): Promise<void> {
     const toast = useToast()
+    const actStore = useActuatorStore()
+
+    if (actStore.isActuatorCommandInCooldown(deviceId, gpio)) {
+      const remainingSec = Math.ceil(actStore.getActuatorCooldownRemainingMs(deviceId, gpio) / 1000)
+      toast.warning(
+        `Bitte ${remainingSec}s warten — kurze Pause zwischen Schaltbefehlen (GPIO ${gpio}).`,
+        { dedupeKey: `actuator-cooldown:${deviceId}:${gpio}` },
+      )
+      return
+    }
 
     if (isMock(deviceId)) {
       // Mock path: use debug API
       try {
         const state = command === 'ON' || command === 'TOGGLE'
         await debugApi.setActuatorState(deviceId, gpio, state, value)
+        actStore.recordActuatorCommandSent(deviceId, gpio)
         await fetchDevice(deviceId)
         toast.success(`[Simulation] Befehl ausgeführt: ${command} an ${deviceId} GPIO ${gpio}`, {
           dedupeKey: `sim-actuator-command:${deviceId}:${gpio}:${command}:${value ?? 'na'}`,
@@ -2000,7 +2011,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         command,
         value: value ?? (command === 'ON' ? 1.0 : 0.0),
       })
-      const actStore = useActuatorStore()
+      actStore.recordActuatorCommandSent(deviceId, gpio)
       const responseData = response as unknown as Record<string, unknown>
       const correlationId = typeof responseData.correlation_id === 'string' ? responseData.correlation_id : undefined
       const requestId = typeof responseData.request_id === 'string' ? responseData.request_id : undefined
@@ -2141,9 +2152,18 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     wsUnsubscribers.push(
       websocketService.onConnect(() => {
         logger.info('WebSocket connected, refreshing ESP data...')
-        fetchAll().catch(err => {
-          logger.error(`Failed to refresh ESP data after WebSocket connect:`, err)
-        })
+        const actStore = useActuatorStore()
+        fetchAll()
+          .catch(err => {
+            logger.error(`Failed to refresh ESP data after WebSocket connect:`, err)
+          })
+          .finally(() => {
+            actStore.reconcilePendingIntentsFromServer({
+              espIds: devices.value.map((device) => getDeviceId(device)).filter(Boolean),
+            }).catch(err => {
+              logger.warn('Failed to reconcile pending intents after WebSocket connect', err)
+            })
+          })
         const zs = useZoneStore()
         zs.fetchZoneEntities().catch(err => {
           logger.error(`Failed to refresh zone entities after WebSocket connect:`, err)

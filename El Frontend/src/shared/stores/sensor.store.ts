@@ -175,7 +175,16 @@ export const useSensorStore = defineStore('sensor', () => {
       const sensorTsMs = parseSensorTimestampMs(data.timestamp)
       const offlineInfo = (device as unknown as { offlineInfo?: { timestamp?: number } }).offlineInfo
       const offlineSinceMs = typeof offlineInfo?.timestamp === 'number' ? offlineInfo.timestamp : null
-      if (sensorTsMs !== null && offlineSinceMs !== null && sensorTsMs < offlineSinceMs) {
+      // AUT-481 P2: only drop pre-offline samples while the device is still offline.
+      // After esp_health online, offlineInfo is cleared — but guard against races where
+      // sensor_data arrives before the online transition during LWT flaps.
+      const deviceStillOffline = device.status === 'offline' || device.connected === false
+      if (
+        deviceStillOffline &&
+        sensorTsMs !== null &&
+        offlineSinceMs !== null &&
+        sensorTsMs < offlineSinceMs
+      ) {
         logger.debug(`Ignoring stale sensor_data for ${espId}:${gpio} (${sensorType}) after offline epoch`)
         return device
       }

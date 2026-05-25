@@ -41,6 +41,14 @@ static bool isObservabilityOnlyTopic(const char* topic) {
            strstr(topic, "/system/diagnostics") != nullptr;
 }
 
+// AUT-481 P2: sensor/data is high-frequency but operator-visible; shed only when queue is full.
+static bool isSensorDataPublishTopic(const char* topic) {
+    if (topic == nullptr) {
+        return false;
+    }
+    return strstr(topic, "/sensor/") != nullptr && strstr(topic, "/data") != nullptr;
+}
+
 // Reserve one queue slot for critical publishes by evicting one queued
 // non-critical message. Keeps terminal acknowledgements deliverable under load.
 static bool reserveSlotForCriticalPublish(PublishRequest* critical_req) {
@@ -258,10 +266,15 @@ PublishQueueEnqueueResult tryQueuePublish(const char* topic,
     }
 
     if (!critical && fill >= PUBLISH_QUEUE_SHED_WATERMARK) {
-        g_pq_shed_count.fetch_add(1);
-        LOG_D(PQ_TAG, "[SYNC] Backpressure shed (fill=" + String(fill) +
-              "/" + String(PUBLISH_QUEUE_SIZE) + "): " + String(topic));
-        return PublishQueueEnqueueResult::ShedBackpressure;
+        // Keep live sensor telemetry flowing under actuator bursts until the queue is full.
+        if (isSensorDataPublishTopic(topic) && fill < PUBLISH_QUEUE_SIZE) {
+            // fall through to enqueue
+        } else {
+            g_pq_shed_count.fetch_add(1);
+            LOG_D(PQ_TAG, "[SYNC] Backpressure shed (fill=" + String(fill) +
+                  "/" + String(PUBLISH_QUEUE_SIZE) + "): " + String(topic));
+            return PublishQueueEnqueueResult::ShedBackpressure;
+        }
     }
 
     PublishRequest req;

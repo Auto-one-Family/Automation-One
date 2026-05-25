@@ -1174,6 +1174,7 @@ bool publishIntentOutcome(const char* flow,
                           bool retryable) {
     loadOutboxStatsIfNeeded();
     const char* normalized_outcome = outcome != nullptr ? outcome : "failed";
+    const bool terminal_outcome = isTerminalOutcome(normalized_outcome);
 
     // Defensive guard: intent_id must never be empty in the published payload.
     // An empty intent_id (e.g. from NVS migration, corruption or missing field) causes
@@ -1192,7 +1193,9 @@ bool publishIntentOutcome(const char* flow,
     }
     const IntentMetadata& active_metadata = safe_metadata;
     bool command_flow = flow != nullptr && strcmp(flow, "command") == 0;
-    if (command_flow) {
+    // Keep chain-stage chatter off the hot terminal path. This lowers per-command
+    // burst volume during OFF storms while preserving non-terminal tracing.
+    if (command_flow && !terminal_outcome) {
         recordIntentChainStage(active_metadata,
                                "outcome_publish_attempted",
                                flow,
@@ -1200,7 +1203,7 @@ bool publishIntentOutcome(const char* flow,
                                "attempting outcome publish");
     }
     bool critical = isCriticalOutcomeClass(flow, normalized_outcome);
-    if (isTerminalOutcome(normalized_outcome)) {
+    if (terminal_outcome) {
         bool allow_publish = true;
         bool regression_blocked = false;
         char previous_final_outcome[16] = {0};
@@ -1256,10 +1259,9 @@ bool publishIntentOutcome(const char* flow,
     processIntentOutcomeOutbox();
 
     String topic = TopicBuilder::buildIntentOutcomeTopic();
-    // AUT-54: All intent_outcome publishes at QoS 0. Terminal QoS-1 filled the IDF OUTBOX;
-    // slow PUBACK + OUTBOX-expiry housekeeping caused write-timeout disconnects (AAAAA.md).
-    // Critical outcomes still persist to NVS and replay when publish fails.
-    const uint8_t outcome_qos = 0;
+    // Terminal command outcomes must be durable for end-to-end finality.
+    // Keep non-terminal chatter at QoS 0, but elevate command terminal frames.
+    const uint8_t outcome_qos = (command_flow && terminal_outcome) ? 1 : 0;
     uint8_t outcome_retries = 3;
     const PublishQueuePressureStats pq_stats = getPublishQueuePressureStats();
     if (pq_stats.fill_level >= PUBLISH_QUEUE_SHED_WATERMARK) {
@@ -1269,7 +1271,7 @@ bool publishIntentOutcome(const char* flow,
     bool ok = mqttClient.safePublish(topic, payload, outcome_qos, outcome_retries);
     bool persisted_for_replay = false;
     if (ok) {
-        if (command_flow) {
+        if (command_flow && !terminal_outcome) {
             recordIntentChainStage(active_metadata,
                                    "outcome_publish_ok",
                                    flow,
@@ -1280,7 +1282,7 @@ bool publishIntentOutcome(const char* flow,
         persistOutboxStats();
     }
     if (!ok) {
-        if (command_flow) {
+        if (command_flow && !terminal_outcome) {
             recordIntentChainStage(active_metadata,
                                    "outcome_publish_failed",
                                    flow,

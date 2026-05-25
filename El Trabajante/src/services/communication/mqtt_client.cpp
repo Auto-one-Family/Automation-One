@@ -22,6 +22,7 @@
 #ifndef MQTT_USE_PUBSUBCLIENT
     #include "../../tasks/safety_task.h"         // g_safety_task_handle, NOTIFY_* bits
     #include "../../tasks/publish_queue.h"       // M3: Core 1 → Core 0 publish queue
+    #include "../../tasks/publish_queue_policy.h"
     #include "../../error_handling/error_tracker.h"
     // Forward declarations from main.cpp
     extern void routeIncomingMessage(const char* topic, const char* payload);
@@ -438,6 +439,11 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     // Extra outbox headroom reduces transport write pressure during command bursts
     // (e.g. calibration/manual measurement + heartbeat + responses).
     mqtt_cfg.out_buffer_size = 8192;
+    // AUT-477: Flat esp_mqtt_client_config_t (Arduino-ESP32 SDK) has no runtime outbox.limit;
+    // OUTBOX capacity is compile-time via sdkconfig.defaults CONFIG_MQTT_OUTBOX_SIZE_BYTES=16384.
+#if defined(CONFIG_MQTT_OUTBOX_SIZE_BYTES) && (CONFIG_MQTT_OUTBOX_SIZE_BYTES < 16384)
+#warning "AUT-477: CONFIG_MQTT_OUTBOX_SIZE_BYTES below 16384 — transport burst risk"
+#endif
 
     mqtt_cfg.client_id = config.client_id.c_str();
     if (!anonymous_mode_) {
@@ -511,9 +517,14 @@ bool MQTTClient::connect(const MQTTConfig& config) {
 #endif
         snprintf(cfg_log, sizeof(cfg_log),
                  "[FIX2-VERIFY] MQTT cfg: out_buffer=%u buffer=%u "
-                 "OUTBOX=16384(sdkconfig) expiry=%ums net_timeout=%dms",
+                 "OUTBOX=%u(sdkconfig) expiry=%ums net_timeout=%dms",
                  (unsigned)mqtt_cfg.out_buffer_size,
                  (unsigned)mqtt_cfg.buffer_size,
+#if defined(CONFIG_MQTT_OUTBOX_SIZE_BYTES)
+                 (unsigned)CONFIG_MQTT_OUTBOX_SIZE_BYTES,
+#else
+                 4096U,
+#endif
                  outbox_expiry_ms,
                  mqtt_cfg.network_timeout_ms);
         LOG_I(TAG, cfg_log);
@@ -1424,13 +1435,10 @@ static uint32_t getRetryBackoffMs(uint8_t attempt) {
 
 // Drain limit per communication tick to avoid publish micro-bursts that can
 // saturate the TCP write path (observed as errno=11 under load).
-// AUT-54: Drain at most one queued publish per comm-task tick — was 3, which stacked
+// AUT-54: Drain at most one queued publish per comm-task tick by default — was 3, which stacked
 // multiple esp_mqtt_client_publish calls in one loop iteration and amplified TCP write
 // pressure during rapid actuator ON/OFF + sensor/heartbeat traffic.
-// AUT-360: Intentional fixed 1/tick — a separate write-timeout drain throttle (PKG-18)
-// became dead code once the default budget was lowered to 1; write-path backpressure is
-// still handled via retry/shed paths using isWritePathTimeoutErrno (AUT-55).
-static constexpr uint8_t PUBLISH_DRAIN_BUDGET_PER_TICK = 1;
+// AUT-481 P3: Adaptive boost to 2/tick when fill>=3 and transport is healthy (see policy helper).
 static constexpr uint8_t MAX_PRESSURE_DEFER_PER_MESSAGE = 3;
 
 void MQTTClient::processPublishQueue() {
@@ -1479,6 +1487,14 @@ void MQTTClient::processPublishQueue() {
     }
     processIntentOutcomeOutbox();
 
+    const uint8_t queue_fill_at_tick =
+        static_cast<uint8_t>(uxQueueMessagesWaiting(g_publish_queue));
+    const uint8_t drain_budget = computeAdaptivePublishDrainBudget(
+        queue_fill_at_tick,
+        transport_write_timeout_count_ > 0,
+        circuit_breaker_.allowRequest(),
+        isPublishQueuePaused());
+
     // AUT-117-fix: Write-timeout drain guard.
     // After a write timeout on this connection, esp_mqtt_client_publish() can block
     // again on the same degraded socket. If we continue draining here, we accumulate
@@ -1504,7 +1520,7 @@ void MQTTClient::processPublishQueue() {
     unsigned long now_ms = millis();
     uint8_t drained_this_tick = 0;
 
-    while (drained_this_tick < PUBLISH_DRAIN_BUDGET_PER_TICK &&
+    while (drained_this_tick < drain_budget &&
            xQueueReceive(g_publish_queue, &req, 0) == pdTRUE) {
         if (now_ms < req.next_retry_ms) {
             if (xQueueSend(g_publish_queue, &req, 0) != pdTRUE) {

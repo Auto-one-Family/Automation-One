@@ -214,6 +214,12 @@ const commandIsPending = computed(() =>
   actuatorStore.isActuatorCommandPending(props.actuator.esp_id, props.actuator.gpio)
 )
 
+const commandInCooldown = computed(() =>
+  actuatorStore.isActuatorCommandInCooldown(props.actuator.esp_id, props.actuator.gpio)
+)
+
+const commandToggleBlocked = computed(() => commandIsPending.value || commandInCooldown.value)
+
 const commandIntent = computed(() =>
   actuatorStore.getActuatorIntent(props.actuator.esp_id, props.actuator.gpio)
 )
@@ -340,11 +346,11 @@ function handleToggle(event: Event) {
       <button
         v-if="mode !== 'monitor'"
         class="btn-secondary btn-sm flex-shrink-0 touch-target"
-        :disabled="actuator.emergency_stopped || isEspOffline || isStale || commandIsPending"
-        :title="commandIsPending ? 'Befehl wird ausgeführt...' : isEspOffline ? 'ESP ist offline' : isStale ? 'Status veraltet' : ''"
+        :disabled="actuator.emergency_stopped || isEspOffline || isStale || commandToggleBlocked"
+        :title="commandIsPending ? 'Befehl wird ausgeführt...' : commandInCooldown ? 'Bitte kurz warten (min. 2s zwischen Befehlen)' : isEspOffline ? 'ESP ist offline' : isStale ? 'Status veraltet' : ''"
         @click="handleToggle"
       >
-        {{ commandIsPending ? 'Wird ausgeführt...' : (actuator.state ? 'Ausschalten' : 'Einschalten') }}
+        {{ commandIsPending ? 'Wird ausgeführt...' : commandInCooldown ? 'Kurz warten...' : (actuator.state ? 'Ausschalten' : 'Einschalten') }}
       </button>
     </div>
     <div

@@ -21,8 +21,12 @@ import { createLogger } from '@/utils/logger'
 import { CONTRACT_OPERATOR_ACTION, extractCorrelationId, extractRequestId, validateContractEvent } from '@/utils/contractEventMapper'
 import { websocketService } from '@/services/websocket'
 import type { ESPDevice } from '@/api/esp'
+import { listIntentOutcomes } from '@/api/intentOutcomes'
 
 const logger = createLogger('ActuatorStore')
+
+/** AUT-481: Minimum gap between manual UI actuator commands per esp:gpio (paced acceptance). */
+export const ACTUATOR_UI_COMMAND_COOLDOWN_MS = 2000
 
 /** Payload shape for actuator_status WebSocket events */
 interface ActuatorStatusPayload {
@@ -1684,8 +1688,109 @@ export const useActuatorStore = defineStore('actuator', () => {
     return !isTerminalState(intent.state)
   }
 
+  const lastCommandSentAt = new Map<string, number>()
+
+  function getActuatorCommandCooldownKey(espId: string, gpio: number): string {
+    return `${espId}:${gpio}`
+  }
+
+  function recordActuatorCommandSent(espId: string, gpio: number): void {
+    lastCommandSentAt.set(getActuatorCommandCooldownKey(espId, gpio), Date.now())
+  }
+
+  function isActuatorCommandInCooldown(espId: string, gpio: number): boolean {
+    const last = lastCommandSentAt.get(getActuatorCommandCooldownKey(espId, gpio))
+    if (last === undefined) return false
+    return Date.now() - last < ACTUATOR_UI_COMMAND_COOLDOWN_MS
+  }
+
+  function getActuatorCooldownRemainingMs(espId: string, gpio: number): number {
+    const last = lastCommandSentAt.get(getActuatorCommandCooldownKey(espId, gpio))
+    if (last === undefined) return 0
+    const remaining = ACTUATOR_UI_COMMAND_COOLDOWN_MS - (Date.now() - last)
+    return Math.max(0, remaining)
+  }
+
   function getActuatorIntent(espId: string, gpio: number): IntentRecord | undefined {
     return intents.get(getIntentKey('actuator', `${espId}:${gpio}`))
+  }
+
+  async function reconcilePendingIntentsFromServer(options?: {
+    espIds?: string[]
+    limit?: number
+  }): Promise<number> {
+    const pending = Array.from(intents.values()).filter((intent) => (
+      (intent.intentType === 'actuator' || intent.intentType === 'config') &&
+      !isTerminalState(intent.state)
+    ))
+    if (pending.length === 0) return 0
+
+    const espFilter = new Set((options?.espIds ?? []).map((value) => value.trim()).filter(Boolean))
+    const effectiveLimit = Math.max(options?.limit ?? 300, pending.length * 3)
+    const rows = await listIntentOutcomes({ limit: Math.min(1000, effectiveLimit) })
+
+    const terminalRows = rows.filter((row) => row?.is_final === true)
+    const byCorrelation = new Map<string, typeof terminalRows[number]>()
+    const byIntentId = new Map<string, typeof terminalRows[number]>()
+    for (const row of terminalRows) {
+      const correlationId = typeof row.correlation_id === 'string' ? row.correlation_id.trim() : ''
+      const intentId = typeof row.intent_id === 'string' ? row.intent_id.trim() : ''
+      if (correlationId && !byCorrelation.has(correlationId)) byCorrelation.set(correlationId, row)
+      if (intentId && !byIntentId.has(intentId)) byIntentId.set(intentId, row)
+    }
+
+    let reconciled = 0
+    for (const intent of pending) {
+      const correlationId = intent.correlationId?.trim()
+      const requestId = intent.requestId?.trim()
+      const fromCorrelation = correlationId ? byCorrelation.get(correlationId) : undefined
+      const fromRequest = requestId ? byIntentId.get(requestId) : undefined
+      const row = fromCorrelation ?? fromRequest
+      if (!row) continue
+
+      const rowEspId = typeof row.esp_id === 'string' ? row.esp_id.trim() : ''
+      if (espFilter.size > 0 && rowEspId && !espFilter.has(rowEspId)) continue
+
+      const normalizedOutcome = String(row.outcome ?? '').toLowerCase()
+      const terminalOutcome: IntentTerminalOutcome = (
+        normalizedOutcome === 'persisted' || normalizedOutcome === 'applied'
+      ) ? 'success' : 'failed'
+
+      if (intent.intentType === 'actuator' && typeof intent.gpio === 'number') {
+        const pendingKey = `${rowEspId || intent.subjectId.split(':')[0] || ''}:${intent.gpio}`
+        const pendingTimeout = pendingCommands.get(pendingKey)
+        if (pendingTimeout) {
+          clearTimeout(pendingTimeout)
+          pendingCommands.delete(pendingKey)
+        }
+        clearActuatorSnapshot(rowEspId || intent.subjectId.split(':')[0] || '', intent.gpio)
+      } else if (intent.intentType === 'config') {
+        clearConfigTimeout(intent.subjectId, correlationId, requestId)
+      }
+
+      finalizeIntent({
+        intentType: intent.intentType,
+        subjectId: intent.subjectId,
+        command: intent.command,
+        gpio: intent.gpio,
+        summary: `Reconciliation nach Reconnect: ${normalizedOutcome || 'failed'}${row.code ? ` (${row.code})` : ''}`,
+        outcome: terminalOutcome,
+        source: intent.intentType === 'actuator' ? 'actuator_response' : 'config_response',
+        correlationId: correlationId || undefined,
+        requestId: requestId || undefined,
+        issuedBy: intent.issuedBy,
+        allowTimeoutOverride: true,
+      })
+      reconciled += 1
+    }
+
+    if (reconciled > 0) {
+      logger.info('Reconciled pending intents from server outcomes', {
+        reconciled,
+        pending_before: pending.length,
+      })
+    }
+    return reconciled
   }
 
   /**
@@ -1788,8 +1893,12 @@ export const useActuatorStore = defineStore('actuator', () => {
     findConfigIntentBySubject,
     dismissConfigTimeout,
     isActuatorCommandPending,
+    recordActuatorCommandSent,
+    isActuatorCommandInCooldown,
+    getActuatorCooldownRemainingMs,
     getActuatorIntent,
     findActiveIntentByActuator,
     finalizeConflictLoserIntent,
+    reconcilePendingIntentsFromServer,
   }
 })

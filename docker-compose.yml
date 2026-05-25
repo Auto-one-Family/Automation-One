@@ -525,6 +525,8 @@ services:
       DEVICE_ID: ${ESP32_DEVICE_ID:-esp32-xiao-01}
       LOG_FORMAT: ${ESP32_LOG_FORMAT:-structured}
       RECONNECT_DELAY: ${ESP32_RECONNECT_DELAY:-5}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     logging:
       driver: json-file
       options:
