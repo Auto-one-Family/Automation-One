@@ -48,6 +48,7 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 | Sensor-/Aktor-Rohdaten | `raw_mode: true` (Skill + `.cursor/rules/firmware.mdc`); Verarbeitung auf dem Server |
 | Error-Codes | `El Trabajante/src/models/error_codes.h`, `.claude/reference/errors/ERROR_CODES.md` |
 | Pins / ADC2 vs. WiFi | `El Trabajante/src/config/hardware/esp32_dev.h`, `xiao_esp32c3.h` (u. a. `RESERVED_GPIO_PINS`, `ADC2_GPIO_PINS`, Kommentar ADC2+WiFi) |
+| Publish-Queue Größe / Pacing (AUT-481 P3) | `El Trabajante/src/tasks/publish_queue_constants.h` (SIZE=10, SHED=5), `publish_queue_policy.h` (adaptive Drain, status-defer), `mqtt_client.cpp` (`processPublishQueue`) |
 
 **Hinweis QoS:** `.cursor/rules/firmware.mdc` nennt für Aktor-Befehle QoS 2; `MQTT_TOPICS.md` listet Server→ESP teils als QoS 2; die Firmware subscribed in `main.cpp` u. a. mit **QoS 1**. Keine Annahme treffen — drei Stellen oder gezielter `Grep` nach `subscribe(` / `publish(`.
 
@@ -319,7 +320,7 @@ ON mit `duration` > 0 im MQTT-Payload → `command_duration_end_ms` gesetzt. `pr
 
 **Backends (SAFETY-RTOS M2):** `esp32_dev` nutzt standardmässig ESP-IDF `esp_mqtt_client` (eigener Task, Outbox). **`MQTT_USE_PUBSUBCLIENT=1`** (Seeed XIAO, Wokwi): PubSubClient, manueller Offline-Buffer. SDK-Header ESP-IDF: `#include <mqtt_client.h>` (Arduino-ESP32 SDK), nicht mit lokalem `services/communication/mqtt_client.h` verwechseln.
 
-**M3 (ESP-IDF):** Publishes vom Safety-Task (Core 1) gehen über `queuePublish()` → `MQTTClient::processPublishQueue()` im Communication-Task. `processPublishQueue()` existiert nur ohne `MQTT_USE_PUBSUBCLIENT`.
+**M3 (ESP-IDF):** Publishes vom Safety-Task (Core 1) gehen über `queuePublish()` → `MQTTClient::processPublishQueue()` im Communication-Task (50 ms). Queue: **10** Slots, Shed ab fill≥**5** (`publish_queue_constants.h`). Drain: default **1**/Tick, Boost **2**/Tick bei fill≥3 + gesundem Transport (`computeAdaptivePublishDrainBudget` in `publish_queue_policy.h`). `actuator/status` wird bei fill≥WATERMARK−1 deferred. `processPublishQueue()` existiert nur ohne `MQTT_USE_PUBSUBCLIENT`.
 
 ### Topic-Builder
 ```cpp

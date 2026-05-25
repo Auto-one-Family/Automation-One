@@ -25,7 +25,7 @@
 | Queue/Buffer | Tiefe/Groesse | Producer | Consumer | Verhalten bei Vollstand |
 |---|---|---|---|---|
 | `g_sensor_cmd_queue` | 10 | Core0 Router | Core1 SafetyTask | Standard non-blocking; Recovery-Intent bis 20ms `SendToFront`; sonst Drop mit Intent-Outcome |
-| `g_publish_queue` | 8 (`PUBLISH_QUEUE_SIZE`, `publish_queue.h`; historisch 15, AUT-344; AUT-362) | Core1 publish | Core0 comm task | Drop + Warnlog + CB failure |
+| `g_publish_queue` | 10 (`PUBLISH_QUEUE_SIZE`, `publish_queue_constants.h`; früher 8/AUT-362, historisch 15/AUT-344; AUT-481 P3) | Core1 publish | Core0 comm task | Shed ab fill≥5; Drop + Warnlog + CB failure; adaptive drain 1–2/Tick |
 | MQTT Outbox (ESP-IDF) | intern | Core0 publish | Broker ACK-Fluss | `msg_id=-2`, Drop |
 | `g_config_update_queue` | 5, 100ms enqueue timeout | Core0 | Core1 | timeout -> Drop + Warnlog |
 

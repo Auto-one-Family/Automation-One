@@ -1310,20 +1310,20 @@ kann `context` zusätzlich enthalten:
 {
   "event": "entered_pressure",
   "fill_level": 7,
-  "high_watermark": 8,
+  "high_watermark": 10,
   "shed_count": 0,
   "drop_count": 0,
-  "threshold": 6,
+  "threshold": 5,
   "ts": 1735818000
 }
 ```
 
 Event-Werte: `"entered_pressure"` (Backpressure aktiv), `"recovered"` (aufgehoben).
 
-**Hysterese-Regeln (IST):**
-- **`entered_pressure`:** `fill_level >= PUBLISH_QUEUE_SHED_WATERMARK` (6) und zuvor nicht im Druck-Zustand
-- **`recovered`:** zuvor im Druck-Zustand und `fill_level < PRESSURE_RECOVERED_THRESHOLD` (4)
-- Kein Emit wenn `fill_level >= PUBLISH_QUEUE_SIZE` (8) — vermeidet zusätzliche Last bei gesättigter Queue (PKG-01a)
+**Hysterese-Regeln (IST, AUT-481 P3):**
+- **`entered_pressure`:** `fill_level >= PUBLISH_QUEUE_SHED_WATERMARK` (**5**, 50 % von 10 Slots; SSOT `publish_queue_constants.h`)
+- **`recovered`:** zuvor im Druck-Zustand und `fill_level < publishQueuePressureRecoveredThreshold()` (**4**)
+- Kein Emit wenn `fill_level >= PUBLISH_QUEUE_SIZE` (**10**) — vermeidet zusätzliche Last bei gesättigter Queue (PKG-01a)
 
 **Publish-Route:** Core-0 Communication-Task, 50 ms Takt — `MQTTClient::publish` mit QoS 0; **kein** Slot in `g_publish_queue`, damit das Event sich nicht selbst blockiert.
 
@@ -4077,11 +4077,20 @@ def test_actuator_control(mock_esp32):
 
 ## Changelog
 
+### Version 2.5 (2026-05-25) - AUT-481 P3 Publish-Queue Pacing
+
+**Firmware (kein Topic-/Payload-Breaking-Change):**
+1. ✅ `PUBLISH_QUEUE_SIZE` 8→**10**, `PUBLISH_QUEUE_SHED_WATERMARK` 4→**5** (`publish_queue_constants.h`)
+2. ✅ Adaptive Drain: default 1/Tick, Boost 2/Tick bei fill≥3 + gesundem Transport (`publish_queue_policy.h`, `processPublishQueue()`)
+3. ✅ `actuator/{gpio}/status` defer bei fill≥WATERMARK−1 (supplementary; response + intent_outcome unberührt)
+4. ✅ Hysterese-Recover-Schwelle **4** via `publishQueuePressureRecoveredThreshold()` (ENTER bei fill≥5)
+5. ✅ ESP-IDF OUTBOX **16384 B** weiterhin über `sdkconfig.defaults` (`CONFIG_MQTT_OUTBOX_SIZE_BYTES`; flat `esp_mqtt_client_config_t` ohne runtime `outbox.limit`)
+
 ### Version 2.4 (2026-04-20) - PKG-01 QUEUE-PRESSURE (INC-2026-04-20-offline-mode-observability-hardening)
 
 **Neu hinzugefügt:**
 1. ✅ Topic `kaiser/god/esp/{esp_id}/system/queue_pressure` dokumentiert (Sektion 15a)
-2. ✅ Hysterese-Semantik (ENTER bei SHED_WATERMARK=6, RECOVERED bei HYSTERESIS_LOW=3)
+2. ✅ Hysterese-Semantik (ENTER bei SHED_WATERMARK=5, RECOVERED bei fill<4) — siehe AUT-481 P3 Changelog oben; historisch PKG-01a: ENTER=6/RECOVER=3
 3. ✅ Publish-Route-Hinweis: `publishDirect()` statt `queuePublish()` (Selbstverlust-Schutz)
 4. ✅ Korrelation zu `system/error` 4062 (Subcategory `MQTT_PUBLISH_BACKPRESSURE`, PKG-07)
 
