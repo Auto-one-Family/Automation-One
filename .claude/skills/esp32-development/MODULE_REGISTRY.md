@@ -834,6 +834,7 @@ struct IntentMetadata {
 
 void initIntentMetadata(IntentMetadata* metadata);
 IntentMetadata extractIntentMetadataFromPayload(const char* payload, const char* fallback_prefix);
+void tryWireFillIntentCorrelation(IntentMetadata* metadata, const char* payload);  // config-only, strstr
 bool isIntentExpired(const IntentMetadata& metadata, uint32_t current_epoch);
 bool isRecoveryIntentAllowed(const char* topic, const char* payload);
 
@@ -851,7 +852,7 @@ uint32_t getCriticalOutcomeDropCountTelemetry();  // Heartbeat / Telemetrie
 **Outcome-Werte:** `accepted` | `rejected` | `applied` | `persisted` | `failed` | `expired`
 **Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/system/intent_outcome` (QoS 1)
 **Lifecycle-Subtopic (CONFIG_PENDING-Transitions, nicht kanonisches Outcome-JSON):** `.../system/intent_outcome/lifecycle` — `TopicBuilder::buildIntentOutcomeLifecycleTopic()`, Schema `config_pending_lifecycle_v1` (`docs/runtime-readiness-policy.md`).
-**Metadaten-Extraktion:** Top-level `intent_id`/`correlation_id`/…; optional gespiegelt unter JSON-`data.*`.
+**Metadaten-Extraktion:** Top-level `intent_id`/`correlation_id`/…; optional gespiegelt unter JSON-`data.*`. Config: `tryWireFillIntentCorrelation()` wenn Filter-Parse fehlschlägt (kein 2048-B-Stack auf Aktor-Pfad).
 **Outbox-NVS:** Namespace `io_outbox` mit Ringbuffer (`head`, `count`, `s{idx}_*`) und Stats (`retry_total`, `recovered_total`, `drop_total`, `fin_ok_total`).
 `fin_ok_total` ist absichtlich kurz benannt (NVS key length limit).
 

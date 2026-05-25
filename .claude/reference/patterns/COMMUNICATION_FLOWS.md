@@ -7,11 +7,7 @@ allowed-tools: Read
 
 # Kommunikationsmuster & Datenflüsse
 
-<<<<<<< Updated upstream
-> **Version:** 2.11 | **Aktualisiert:** 2026-04-23
-=======
-> **Version:** 2.11 | **Aktualisiert:** 2026-04-10
->>>>>>> Stashed changes
+> **Version:** 2.12 | **Aktualisiert:** 2026-05-25
 > **Quellen:** Code-Traces durch ESP32, Server, Frontend
 > **Verifiziert:** ✅ Alle Pfade mit Datei:Zeile dokumentiert
 
@@ -303,6 +299,8 @@ BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensation
 **Terminale Persistenz-Authority (Server):**
 - Vor History/Audit/WS greift ein write-once/finality-Guard pro dedup-key (`correlation_id` bevorzugt).
 - Stale/Replayed `actuator_response`-Events werden idempotent quittiert und erzeugen keine doppelten Seiteneffekte.
+
+**Cross-Source GPIO-Serialisierung (Server, 2026-05):** `ActuatorService.send_command()` hält pro `esp_id:gpio` ein `asyncio.Lock` und serialisiert parallele MQTT-Publishes von REST (manual) und `logic_engine` auf demselben GPIO. Ergänzt `ConflictManager` (nur Regel-vs-Regel-Arbitration).
 
 **Frontend Contract-Integrationssignale:**
 - Unknown-Events oder Schema-Mismatch in der WS-Consumption werden als `contract_unknown_event`/`contract_mismatch` sichtbar gemacht.
