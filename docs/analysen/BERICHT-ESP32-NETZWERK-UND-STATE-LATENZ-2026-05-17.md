@@ -75,8 +75,8 @@ In den relevanten Läufen (insb. `20260517_103356`, `20260517_105021`) werden kr
 
 ### Code-Beleg (Ursachenpfad)
 
-- `El Trabajante/src/tasks/publish_queue.h`:
-  - Watermark wurde auf `PUBLISH_QUEUE_SHED_WATERMARK = 4` abgesenkt (früheres Eingreifen).
+- `El Trabajante/src/tasks/publish_queue_constants.h` (SSOT seit AUT-481 P3):
+  - Messsession: `PUBLISH_QUEUE_SHED_WATERMARK = 4`; **IST heute: 5** (50 % von 10 Slots); `PUBLISH_QUEUE_SIZE = 10`.
 - `El Trabajante/src/services/communication/mqtt_client.cpp`:
   - `publish()`: kritische Direktpublishes werden bei `fill >= watermark` in Queue umgeleitet.
   - `processPublishQueue()`: kritische Queue-Elemente werden bei Pressure mit `next_retry_ms = now + 1000` requeued und der Loop bricht ab.

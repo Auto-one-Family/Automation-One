@@ -265,10 +265,10 @@ Fehler-Codes: `JSON_PARSE_ERROR`, `VALIDATION_FAILED`, `GPIO_CONFLICT`, `NVS_WRI
 {
   "event": "entered_pressure",
   "fill_level": 7,
-  "high_watermark": 8,
+  "high_watermark": 10,
   "shed_count": 0,
   "drop_count": 0,
-  "threshold": 6,
+  "threshold": 5,
   "ts": 1735818000
 }
 ```

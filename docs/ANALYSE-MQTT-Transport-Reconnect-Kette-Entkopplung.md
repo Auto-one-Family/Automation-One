@@ -1,6 +1,6 @@
 # Analyse: MQTT-Transport, Reconnect-Kette, Heartbeat/ACK und geplante Entkopplung
 
-**Stand:** 2026-05-11  
+**Stand:** 2026-05-11 (Abschnitt 2.5 Drain-Budget: nachgezogen AUT-481 P3, 2026-05-25)  
 **Kontext:** Raspberry Pi, Repo-Wurzel `/home/robin/autoone` (Firmware `El Trabajante`, Server `El Servador/god_kaiser_server`).  
 **Ziel dieses Dokuments:** Die **gesamte** relevante Kette von TCP-Schreibpfad über Connect/Reconnect bis Heartbeat/Registrierung abbilden, **ohne** vorzeitig auf eine Einzelursache zu verengen; anschließend **Entkopplungsoptionen** mit **Systemwirkung** und **Konsistenz** zum bestehenden Design bewerten.
 
@@ -186,7 +186,7 @@ Aus der separaten Session-Analyse (Logs `esp_uart_*`, Mosquitto):
 
 **Idee:** `publishActuatorStatus` erkennt „Reconnect-Sturm-Modus“ oder generell: immer Queue.
 
-**Problem:** `queuePublish` nutzt `strlen` für Länge — passt zu JSON-Strings; aber **8 Slots**, Shedding ab Fill ≥ 6 — bei vielen Aktoren + anderer Last könnten **Status-Messages geshed** werden, was **UI/Server** verwirrt.
+**Problem:** `queuePublish` nutzt `strlen` für Länge — passt zu JSON-Strings; aber **10 Slots** (AUT-481 P3), Shedding ab Fill ≥ **5** — bei vielen Aktoren + anderer Last könnten **Status-Messages geshed/deferred** werden (`shouldDeferActuatorStatusPublish` ab fill≥4), was **UI/Server** verwirrt.
 
 | Kriterium | Bewertung |
 |-----------|-----------|
