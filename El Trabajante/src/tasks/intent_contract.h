@@ -54,6 +54,7 @@ bool publishIntentOutcome(const char* flow,
                           const String& reason,
                           bool retryable);
 void processIntentOutcomeOutbox();
+void processDeferredOutboxStatsPersist();
 
 uint32_t getSafetyEpoch();
 uint32_t bumpSafetyEpoch(const char* reason);

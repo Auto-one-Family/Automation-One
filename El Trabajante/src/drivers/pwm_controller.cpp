@@ -14,10 +14,10 @@
     #include "../config/hardware/xiao_esp32c3.h"
 #else
     #include "../config/hardware/esp32_dev.h"
+#endif
 
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "PWM";
-#endif
 
 // ============================================
 // GLOBAL INSTANCE

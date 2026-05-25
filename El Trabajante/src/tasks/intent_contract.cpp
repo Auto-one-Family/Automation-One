@@ -327,12 +327,9 @@ static void loadOutboxStatsIfNeeded() {
     loadOutboxStatsLocked();
 }
 
-static void persistOutboxStats() {
-    OutboxLockGuard guard("persist_stats");
-    if (!guard.locked()) {
-        LOG_W(IC_TAG, "Outbox stats lock timeout (persist)");
-        return;
-    }
+static bool s_outbox_stats_dirty = false;
+
+static void persistOutboxStatsLocked() {
     if (!beginOutcomeOutboxPrefs(false)) {
         return;
     }
@@ -346,6 +343,31 @@ static void persistOutboxStats() {
         markOutboxStorageDegraded("persist_stats", "stats");
     }
     s_outcome_outbox_prefs.end();
+}
+
+static void persistOutboxStats() {
+    OutboxLockGuard guard("persist_stats");
+    if (!guard.locked()) {
+        LOG_W(IC_TAG, "Outbox stats lock timeout (persist)");
+        return;
+    }
+    persistOutboxStatsLocked();
+}
+
+static void requestPersistOutboxStats() {
+    s_outbox_stats_dirty = true;
+}
+
+void processDeferredOutboxStatsPersist() {
+    if (!s_outbox_stats_dirty) {
+        return;
+    }
+    const PublishQueuePressureStats pq_stats = getPublishQueuePressureStats();
+    if (pq_stats.fill_level >= PUBLISH_QUEUE_SHED_WATERMARK) {
+        return;
+    }
+    s_outbox_stats_dirty = false;
+    persistOutboxStats();
 }
 
 static bool saveOutboxEntryAt(uint8_t idx,
@@ -1279,7 +1301,7 @@ bool publishIntentOutcome(const char* flow,
                                    "outcome publish delivered");
         }
         s_outcome_final_confirmed_count++;
-        persistOutboxStats();
+        requestPersistOutboxStats();
     }
     if (!ok) {
         if (command_flow && !terminal_outcome) {
@@ -1309,7 +1331,7 @@ bool publishIntentOutcome(const char* flow,
                 persisted_for_replay = true;
                 LOG_W(IC_TAG, "[INC-EA5484] Critical outcome persisted for replay [" + String(active_metadata.intent_id) + "]");
             }
-            persistOutboxStats();
+            requestPersistOutboxStats();
         }
     }
     return ok || persisted_for_replay;

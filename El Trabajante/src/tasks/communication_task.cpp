@@ -30,6 +30,7 @@
 #include "../models/error_codes.h"
 #include "../error_handling/circuit_breaker.h"
 #include "../error_handling/error_tracker.h"
+#include "intent_contract.h"
 
 static const char* COMM_TAG = "COMM";
 
@@ -467,6 +468,7 @@ void communicationTaskFunction(void* param) {
             }
         }
         processDeferredPostReconnectActuatorStatusSync();
+        processDeferredOutboxStatsPersist();
 #endif
 
         handleBootCounterReset();

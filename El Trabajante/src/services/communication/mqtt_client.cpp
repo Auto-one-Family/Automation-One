@@ -440,9 +440,14 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     // (e.g. calibration/manual measurement + heartbeat + responses).
     mqtt_cfg.out_buffer_size = 8192;
     // AUT-477: Flat esp_mqtt_client_config_t (Arduino-ESP32 SDK) has no runtime outbox.limit;
-    // OUTBOX capacity is compile-time via sdkconfig.defaults CONFIG_MQTT_OUTBOX_SIZE_BYTES=16384.
+    // OUTBOX capacity is compile-time in prebuilt libmqtt.a (default 4096 B).
+    // sdkconfig.defaults CONFIG_MQTT_OUTBOX_SIZE_BYTES=16384 does NOT apply to Arduino
+    // framework builds — runtime size is logged after MQTT_EVENT_CONNECTED.
 #if defined(CONFIG_MQTT_OUTBOX_SIZE_BYTES) && (CONFIG_MQTT_OUTBOX_SIZE_BYTES < 16384)
 #warning "AUT-477: CONFIG_MQTT_OUTBOX_SIZE_BYTES below 16384 — transport burst risk"
+#endif
+#if !defined(CONFIG_MQTT_OUTBOX_SIZE_BYTES)
+#pragma message("AUT-477: CONFIG_MQTT_OUTBOX_SIZE_BYTES undefined — expect prebuilt libmqtt OUTBOX=4096")
 #endif
 
     mqtt_cfg.client_id = config.client_id.c_str();
@@ -505,26 +510,27 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     // Portal recovery for MQTT failure now happens via the 5-minute persistent-failure timer
     // in loop() (CircuitBreaker OPEN → provisionManager.startAPModeForReconfig()).
     LOG_I(TAG, "[M2] ESP-IDF MQTT client started — connecting in background");
-    // [FIX2-VERIFY] Log MQTT buffer config at connect time so serial monitor confirms
-    // OUTBOX=16384 (via sdkconfig CONFIG_MQTT_OUTBOX_SIZE_BYTES) is active.
-    // out_buffer_size is the transport send buffer (runtime); OUTBOX is compile-time sdkconfig.
+    // [FIX2-VERIFY] Log MQTT buffer config at connect time.
+    // compile-time CONFIG_MQTT_* may be absent with Arduino prebuilt SDK; runtime OUTBOX
+    // is logged in MQTT_EVENT_CONNECTED via esp_mqtt_client_get_outbox_size().
     {
-        char cfg_log[160];
+        char cfg_log[192];
 #if defined(CONFIG_MQTT_OUTBOX_EXPIRED_TIMEOUT_MS)
         const unsigned outbox_expiry_ms = static_cast<unsigned>(CONFIG_MQTT_OUTBOX_EXPIRED_TIMEOUT_MS);
 #else
         const unsigned outbox_expiry_ms = 0U;
 #endif
+#if defined(CONFIG_MQTT_OUTBOX_SIZE_BYTES)
+        const unsigned outbox_compile_bytes = static_cast<unsigned>(CONFIG_MQTT_OUTBOX_SIZE_BYTES);
+#else
+        const unsigned outbox_compile_bytes = 0U;
+#endif
         snprintf(cfg_log, sizeof(cfg_log),
                  "[FIX2-VERIFY] MQTT cfg: out_buffer=%u buffer=%u "
-                 "OUTBOX=%u(sdkconfig) expiry=%ums net_timeout=%dms",
+                 "OUTBOX_COMPILE=%u runtime_logged_on_connect expiry=%ums net_timeout=%dms",
                  (unsigned)mqtt_cfg.out_buffer_size,
                  (unsigned)mqtt_cfg.buffer_size,
-#if defined(CONFIG_MQTT_OUTBOX_SIZE_BYTES)
-                 (unsigned)CONFIG_MQTT_OUTBOX_SIZE_BYTES,
-#else
-                 4096U,
-#endif
+                 outbox_compile_bytes,
                  outbox_expiry_ms,
                  mqtt_cfg.network_timeout_ms);
         LOG_I(TAG, cfg_log);
@@ -2179,6 +2185,16 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             LOG_I(TAG, String("[OUTBOX-TRACE] session_present=") +
                        String(event->session_present) +
                        " (1=broker replays pending QoS-1 state -> OUTBOX may pre-fill)");
+            if (self->mqtt_client_ != nullptr) {
+                const int runtime_outbox_bytes = esp_mqtt_client_get_outbox_size(self->mqtt_client_);
+                LOG_I(TAG, String("[FIX2-VERIFY] IDF runtime outbox_size=") +
+                           String(runtime_outbox_bytes) + " bytes");
+                if (runtime_outbox_bytes > 0 && runtime_outbox_bytes <= 4096) {
+                    LOG_W(TAG, "[AUT-477] OUTBOX at prebuilt default 4096 B — "
+                               "sdkconfig.defaults inactive (Arduino libmqtt.a); "
+                               "paced actuator bursts risk queue/outbox pressure");
+                }
+            }
 
             // Update shared connection state (atomic — read by Safety-Task Core 1)
             g_mqtt_connected.store(true);
