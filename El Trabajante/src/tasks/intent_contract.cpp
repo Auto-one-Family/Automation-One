@@ -998,8 +998,8 @@ static IntentMetadata extractIntentMetadataFromPayloadInternal(const char* paylo
     // Contract: primary fields are top-level (intent_id, correlation_id, generation, …).
     // Optional nested mirror under "data" is supported when the server wraps metadata
     // (data.intent_id, data.correlation_id, …). Top-level wins if both are present.
-    // 384 B was too tight for some large config payloads and caused false-negative
-    // "missing correlation_id" contract violations.
+    // 1024 B filter-parse: keep stack small on mqtt_task (actuator hot path).
+    // Config-only wire fallback: tryWireFillIntentCorrelation() when parse misses fields.
     StaticJsonDocument<1024> doc;
     StaticJsonDocument<256> filter;
     filter["intent_id"] = true;
@@ -1082,6 +1082,55 @@ IntentMetadata extractIntentMetadataFromPayload(const char* payload, const char*
 IntentMetadata extractIntentMetadataFromPayloadNoCorrelationFallback(const char* payload,
                                                                      const char* fallback_prefix) {
     return extractIntentMetadataFromPayloadInternal(payload, fallback_prefix, false);
+}
+
+static bool copyQuotedJsonField(const char* payload, const char* key, char* dest, size_t dest_len) {
+    if (payload == nullptr || key == nullptr || dest == nullptr || dest_len < 2) {
+        return false;
+    }
+    char needle[80];
+    const int needle_len = snprintf(needle, sizeof(needle), "\"%s\":\"", key);
+    if (needle_len <= 0 || static_cast<size_t>(needle_len) >= sizeof(needle)) {
+        return false;
+    }
+    const char* value_start = strstr(payload, needle);
+    if (value_start == nullptr) {
+        return false;
+    }
+    value_start += static_cast<size_t>(needle_len);
+    const char* value_end = strchr(value_start, '"');
+    if (value_end == nullptr || value_end <= value_start) {
+        return false;
+    }
+    size_t value_len = static_cast<size_t>(value_end - value_start);
+    if (value_len >= dest_len) {
+        value_len = dest_len - 1;
+    }
+    memcpy(dest, value_start, value_len);
+    dest[value_len] = '\0';
+    return value_len > 0;
+}
+
+void tryWireFillIntentCorrelation(IntentMetadata* metadata, const char* payload) {
+    if (metadata == nullptr || payload == nullptr || strlen(payload) == 0) {
+        return;
+    }
+    if (strlen(metadata->correlation_id) > 0) {
+        return;
+    }
+    char wire_id[CORRELATION_ID_MAX_LEN];
+    wire_id[0] = '\0';
+    if (!copyQuotedJsonField(payload, "correlation_id", wire_id, sizeof(wire_id)) &&
+        !copyQuotedJsonField(payload, "request_id", wire_id, sizeof(wire_id)) &&
+        !copyQuotedJsonField(payload, "intent_id", wire_id, sizeof(wire_id))) {
+        return;
+    }
+    strncpy(metadata->correlation_id, wire_id, sizeof(metadata->correlation_id) - 1);
+    metadata->correlation_id[sizeof(metadata->correlation_id) - 1] = '\0';
+    if (strlen(metadata->intent_id) == 0) {
+        strncpy(metadata->intent_id, wire_id, sizeof(metadata->intent_id) - 1);
+        metadata->intent_id[sizeof(metadata->intent_id) - 1] = '\0';
+    }
 }
 
 IntentInvalidationReason getIntentInvalidationReason(const IntentMetadata& metadata, uint32_t current_epoch) {

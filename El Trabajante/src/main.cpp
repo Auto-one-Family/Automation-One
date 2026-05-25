@@ -778,6 +778,7 @@ void routeIncomingMessage(const char* t, const char* p) {
     String config_topic = String(TopicBuilder::buildConfigTopic());
     if (topic == config_topic) {
         IntentMetadata metadata = extractIntentMetadataFromPayloadNoCorrelationFallback(payload.c_str(), "cfg");
+        tryWireFillIntentCorrelation(&metadata, payload.c_str());
         String corr_id = String(metadata.correlation_id);
         if (corr_id.length() == 0) {
             String fallback_corr_id = ensureCorrelationId(corr_id);

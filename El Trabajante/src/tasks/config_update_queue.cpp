@@ -402,6 +402,7 @@ void initConfigUpdateQueue() {
 
 bool queueConfigUpdate(ConfigUpdateRequest::Type type, const char* json_payload) {
     IntentMetadata metadata = extractIntentMetadataFromPayloadNoCorrelationFallback(json_payload, "cfg");
+    tryWireFillIntentCorrelation(&metadata, json_payload);
     return queueConfigUpdateWithMetadata(type, json_payload, &metadata);
 }
 
@@ -423,8 +424,9 @@ bool queueConfigUpdateWithMetadata(ConfigUpdateRequest::Type type,
         req.metadata = *metadata;
     } else {
         req.metadata = extractIntentMetadataFromPayloadNoCorrelationFallback(json_payload, "cfg");
+        tryWireFillIntentCorrelation(&req.metadata, json_payload);
     }
-    if (String(req.metadata.correlation_id).length() == 0) {
+    if (strlen(req.metadata.correlation_id) == 0) {
         ConfigResponseBuilder::publishError(
             ConfigType::SYSTEM,
             ConfigErrorCode::CONTRACT_MISSING_CORRELATION,
