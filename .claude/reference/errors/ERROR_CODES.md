@@ -27,7 +27,7 @@ allowed-tools: Read
 | 1050 | ESP32 | HARDWARE | Actuator Set fehlgeschlagen | GPIO/Verdrahtung prüfen |
 | 2001 | ESP32 | SERVICE | NVS Initialisierung fehlgeschlagen | Flash löschen |
 | 3011 | ESP32 | COMMUNICATION | MQTT Connect failed | Broker prüfen |
-| 3012 | ESP32 | COMMUNICATION | MQTT Publish failed | Verbindung prüfen |
+| 3012 | ESP32 | COMMUNICATION | MQTT Publish failed (Kontext: reason_class/topic/gpio/sensor_type) | Verbindung prüfen |
 | 4001 | ESP32 | APPLICATION | State Transition ungültig | Logs prüfen |
 | 5001 | Server | CONFIG | ESP nicht gefunden | ESP registrieren |
 | 5202 | Server | VALIDATION | Ungültiger GPIO | Gültigen GPIO verwenden |
@@ -236,7 +236,7 @@ allowed-tools: Read
 |------|------|--------------|
 | 3010 | `MQTT_INIT_FAILED` | Failed to initialize MQTT client |
 | 3011 | `MQTT_CONNECT_FAILED` | MQTT broker connection failed |
-| 3012 | `MQTT_PUBLISH_FAILED` | Failed to publish MQTT message |
+| 3012 | `MQTT_PUBLISH_FAILED` | Failed to publish MQTT message (context may include reason_class/topic/gpio/sensor_type) |
 | 3013 | `MQTT_SUBSCRIBE_FAILED` | Failed to subscribe to MQTT topic |
 | 3014 | `MQTT_DISCONNECT` | MQTT disconnected from broker |
 | 3015 | `MQTT_BUFFER_FULL` | MQTT offline buffer is full (messages dropped) |

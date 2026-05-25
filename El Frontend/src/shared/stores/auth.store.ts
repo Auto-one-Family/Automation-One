@@ -26,6 +26,17 @@ export const useAuthStore = defineStore('auth', () => {
   const isAdmin = computed(() => user.value?.role === 'admin')
   const isOperator = computed(() => ['admin', 'operator'].includes(user.value?.role || ''))
 
+  async function ensureRealtimeConnected(): Promise<void> {
+    // After login/re-auth we need a deterministic reconnect so stores
+    // (esp/actuator/logic) receive live WS events again without page reload.
+    try {
+      websocketService.disconnect()
+      await websocketService.connect()
+    } catch (err) {
+      logger.error('Realtime reconnect after auth failed', err)
+    }
+  }
+
   // Actions
   async function checkAuthStatus(): Promise<void> {
     isLoading.value = true
@@ -46,11 +57,13 @@ export const useAuthStore = defineStore('auth', () => {
       if (accessToken.value) {
         try {
           user.value = await authApi.me()
+          await ensureRealtimeConnected()
         } catch {
           // Token might be expired, try refresh ONCE
           if (refreshToken.value) {
             try {
               await refreshTokens()
+              await ensureRealtimeConnected()
             } catch {
               // Refresh also failed - clear auth silently, don't throw
               clearAuth()
@@ -78,6 +91,7 @@ export const useAuthStore = defineStore('auth', () => {
       setTokens(response.tokens.access_token, response.tokens.refresh_token)
       // User is included in login response
       user.value = response.user
+      await ensureRealtimeConnected()
     } catch (err: unknown) {
       error.value = formatUiApiError(toUiApiError(err, 'Login fehlgeschlagen'))
       throw err
@@ -97,6 +111,7 @@ export const useAuthStore = defineStore('auth', () => {
       // User is included in setup response
       user.value = response.user
       setupRequired.value = false
+      await ensureRealtimeConnected()
     } catch (err: unknown) {
       error.value = formatUiApiError(toUiApiError(err, 'Setup fehlgeschlagen'))
       throw err

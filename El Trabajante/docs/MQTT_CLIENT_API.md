@@ -285,6 +285,17 @@ if (mqttClient.isAnonymousMode()) {
 
 ### Publishing
 
+#### `PublishFailureReasonClass`
+**Beschreibung:** Kanonische Klassifikation des letzten Publish-Fehlschlags.  
+**Werte:**
+- `None`
+- `CircuitBreakerOpen`
+- `QueueShed`
+- `OutboxFull`
+- `TransportError`
+
+---
+
 #### `bool publish(const String& topic, const String& payload, uint8_t qos = 1)`
 **Beschreibung:** Publiziert MQTT-Message  
 **Parameter:**
@@ -310,6 +321,18 @@ String topic = "kaiser/god/esp/ESP_12AB34CD/sensor/4/data";
 String payload = "{\"value\":21.5}";
 mqttClient.publish(topic, payload, 1);
 ```
+
+---
+
+#### `PublishFailureReasonClass getLastPublishFailureReasonClass() const`
+**Beschreibung:** Liefert die letzte Publish-Fehlerklasse als Enum.  
+**Rückgabe:** Letzte Fehlerklasse (`PublishFailureReasonClass`), bei Erfolg `None`.
+
+---
+
+#### `const char* getLastPublishFailureReasonClassName() const`
+**Beschreibung:** Liefert die letzte Publish-Fehlerklasse als kanonischen String.  
+**Rückgabe:** Einer von `cb_open`, `queue_shed`, `outbox_full`, `transport_error`.
 
 ---
 

@@ -1262,6 +1262,13 @@ Libraries werden über MQTT in Chunks übertragen, da MQTT-Payloads limitiert si
 }
 ```
 
+**AUT-454 (additiver Kontext für 3012):** Bei `error_code=3012` (`MQTT_PUBLISH_FAILED`)
+kann `context` zusätzlich enthalten:
+- `topic` (string): betroffener MQTT-Topic
+- `gpio` (int): betroffener GPIO (falls vorhanden)
+- `sensor_type` (string): Sensor-Typ (falls vorhanden)
+- `reason_class` (string): kanonischer Grundklasse (`cb_open`, `queue_shed`, `outbox_full`, `transport_error`)
+
 **Error-Code Ranges (siehe error_codes.h):**
 - `1000-1099`: HARDWARE (GPIO, I2C, OneWire, PWM, Sensor, Actuator, DS18B20)
 - `2000-2599`: SERVICE (NVS, Config, Logger, Storage, Subzone)
