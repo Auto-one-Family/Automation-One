@@ -221,10 +221,12 @@ export const sensorsApi = {
    */
   async triggerMeasurement(
     espId: string,
-    gpio: number
+    gpio: number,
+    options: TriggerMeasurementOptions = {},
   ): Promise<TriggerMeasurementResponse> {
     const response = await api.post<TriggerMeasurementResponse>(
-      `/sensors/${espId}/${gpio}/measure`
+      `/sensors/${espId}/${gpio}/measure`,
+      Object.keys(options).length > 0 ? options : undefined,
     )
     return response.data
   },
@@ -277,6 +279,13 @@ export const sensorsApi = {
 // ===========================================================================
 // Types for On-Demand Measurement (Phase 2D)
 // ===========================================================================
+
+export interface TriggerMeasurementOptions {
+  sensor_type?: string
+  sample_count?: number
+  sample_delay_ms?: number
+  timeout_ms?: number
+}
 
 export interface TriggerMeasurementResponse {
   success: boolean

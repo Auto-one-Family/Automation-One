@@ -61,6 +61,7 @@ from ...schemas import (
     SensorReading,
     SensorStats,
     SensorStatsResponse,
+    TriggerMeasurementRequest,
     TriggerMeasurementResponse,
 )
 from ...schemas.alert_config import (
@@ -1752,6 +1753,7 @@ async def trigger_measurement(
     db: DBSession,
     current_user: OperatorUser,
     sensor_service: Annotated[SensorService, Depends(get_sensor_service)],
+    body: TriggerMeasurementRequest | None = None,
 ) -> TriggerMeasurementResponse:
     """
     Trigger a manual measurement for a sensor.
@@ -1772,9 +1774,14 @@ async def trigger_measurement(
         TriggerMeasurementResponse with request tracking info
     """
     try:
+        measure_opts = body or TriggerMeasurementRequest()
         result = await sensor_service.trigger_measurement(
             esp_id=esp_id,
             gpio=gpio,
+            sensor_type=measure_opts.sensor_type,
+            sample_count=measure_opts.sample_count,
+            sample_delay_ms=measure_opts.sample_delay_ms,
+            timeout_ms=measure_opts.timeout_ms,
         )
         return TriggerMeasurementResponse(**result)
 

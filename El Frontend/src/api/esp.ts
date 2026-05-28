@@ -136,7 +136,8 @@ export interface ESPDeviceListResponse {
 }
 
 export interface ESPDeviceUpdate {
-  name?: string
+  /** Explicit `null` clears the device name in the DB (omit field = no change). */
+  name?: string | null
   zone_id?: string | null
   zone_name?: string | null
   is_zone_master?: boolean

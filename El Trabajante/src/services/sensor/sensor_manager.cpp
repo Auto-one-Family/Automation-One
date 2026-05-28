@@ -18,6 +18,8 @@
 #include "../../models/watchdog_types.h"
 #include "../../models/sensor_types.h"
 #include "../../models/sensor_registry.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "SENSOR";
@@ -58,6 +60,39 @@ bool isAnalogProbeSensorType(const String& sensor_type) {
            lower.indexOf("ec") >= 0 ||
            lower.indexOf("moisture") >= 0 ||
            lower.indexOf("soil") >= 0;
+}
+
+bool isHighPrecisionAnalogProbe(const String& sensor_type) {
+    String lower = sensor_type;
+    lower.toLowerCase();
+    return lower.indexOf("ph") >= 0 || lower.indexOf("ec") >= 0;
+}
+
+void resolveAnalogProbeSampleParams(const String& sensor_type, uint8_t& sample_count,
+                                    uint16_t& sample_delay_ms) {
+    if (sample_count == 0) {
+        sample_count = isHighPrecisionAnalogProbe(sensor_type) ? 30 : 3;
+    }
+    if (sample_delay_ms == 0) {
+        sample_delay_ms = isHighPrecisionAnalogProbe(sensor_type) ? 100 : 200;
+    }
+}
+
+float computePopulationStdDev(const uint32_t* values, uint8_t count) {
+    if (count < 2) {
+        return 0.0f;
+    }
+    float sum = 0.0f;
+    for (uint8_t i = 0; i < count; i++) {
+        sum += static_cast<float>(values[i]);
+    }
+    const float mean = sum / static_cast<float>(count);
+    float variance_sum = 0.0f;
+    for (uint8_t i = 0; i < count; i++) {
+        const float diff = static_cast<float>(values[i]) - mean;
+        variance_sum += diff * diff;
+    }
+    return sqrtf(variance_sum / static_cast<float>(count));
 }
 }  // namespace
 
@@ -849,7 +884,14 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
 
 bool SensorManager::measureAnalogProbeMedian(SensorConfig* config, SensorReading& reading_out,
                                              uint8_t sample_count, uint16_t sample_delay_ms) {
-    if (!initialized_ || !config || sample_count == 0) {
+    if (!initialized_ || !config) {
+        reading_out.valid = false;
+        reading_out.error_message = "Analog median measurement not possible";
+        return false;
+    }
+
+    resolveAnalogProbeSampleParams(config->sensor_type, sample_count, sample_delay_ms);
+    if (sample_count == 0) {
         reading_out.valid = false;
         reading_out.error_message = "Analog median measurement not possible";
         return false;
@@ -861,16 +903,18 @@ bool SensorManager::measureAnalogProbeMedian(SensorConfig* config, SensorReading
     };
 
     // Keep bounded stack usage (firmware task stack is limited)
-    static constexpr uint8_t MAX_ANALOG_MEDIAN_SAMPLES = 5;
+    static constexpr uint8_t MAX_ANALOG_MEDIAN_SAMPLES = 32;
     uint8_t bounded_count = sample_count > MAX_ANALOG_MEDIAN_SAMPLES ? MAX_ANALOG_MEDIAN_SAMPLES : sample_count;
     AnalogSample samples[MAX_ANALOG_MEDIAN_SAMPLES];
+    uint32_t raw_values[MAX_ANALOG_MEDIAN_SAMPLES];
 
     for (uint8_t i = 0; i < bounded_count; i++) {
         if (i > 0 && sample_delay_ms > 0) {
-            delay(sample_delay_ms);
+            vTaskDelay(pdMS_TO_TICKS(sample_delay_ms));
         }
         uint32_t raw = readRawAnalog(config->gpio);
         samples[i].raw_value = raw;
+        raw_values[i] = raw;
         samples[i].quality = validateAdcReading(raw, config->gpio);
     }
 
@@ -886,6 +930,11 @@ bool SensorManager::measureAnalogProbeMedian(SensorConfig* config, SensorReading
     }
 
     AnalogSample median = samples[bounded_count / 2];
+    const float adc_stddev = computePopulationStdDev(raw_values, bounded_count);
+    const float pct_threshold = static_cast<float>(median.raw_value) * 0.01f;
+    const float stability_threshold = pct_threshold > 1.0f ? pct_threshold : 1.0f;
+    const bool stable = adc_stddev <= stability_threshold;
+
     String server_sensor_type = getServerSensorType(config->sensor_type);
     LocalConversion conv = applyLocalConversion(server_sensor_type, median.raw_value);
 
@@ -900,12 +949,18 @@ bool SensorManager::measureAnalogProbeMedian(SensorConfig* config, SensorReading
     reading_out.valid = true;
     reading_out.error_message = "";
     reading_out.i2c_address = config->i2c_address;
+    reading_out.sample_count = bounded_count;
+    reading_out.adc_stddev = adc_stddev;
+    reading_out.stable = stable;
+    reading_out.has_sampling_stats = bounded_count > 1;
 
     config->last_raw_value = median.raw_value;
     config->last_reading = millis();
 
     LOG_I(TAG, "SensorManager: Analog median " + String(bounded_count) + " samples, raw=" +
-               String(median.raw_value) + " (GPIO " + String(config->gpio) + ")");
+               String(median.raw_value) + ", stddev=" + String(adc_stddev, 2) +
+               ", stable=" + String(stable ? "true" : "false") +
+               " (GPIO " + String(config->gpio) + ")");
     return true;
 }
 
@@ -1539,7 +1594,9 @@ void SensorManager::setMeasurementInterval(unsigned long interval_ms) {
 // ============================================
 // MANUAL MEASUREMENT (PHASE 2C - On-Demand)
 // ============================================
-ManualMeasurementResult SensorManager::triggerManualMeasurement(uint8_t gpio, uint32_t timeout_ms) {
+ManualMeasurementResult SensorManager::triggerManualMeasurement(uint8_t gpio, uint32_t timeout_ms,
+                                                                uint8_t sample_count,
+                                                                uint16_t sample_delay_ms) {
     ManualMeasurementResult result;
     result.reason_code = "UNKNOWN";
 
@@ -1640,7 +1697,7 @@ ManualMeasurementResult SensorManager::triggerManualMeasurement(uint8_t gpio, ui
         SensorReading reading;
         if (isAnalogProbeSensorType(config->sensor_type)) {
             // AUT-441: Continuous and manual paths share exactly one median implementation.
-            if (!measureAnalogProbeMedian(config, reading)) {
+            if (!measureAnalogProbeMedian(config, reading, sample_count, sample_delay_ms)) {
                 LOG_E(TAG, "SensorManager: Manual analog median measurement failed for GPIO " + String(gpio));
                 result.reason_code = "MEASUREMENT_FAILED";
                 manual_measure_busy_[sensor_index] = false;  // AUT-303: release busy flag
@@ -1671,6 +1728,10 @@ ManualMeasurementResult SensorManager::triggerManualMeasurement(uint8_t gpio, ui
         result.quality = reading.quality;
         result.raw_value = static_cast<int32_t>(reading.raw_value);
         result.sensor_type = reading.sensor_type;
+        result.sample_count = reading.sample_count;
+        result.adc_stddev = reading.adc_stddev;
+        result.stable = reading.stable;
+        result.has_sampling_stats = reading.has_sampling_stats;
         if (result.timeout_reached) {
             result.reason_code = "MEASURE_TIMEOUT";
         } else if (!publish_ok) {
@@ -1966,6 +2027,15 @@ String SensorManager::buildMQTTPayload(const SensorReading& reading) const {
     // raw_mode from Reading (Server-Centric: true = server processes RAW data)
     payload += "\"raw_mode\":";
     payload += (reading.raw_mode ? "true" : "false");
+
+    if (reading.has_sampling_stats && reading.sample_count > 1) {
+        payload += ",\"sample_count\":";
+        payload += String(reading.sample_count);
+        payload += ",\"adc_stddev\":";
+        payload += String(reading.adc_stddev, 2);
+        payload += ",\"stable\":";
+        payload += (reading.stable ? "true" : "false");
+    }
     
     // OneWire Address (for device identification on shared bus)
     if (!reading.onewire_address.isEmpty()) {

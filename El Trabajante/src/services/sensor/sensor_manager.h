@@ -26,6 +26,10 @@ struct ManualMeasurementResult {
     String quality = "unknown";
     int32_t raw_value = 0;
     String sensor_type;
+    uint8_t sample_count = 0;
+    float adc_stddev = 0.0f;
+    bool stable = false;
+    bool has_sampling_stats = false;
 };
 
 class SensorManager {
@@ -110,7 +114,9 @@ public:
     // ✅ Phase 2C: Trigger manual measurement for on-demand sensors
     // Returns full outcome contract projection for queue-worker mapping.
     // timeout_ms: Max duration before aborting (E-P3 Timeout-Guard, default 5s)
-    ManualMeasurementResult triggerManualMeasurement(uint8_t gpio, uint32_t timeout_ms = 5000);
+    ManualMeasurementResult triggerManualMeasurement(uint8_t gpio, uint32_t timeout_ms = 5000,
+                                                     uint8_t sample_count = 0,
+                                                     uint16_t sample_delay_ms = 0);
 
     // ============================================
     // RAW DATA READING METHODS (PHASE 4)
@@ -219,7 +225,7 @@ private:
 
     // AUT-441: Canonical median-based analog probe measurement (shared by continuous + manual paths)
     bool measureAnalogProbeMedian(SensorConfig* config, SensorReading& reading_out,
-                                  uint8_t sample_count = 3, uint16_t sample_delay_ms = 200);
+                                  uint8_t sample_count = 0, uint16_t sample_delay_ms = 0);
     
     // Publish sensor reading via MQTT
     bool publishSensorReading(const SensorReading& reading);

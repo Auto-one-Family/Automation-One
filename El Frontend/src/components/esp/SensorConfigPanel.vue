@@ -123,8 +123,42 @@ const scheduleConfig = ref<{ type: string; expression: string } | null>(null)
 // Sensor-Lifecycle: Freshness & Calibration (AUT-39)
 const measurementFreshnessHours = ref<number | null>(null)
 const calibrationIntervalDays = ref<number | null>(null)
+const calibrationData = ref<Record<string, unknown> | null>(null)
 
-/** Cron presets for scheduled mode (matches EditSensorModal) */
+const calibrationStatusSummary = computed(() => {
+  const data = calibrationData.value
+  if (!data || typeof data !== 'object') {
+    return { calibrated: false, label: 'Nicht kalibriert — Werte unzuverlässig' }
+  }
+  const derived = (data.derived as Record<string, unknown> | undefined) ?? data
+  const calibratedAt = (data.metadata as Record<string, unknown> | undefined)?.calibrated_at
+    ?? data.calibrated_at
+    ?? derived.calibrated_at
+  const cellFactor = derived.cell_factor
+  if (calibratedAt || cellFactor != null) {
+    return {
+      calibrated: true,
+      label: calibratedAt
+        ? `Kalibriert ${formatRelativeTime(String(calibratedAt))}`
+        : 'Kalibriert',
+      cellFactor: typeof cellFactor === 'number' ? cellFactor : null,
+      calibratedAt: calibratedAt ? String(calibratedAt) : null,
+    }
+  }
+  return { calibrated: false, label: 'Nicht kalibriert — Werte unzuverlässig' }
+})
+
+function openCalibrationWizard(): void {
+  router.push({
+    path: '/calibration',
+    query: {
+      espId: props.espId,
+      gpio: String(props.gpio),
+      sensorType: props.sensorType,
+      skipSelect: '1',
+    },
+  })
+}
 const CRON_PRESETS = [
   { label: 'Jede Stunde', value: '0 * * * *', description: 'Zur vollen Stunde' },
   { label: 'Alle 6 Stunden', value: '0 */6 * * *', description: '00:00, 06:00, 12:00, 18:00' },
@@ -469,6 +503,7 @@ onMounted(async () => {
       // Sensor-Lifecycle: Freshness & Calibration (AUT-39)
       measurementFreshnessHours.value = (configExt.measurement_freshness_hours as number) ?? null
       calibrationIntervalDays.value = (configExt.calibration_interval_days as number) ?? null
+      calibrationData.value = (config.calibration as Record<string, unknown> | null) ?? null
 
       if (config.threshold_min != null) alarmLow.value = roundToDecimals(config.threshold_min, 2)
       if (config.warning_min != null) warnLow.value = roundToDecimals(config.warning_min, 2)
@@ -1111,6 +1146,34 @@ async function handleSave() {
               Leer lassen = keine automatische Erinnerung.
             </span>
           </div>
+
+          <div
+            v-if="sensorType.toLowerCase() === 'ec'"
+            class="sensor-config__calibration-status"
+          >
+            <div class="sensor-config__calibration-status-row">
+              <span class="sensor-config__label">Kalibrierungsstatus</span>
+              <span class="sensor-config__calibration-status-value">
+                {{ calibrationStatusSummary.label }}
+              </span>
+            </div>
+            <div
+              v-if="calibrationStatusSummary.cellFactor != null"
+              class="sensor-config__calibration-status-row"
+            >
+              <span class="sensor-config__label">Zellfaktor</span>
+              <span class="sensor-config__calibration-status-value">
+                {{ calibrationStatusSummary.cellFactor }}
+              </span>
+            </div>
+            <button
+              type="button"
+              class="sensor-config__calibrate-btn"
+              @click="openCalibrationWizard"
+            >
+              EC-Sensor kalibrieren
+            </button>
+          </div>
         </div>
       </AccordionSection>
 
@@ -1701,6 +1764,21 @@ async function handleSave() {
   font-variant-numeric: tabular-nums;
   color: var(--color-success);
   font-size: var(--text-xs);
+}
+
+.sensor-config__calibrate-btn {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.sensor-config__calibrate-btn:hover {
+  border-color: var(--color-iridescent-1);
 }
 
 .sensor-config__info-box {

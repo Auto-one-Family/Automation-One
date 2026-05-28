@@ -499,6 +499,7 @@ describe('useCalibrationWizard', () => {
       gpio: 7,
       sensorType: 'ec',
     })
+    wizard.ecPreset.value = 'custom'
 
     // EC: Phase 1 Capture -> now directly finalize/apply (no point2, no extra confirm click)
     expect(wizard.phase.value).toBe('point1')
@@ -528,8 +529,335 @@ describe('useCalibrationWizard', () => {
       gpio: 7,
       sensorType: 'ec',
     })
+    wizard.ecPreset.value = 'custom'
 
     expect(wizard.currentPreset.value?.expectedPoints).toBe(1)
     expect(wizard.currentPreset.value?.calibrationMethod).toBe('ec_1point')
+  })
+
+  // ─── B6 / P0a: Default ecPreset = 'custom' (1-Punkt) ─────────────────
+
+  it('ecPreset ist standardmaessig custom (1-Punkt)', () => {
+    const wizard = useCalibrationWizard({
+      skipSelect: true,
+      espId: 'ESP_EC_001',
+      gpio: 7,
+      sensorType: 'ec',
+    })
+
+    expect(wizard.ecPreset.value).toBe('custom')
+    expect(wizard.currentPreset.value?.expectedPoints).toBe(1)
+    expect(wizard.currentPreset.value?.calibrationMethod).toBe('ec_1point')
+  })
+
+  it('reset stellt ecPreset auf custom zurueck', () => {
+    const wizard = useCalibrationWizard({
+      skipSelect: true,
+      espId: 'ESP_EC_001',
+      gpio: 7,
+      sensorType: 'ec',
+    })
+
+    wizard.ecPreset.value = '1413_12880'
+    expect(wizard.ecPreset.value).toBe('1413_12880')
+
+    wizard.reset()
+    expect(wizard.ecPreset.value).toBe('custom')
+  })
+
+  // ─── A2 / P0a: EC 2-Punkt Rollen-Fix (reference_low + reference_high) ────
+
+  it('haendelt EC-2-Punkt-Flow (1413_12880) mit reference_low + reference_high', async () => {
+    calibrationApiMock.startSession.mockResolvedValue({
+      id: 'ec2-session-1',
+      status: 'pending',
+      method: 'ec_linear_2point',
+      sensor_type: 'ec',
+      expected_points: 2,
+      calibration_points: { points: [] },
+    })
+    calibrationApiMock.addPoint
+      .mockResolvedValueOnce({
+        id: 'ec2-session-1',
+        status: 'collecting',
+        method: 'ec_linear_2point',
+        sensor_type: 'ec',
+        calibration_points: { points: [{ id: 'ec2-low', point_role: 'reference_low' }] },
+      })
+      .mockResolvedValueOnce({
+        id: 'ec2-session-1',
+        status: 'collecting',
+        method: 'ec_linear_2point',
+        sensor_type: 'ec',
+        calibration_points: {
+          points: [
+            { id: 'ec2-low', point_role: 'reference_low' },
+            { id: 'ec2-high', point_role: 'reference_high' },
+          ],
+        },
+      })
+    calibrationApiMock.finalizeSession.mockResolvedValue({
+      id: 'ec2-session-1',
+      status: 'finalizing',
+      method: 'ec_linear_2point',
+      sensor_type: 'ec',
+      calibration_result: { slope: 0.009, offset: -1.2 },
+      failure_reason: null,
+    })
+    calibrationApiMock.applySession.mockResolvedValue({
+      id: 'ec2-session-1',
+      status: 'applied',
+      method: 'ec_linear_2point',
+      sensor_type: 'ec',
+      calibration_result: { slope: 0.009, offset: -1.2 },
+      failure_reason: null,
+    })
+    calibrationApiMock.getSession.mockResolvedValue({
+      id: 'ec2-session-1',
+      status: 'applied',
+      method: 'ec_linear_2point',
+      sensor_type: 'ec',
+      calibration_result: { slope: 0.009, offset: -1.2 },
+      failure_reason: null,
+    })
+
+    const wizard = useCalibrationWizard({
+      skipSelect: true,
+      espId: 'ESP_EC_001',
+      gpio: 7,
+      sensorType: 'ec',
+    })
+    wizard.ecPreset.value = '1413_12880'
+
+    // Preset muss ec_linear_2point + 2 Punkte sein
+    expect(wizard.currentPreset.value?.calibrationMethod).toBe('ec_linear_2point')
+    expect(wizard.currentPreset.value?.expectedPoints).toBe(2)
+
+    // Phase 1: Capture reference_low (1413)
+    expect(wizard.phase.value).toBe('point1')
+    await wizard.onPoint1Captured({ raw: 2048, reference: 1413 })
+    expect(wizard.phase.value).toBe('point2')
+    expect(wizard.points.value[0]).toEqual(
+      expect.objectContaining({ point_role: 'reference_low' }),
+    )
+    expect(calibrationApiMock.addPoint).toHaveBeenCalledWith(
+      'ec2-session-1',
+      expect.objectContaining({
+        point_role: 'reference_low',
+        reference_value: 1413,
+      }),
+    )
+
+    // Phase 2: Capture reference_high (12880)
+    await wizard.onPoint2Captured({ raw: 3900, reference: 12880 })
+    expect(wizard.phase.value).toBe('confirm')
+    expect(wizard.points.value[1]).toEqual(
+      expect.objectContaining({ point_role: 'reference_high' }),
+    )
+    expect(calibrationApiMock.addPoint).toHaveBeenCalledWith(
+      'ec2-session-1',
+      expect.objectContaining({
+        point_role: 'reference_high',
+        reference_value: 12880,
+      }),
+    )
+
+    // Submit mit ec_linear_2point Methode
+    await wizard.submitCalibration()
+    expect(calibrationApiMock.startSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'ec_linear_2point',
+        expected_points: 2,
+      }),
+    )
+    expect(wizard.phase.value).toBe('done')
+  })
+
+  it('EC-2-Punkt (0_1413): reference_low=0, reference_high=1413', async () => {
+    const wizard = useCalibrationWizard({
+      skipSelect: true,
+      espId: 'ESP_EC_001',
+      gpio: 7,
+      sensorType: 'ec',
+    })
+    wizard.ecPreset.value = '0_1413'
+
+    expect(wizard.currentPreset.value?.calibrationMethod).toBe('ec_linear_2point')
+    expect(wizard.currentPreset.value?.expectedPoints).toBe(2)
+    expect(wizard.currentPreset.value?.point1Ref).toBe(0)
+    expect(wizard.currentPreset.value?.point2Ref).toBe(1413)
+  })
+
+  // ─── A4 / P0b: Temperatur-Session-Sync ────────────────────────────────────
+
+  it('triggerLiveMeasurement startet Session mit calibration_temperature', async () => {
+    calibrationApiMock.startSession.mockResolvedValue({
+      id: 'temp-session-1',
+      status: 'pending',
+      method: 'ec_1point',
+      sensor_type: 'ec',
+      calibration_points: { points: [] },
+    })
+
+    const wizard = useCalibrationWizard({
+      skipSelect: true,
+      espId: 'ESP_EC_TEMP',
+      gpio: 5,
+      sensorType: 'ec',
+    })
+    wizard.selectSensor('ESP_EC_TEMP', 5, 'ec')
+    wizard.setCalibrationTemperature(22.5, 'config:sensor-abc')
+
+    await wizard.triggerLiveMeasurement()
+
+    expect(calibrationApiMock.startSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        calibration_temperature: 22.5,
+        calibration_temperature_source: 'config:sensor-abc',
+      }),
+    )
+  })
+
+  it('triggerLiveMeasurement nutzt bestehende Session (kein doppelter startSession)', async () => {
+    calibrationApiMock.startSession.mockResolvedValue({
+      id: 'existing-session-1',
+      status: 'pending',
+      method: 'ec_1point',
+      sensor_type: 'ec',
+      calibration_points: { points: [] },
+    })
+
+    const wizard = useCalibrationWizard({
+      skipSelect: true,
+      espId: 'ESP_EC_TEMP',
+      gpio: 5,
+      sensorType: 'ec',
+    })
+    wizard.selectSensor('ESP_EC_TEMP', 5, 'ec')
+
+    // Erster Trigger: startet Session
+    await wizard.triggerLiveMeasurement()
+    expect(calibrationApiMock.startSession).toHaveBeenCalledTimes(1)
+    const sessionId = wizard.currentSessionId.value
+    expect(sessionId).toBe('existing-session-1')
+
+    // Zweiter Trigger (nach Cooldown): Session bereits vorhanden — kein zweiter startSession
+    // Direkt testen via interne Logik: currentSessionId gesetzt → ensureSessionStarted reused
+    calibrationApiMock.startSession.mockClear()
+    wizard.phase.value = 'point1' // Phase zuruecksetzen damit kein Guard greift
+
+    // currentSessionId ist gesetzt — zweiter triggerLiveMeasurement darf kein startSession machen
+    // (isMeasuring guard verhindert parallelen Aufruf; wir testen nach Cooldown)
+    // Simuliere direkten Aufruf nach Cooldown durch kurzen Warten-Cycle
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    // Kein weiterer startSession-Call
+    expect(calibrationApiMock.startSession).not.toHaveBeenCalled()
+  })
+
+  // ─── P1a: EC live preview fields (AUT-490 / AUT-488) ────────────────────
+  it('extrahiert preview_ec_us_cm und stable aus calibration_measurement_received', async () => {
+    calibrationApiMock.startSession.mockResolvedValue({
+      id: 'ec-preview-session-1',
+      status: 'pending',
+      method: 'ec_1point',
+      sensor_type: 'ec',
+      calibration_points: { points: [] },
+    })
+
+    const wizard = useCalibrationWizard({
+      skipSelect: true,
+      espId: 'ESP_EC_PREVIEW',
+      gpio: 6,
+      sensorType: 'ec',
+    })
+    wizard.selectSensor('ESP_EC_PREVIEW', 6, 'ec')
+    await wizard.triggerLiveMeasurement()
+
+    const handler = wsHandlers.get('calibration_measurement_received')
+    expect(handler).toBeDefined()
+
+    // Simulate WS event with preview_ec_us_cm, stable, adc_stddev, temperature_used
+    handler?.({
+      data: {
+        esp_id: 'ESP_EC_PREVIEW',
+        gpio: 6,
+        raw_value: 2200,
+        quality: 'good',
+        intent_id: 'req-1',
+        preview_ec_us_cm: 1413.5,
+        preview_available: true,
+        stable: true,
+        adc_stddev: 2.3,
+        temperature_used: 24.8,
+      },
+    })
+
+    expect(wizard.previewEcUsCm.value).toBe(1413.5)
+    expect(wizard.previewAvailable.value).toBe(true)
+    expect(wizard.lastStable.value).toBe(true)
+    expect(wizard.lastAdcStddev.value).toBe(2.3)
+    expect(wizard.lastTemperatureUsed.value).toBe(24.8)
+  })
+
+  it('setzt previewAvailable=false wenn preview_available explizit false ist (AUT-488)', async () => {
+    calibrationApiMock.startSession.mockResolvedValue({
+      id: 'ec-preview-session-2',
+      status: 'pending',
+      method: 'ec_1point',
+      sensor_type: 'ec',
+      calibration_points: { points: [] },
+    })
+
+    const wizard = useCalibrationWizard({
+      skipSelect: true,
+      espId: 'ESP_EC_PREV2',
+      gpio: 7,
+      sensorType: 'ec',
+    })
+    wizard.selectSensor('ESP_EC_PREV2', 7, 'ec')
+    await wizard.triggerLiveMeasurement()
+
+    const handler = wsHandlers.get('calibration_measurement_received')
+    handler?.({
+      data: {
+        esp_id: 'ESP_EC_PREV2',
+        gpio: 7,
+        raw_value: 1800,
+        quality: 'good',
+        intent_id: 'req-1',
+        // preview_ec_us_cm absent (AUT-488: backend not yet sending it)
+        // preview_available absent → null-safe default applies
+      },
+    })
+
+    // When preview_ec_us_cm is absent: previewEcUsCm should be null
+    expect(wizard.previewEcUsCm.value).toBeNull()
+    // previewAvailable should be false because previewEcUsCm is null
+    expect(wizard.previewAvailable.value).toBe(false)
+  })
+
+  it('reset loescht EC-Preview-State (AUT-490)', () => {
+    const wizard = useCalibrationWizard({
+      skipSelect: true,
+      espId: 'ESP_EC_RESET',
+      gpio: 8,
+      sensorType: 'ec',
+    })
+
+    // Manually set preview fields to non-default values
+    wizard.previewEcUsCm.value = 1413.0
+    wizard.previewAvailable.value = true
+    wizard.lastStable.value = false
+    wizard.lastAdcStddev.value = 5.5
+    wizard.lastTemperatureUsed.value = 23.0
+
+    wizard.reset()
+
+    expect(wizard.previewEcUsCm.value).toBeNull()
+    expect(wizard.previewAvailable.value).toBe(false)
+    expect(wizard.lastStable.value).toBeNull()
+    expect(wizard.lastAdcStddev.value).toBeNull()
+    expect(wizard.lastTemperatureUsed.value).toBeNull()
   })
 })

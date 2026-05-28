@@ -272,6 +272,35 @@ const atcReadFailed = computed<boolean>(() => {
   return meta.temp_source === 'read_failed' || meta.temp_source === 'temp_read_failed'
 })
 
+const stabilityBadge = computed<{
+  level: 'good' | 'warning'
+  label: string
+  detail?: string
+} | null>(() => {
+  const sType = props.sensor.sensor_type.toLowerCase()
+  if (!sType.includes('ec') && !sType.includes('ph')) return null
+  const meta = props.sensor.metadata
+  if (!meta || typeof meta !== 'object' || meta.sample_count == null) return null
+  const ecStddev = typeof meta.ec_stddev === 'number' ? meta.ec_stddev : null
+  const adcStddev = typeof meta.adc_stddev === 'number' ? meta.adc_stddev : null
+  if (meta.stable === true) {
+    return {
+      level: 'good',
+      label: 'Stabil',
+      detail: ecStddev != null ? `σ ${ecStddev} µS/cm` : undefined,
+    }
+  }
+  return {
+    level: 'warning',
+    label: 'Instabil',
+    detail: ecStddev != null
+      ? `σ ${ecStddev} µS/cm`
+      : adcStddev != null
+        ? `ADC σ ${adcStddev}`
+        : undefined,
+  }
+})
+
 // On-demand measurement (AUT-298)
 const isOnDemand = computed(() => props.sensor.operating_mode === 'on_demand')
 // AUT-300: Stale-due uses server flag (measurement_freshness_hours threshold), not frontend 120s threshold
@@ -341,7 +370,12 @@ async function triggerMeasure(): Promise<void> {
   preMeasureLastRead = props.sensor.last_read ?? null
   preMeasureLastEventAt = props.sensor.last_event_at ?? null
   try {
-    await sensorsApi.triggerMeasurement(props.sensor.esp_id, props.sensor.gpio)
+    await sensorsApi.triggerMeasurement(props.sensor.esp_id, props.sensor.gpio, {
+      sensor_type: props.sensor.sensor_type,
+      ...(isAnalogProbeSensor.value
+        ? { sample_count: 30, sample_delay_ms: 100, timeout_ms: 15000 }
+        : {}),
+    })
     // Command published to ESP — wait for WS sensor_data (finality via watch above)
     measureTimeoutId = setTimeout(() => {
       isMeasuring.value = false
@@ -534,6 +568,24 @@ function handleClick() {
             title="Temp-Read fehlgeschlagen — Messung wurde abgebrochen. Temperaturerfassung prüfen."
           >
             <AlertTriangle class="w-3 h-3" />
+          </span>
+          <span
+            v-if="stabilityBadge"
+            :class="[
+              'sensor-card__badge',
+              stabilityBadge.level === 'good'
+                ? 'sensor-card__badge--stability-good'
+                : 'sensor-card__badge--stability-warn',
+            ]"
+            :title="stabilityBadge.detail
+              ? `${stabilityBadge.label} (${stabilityBadge.detail})`
+              : stabilityBadge.label"
+          >
+            <Activity class="w-3 h-3" />
+            {{ stabilityBadge.label }}
+            <span v-if="stabilityBadge.detail" class="sensor-card__badge-detail">
+              {{ stabilityBadge.detail }}
+            </span>
           </span>
         </div>
       </div>
@@ -933,6 +985,24 @@ function handleClick() {
   color: var(--color-error);
   background: rgba(248, 113, 113, 0.1);
   border: 1px solid rgba(248, 113, 113, 0.3);
+}
+
+.sensor-card__badge--stability-good {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-success) 35%, transparent);
+}
+
+.sensor-card__badge--stability-warn {
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
+}
+
+.sensor-card__badge-detail {
+  margin-left: var(--space-1);
+  opacity: 0.85;
+  font-size: var(--text-xs);
 }
 
 /* AUT-300: On-demand sensor state badges */

@@ -40,6 +40,13 @@ interface SensorDataPayload {
   unit: string
   quality?: QualityLevel
   timestamp?: number
+  sample_count?: number
+  adc_stddev?: number
+  stable?: boolean
+  ec_stddev?: number
+  temp_compensated?: boolean
+  temp_source?: string
+  temp_compensation_value?: number
   // Address-based matching for multi-sensor GPIOs (Phase 3)
   config_id?: string
   i2c_address?: number
@@ -89,6 +96,30 @@ function normalizeRawTimestamp(ts: number | undefined | null): string | null {
   const ms = ts > 1e10 ? ts : ts * 1000
   if (ms < 946684800000 || ms > 4102444800000) return null
   return new Date(ms).toISOString()
+}
+
+function buildMeasurementMetadata(data: SensorDataPayload): Record<string, unknown> | null {
+  const metadata: Record<string, unknown> = {}
+  if (data.sample_count != null) metadata.sample_count = data.sample_count
+  if (data.adc_stddev != null) metadata.adc_stddev = data.adc_stddev
+  if (data.stable != null) metadata.stable = data.stable
+  if (data.ec_stddev != null) metadata.ec_stddev = data.ec_stddev
+  if (data.temp_compensated != null) metadata.temp_compensated = data.temp_compensated
+  if (data.temp_source != null) metadata.temp_source = data.temp_source
+  if (data.temp_compensation_value != null) {
+    metadata.temp_compensation_value = data.temp_compensation_value
+  }
+  return Object.keys(metadata).length > 0 ? metadata : null
+}
+
+function applyMeasurementMetadata(
+  sensor: MockSensor,
+  data: SensorDataPayload,
+): void {
+  const metadata = buildMeasurementMetadata(data)
+  if (metadata) {
+    sensor.metadata = { ...(sensor.metadata ?? {}), ...metadata }
+  }
 }
 
 function parseSensorTimestampMs(raw: unknown): number | null {
@@ -205,6 +236,7 @@ export const useSensorStore = defineStore('sensor', () => {
         const ts = normalizeRawTimestamp(data.timestamp)
         if (ts !== null) exactMatch.last_read = ts
         exactMatch.last_event_at = eventReceivedAtIso
+        applyMeasurementMetadata(exactMatch, data)
         return { ...device, sensors }
       }
 

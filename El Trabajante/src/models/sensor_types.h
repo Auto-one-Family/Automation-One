@@ -114,6 +114,14 @@ struct SensorReading {
   // which I2C sensor at a specific address sent this reading
   // 0 for non-I2C sensors
   uint8_t i2c_address = 0;
+
+  // ============================================
+  // ANALOG PROBE SAMPLING STATS (EC/pH stabilization)
+  // ============================================
+  uint8_t sample_count = 0;       // Number of ADC samples aggregated (0 = single/legacy)
+  float adc_stddev = 0.0f;        // Population stddev of raw ADC samples
+  bool stable = false;            // true when adc_stddev <= ~1% of median ADC
+  bool has_sampling_stats = false;
 };
 
 #endif

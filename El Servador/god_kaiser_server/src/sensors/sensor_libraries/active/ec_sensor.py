@@ -95,6 +95,8 @@ class ECSensorProcessor(BaseSensorProcessor):
     REFERENCE_TEMP = 25.0  # °C (calibration reference temperature, industry standard)
     TEMP_COEFFICIENT = 0.02  # 2% per °C (typical for ionic solutions, varies 1.8-2.2% by solution)
 
+    EC_STABILITY_STD_DEV_US_CM = 15.0  # Target stability threshold at reference solution
+
     def get_sensor_type(self) -> str:
         """Return sensor type identifier."""
         return "ec"
@@ -202,20 +204,30 @@ class ECSensorProcessor(BaseSensorProcessor):
         ec_value = round(ec_value, decimal_places)
 
         # Step 8: Assess quality
-        quality = self._assess_quality(ec_value, calibrated, unit_type)
+        stability_params = self._extract_stability_params(params, calibration, adc_type)
+        quality = self._assess_quality(
+            ec_value,
+            calibrated,
+            unit_type,
+            stable=stability_params.get("stable"),
+            ec_stddev=stability_params.get("ec_stddev"),
+        )
+
+        metadata = {
+            "voltage": voltage,
+            "calibrated": calibrated,
+            "raw_value": raw_value,
+            "warnings": validation.warnings,
+            "adc_type": adc_type,
+        }
+        metadata.update(stability_params)
 
         # Step 9: Return result
         return ProcessingResult(
             value=ec_value,
             unit=unit_str,
             quality=quality,
-            metadata={
-                "voltage": voltage,
-                "calibrated": calibrated,
-                "raw_value": raw_value,
-                "warnings": validation.warnings,
-                "adc_type": adc_type,
-            },
+            metadata=metadata,
         )
 
     def validate(self, raw_value: float) -> ValidationResult:
@@ -508,7 +520,57 @@ class ECSensorProcessor(BaseSensorProcessor):
             # Default: µS/cm (most accurate unit for EC)
             return (ec_us_cm, "µS/cm")
 
-    def _assess_quality(self, ec_value: float, calibrated: bool, unit_type: str) -> str:
+    def _extract_stability_params(
+        self,
+        params: Optional[Dict[str, Any]],
+        calibration: Optional[Dict[str, Any]],
+        adc_type: str,
+    ) -> Dict[str, Any]:
+        """Extract sampling stability metadata from ingest params."""
+        if not params:
+            return {}
+
+        result: Dict[str, Any] = {}
+        if "sample_count" in params:
+            result["sample_count"] = int(params["sample_count"])
+        if "stable" in params:
+            result["stable"] = bool(params["stable"])
+        if "adc_stddev" in params:
+            adc_stddev = float(params["adc_stddev"])
+            result["adc_stddev"] = adc_stddev
+            slope_per_count = self._estimate_slope_per_adc_count(calibration, adc_type)
+            if slope_per_count is not None:
+                result["ec_stddev"] = round(adc_stddev * slope_per_count, 2)
+        if "temp_compensated" in params:
+            result["temp_compensated"] = bool(params["temp_compensated"])
+        return result
+
+    def _estimate_slope_per_adc_count(
+        self,
+        calibration: Optional[Dict[str, Any]],
+        adc_type: str,
+    ) -> Optional[float]:
+        """Estimate µS/cm per ADC count for stddev conversion."""
+        if calibration and "slope" in calibration:
+            adc_max = self.ADC_MAX_16BIT if adc_type == "16bit" else self.ADC_MAX_12BIT
+            voltage_range = (
+                self.ADC_VOLTAGE_RANGE_5V if adc_type == "16bit" else self.ADC_VOLTAGE_RANGE_3V3
+            )
+            return calibration["slope"] * (voltage_range / adc_max)
+
+        # Default uncalibrated slope: 20000 µS/cm over full ADC range
+        adc_max = self.ADC_MAX_16BIT if adc_type == "16bit" else self.ADC_MAX_12BIT
+        return self.EC_MAX / adc_max
+
+    def _assess_quality(
+        self,
+        ec_value: float,
+        calibrated: bool,
+        unit_type: str,
+        *,
+        stable: Optional[bool] = None,
+        ec_stddev: Optional[float] = None,
+    ) -> str:
         """
         Assess data quality.
 
@@ -539,11 +601,15 @@ class ECSensorProcessor(BaseSensorProcessor):
 
         # Good: Within typical range and calibrated
         if calibrated and self.EC_TYPICAL_MIN <= ec_us_cm <= self.EC_TYPICAL_MAX:
-            return "good"
+            base_quality = "good"
+        elif calibrated or (self.EC_TYPICAL_MIN <= ec_us_cm <= self.EC_TYPICAL_MAX):
+            base_quality = "fair"
+        else:
+            base_quality = "poor"
 
-        # Fair: Calibrated but at extremes, or not calibrated but reasonable
-        if calibrated or (self.EC_TYPICAL_MIN <= ec_us_cm <= self.EC_TYPICAL_MAX):
+        unstable = stable is False or (
+            ec_stddev is not None and ec_stddev > self.EC_STABILITY_STD_DEV_US_CM
+        )
+        if unstable and base_quality == "good":
             return "fair"
-
-        # Poor: Not calibrated and at extremes
-        return "poor"
+        return base_quality

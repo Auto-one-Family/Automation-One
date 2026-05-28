@@ -166,7 +166,7 @@ async function saveName() {
 
   try {
     log.debug('Calling espStore.updateDevice', { name: newName || undefined })
-    const result = await espStore.updateDevice(deviceId, { name: newName || undefined })
+    const result = await espStore.updateDevice(deviceId, { name: newName })
     log.debug('updateDevice returned', result)
     isEditingName.value = false
     emit('nameUpdated', deviceId, newName)

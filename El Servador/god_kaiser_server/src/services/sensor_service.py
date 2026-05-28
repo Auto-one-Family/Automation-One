@@ -550,6 +550,9 @@ class SensorService:
         esp_id: str,
         gpio: int,
         sensor_type: str | None = None,
+        sample_count: int | None = None,
+        sample_delay_ms: int | None = None,
+        timeout_ms: int | None = None,
     ) -> Dict[str, Any]:
         """
         Trigger a manual measurement for a sensor.
@@ -598,6 +601,20 @@ class SensorService:
         if not sensor.enabled:
             raise ValueError(f"Sensor is disabled: {esp_id}/GPIO {gpio}")
 
+        resolved_sensor_type = sensor.sensor_type
+        command_params: dict[str, int] = {}
+        if resolved_sensor_type in ("ec", "ph"):
+            command_params["sample_count"] = sample_count if sample_count is not None else 30
+            command_params["sample_delay_ms"] = sample_delay_ms if sample_delay_ms is not None else 100
+            command_params["timeout_ms"] = timeout_ms if timeout_ms is not None else 15000
+        else:
+            if sample_count is not None:
+                command_params["sample_count"] = sample_count
+            if sample_delay_ms is not None:
+                command_params["sample_delay_ms"] = sample_delay_ms
+            if timeout_ms is not None:
+                command_params["timeout_ms"] = timeout_ms
+
         # 3. Busy-guard: reject rapid-fire duplicates within the cooldown window
         cooldown_key = (esp_id, gpio)
         now_ts = datetime.now(timezone.utc).timestamp()
@@ -625,6 +642,7 @@ class SensorService:
             gpio=gpio,
             command="measure",
             correlation_id=None,
+            command_params=command_params or None,
         )
 
         if not success:

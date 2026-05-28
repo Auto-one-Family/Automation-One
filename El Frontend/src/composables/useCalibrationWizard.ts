@@ -28,6 +28,7 @@ export type WizardPhase = 'select' | 'point1' | 'point2' | 'confirm' | 'finalizi
 
 export type CalibrationSensorType = 'ph' | 'ec' | 'moisture' | 'soil_moisture' | 'temperature'
 
+/** custom = 1-Punkt (ec_single_point / ec_1point) — DEFAULT */
 export type EcPresetId = '0_1413' | '1413_12880' | 'custom'
 
 export interface SensorTypePreset {
@@ -37,7 +38,7 @@ export interface SensorTypePreset {
   point2Label?: string
   point2Ref?: number
   expectedPoints: 1 | 2
-  calibrationMethod: 'moisture_2point' | 'ph_2point' | 'ec_1point' | 'ec_2point' | 'linear_2point'
+  calibrationMethod: 'moisture_2point' | 'ph_2point' | 'ec_1point' | 'ec_2point' | 'ec_linear_2point' | 'linear_2point'
   /** Number of ADC samples to average for one calibration point. Default: 1 (no averaging). EC sensors use 3. */
   sampleCount?: number
   /** AUT-299: Whether the first point can be skipped (e.g. EC air reference) */
@@ -92,6 +93,13 @@ export interface UseCalibrationWizardReturn {
   calibrationTemperature: Ref<number>
   calibrationTemperatureSource: Ref<string>
 
+  // P1a: EC live preview (AUT-490 / AUT-488)
+  previewEcUsCm: Ref<number | null>
+  previewAvailable: Ref<boolean>
+  lastStable: Ref<boolean | null>
+  lastAdcStddev: Ref<number | null>
+  lastTemperatureUsed: Ref<number | null>
+
   // Presets
   sensorTypePresets: Record<string, SensorTypePreset>
   EC_PRESETS: typeof EC_PRESETS
@@ -109,8 +117,8 @@ export interface UseCalibrationWizardReturn {
   triggerLiveMeasurement: () => Promise<void>
   setCalibrationTemperature: (value: number, source?: string) => void
   setLastRawValue: (rawValue: number | null, quality?: string) => void
-  overwritePoint: (role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference', point: CalibrationPoint) => Promise<void>
-  deletePoint: (role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference') => Promise<void>
+  overwritePoint: (role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference' | 'reference_low' | 'reference_high', point: CalibrationPoint) => Promise<void>
+  deletePoint: (role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference' | 'reference_low' | 'reference_high') => Promise<void>
   /** AUT-299: Skip current point (e.g. air step for EC) — switches method to ec_1point */
   skipCurrentPoint: () => Promise<void>
   goBack: () => void
@@ -126,6 +134,7 @@ export const EC_PRESETS = {
   '0_1413': { point1: 0, point2: 1413, label: '0 / 1413 µS/cm' },
   '1413_12880': { point1: 1413, point2: 12880, label: '1413 / 12.880 µS/cm' },
 } as const
+
 
 /** Reference values and labels per sensor type */
 export const SENSOR_TYPE_PRESETS: Record<string, SensorTypePreset> = {
@@ -144,9 +153,9 @@ export const SENSOR_TYPE_PRESETS: Record<string, SensorTypePreset> = {
     point1Ref: 1413,
     expectedPoints: 1,
     calibrationMethod: 'ec_1point',
-    sampleCount: 3,
+    sampleCount: 1,
   },
-  /** AUT-299: EC 2-point with optional air reference step */
+  /** AUT-299: EC 2-point with optional air reference step (legacy, kept for backward compat) */
   ec_2point: {
     label: 'EC-Sensor (2-Punkt)',
     point1Label: 'Schritt 1 (optional): Luft-Referenz',
@@ -155,8 +164,24 @@ export const SENSOR_TYPE_PRESETS: Record<string, SensorTypePreset> = {
     point2Ref: 1413,
     expectedPoints: 2,
     calibrationMethod: 'ec_2point',
-    sampleCount: 3,
+    sampleCount: 1,
     point1Skippable: true,
+  },
+  /**
+   * AUT-487: EC 2-point linear (ec_linear_2point) with reference_low + reference_high roles.
+   * EC is linear (NOT inverted like pH): ADC_low→1413 µS/cm, ADC_high→12880 µS/cm.
+   * reference_low = 1413 µS/cm (NIST KCl standard), reference_high = 12880 µS/cm.
+   */
+  ec_linear_2point: {
+    label: 'EC-Sensor (2-Punkt Linear)',
+    point1Label: '1413 µS/cm Standardloesung (Niedrig)',
+    point1Ref: 1413,
+    point2Label: '12.880 µS/cm Standardloesung (Hoch)',
+    point2Ref: 12880,
+    expectedPoints: 2,
+    calibrationMethod: 'ec_linear_2point',
+    sampleCount: 1,
+    point1Skippable: false,
   },
   moisture: {
     label: 'Feuchtigkeitssensor',
@@ -229,7 +254,8 @@ export function useCalibrationWizard(
   const selectedEspId = ref(options.espId ?? '')
   const selectedGpio = ref<number | null>(options.gpio ?? null)
   const selectedSensorType = ref(options.sensorType ?? '')
-  const ecPreset = ref<EcPresetId>('1413_12880')
+  // B6 / P0a: Default = 'custom' (1-Punkt) — bewährter Standard für Einzelkalibrierung
+  const ecPreset = ref<EcPresetId>('custom')
 
   // ── Data ────────────────────────────────────────────────────────────────
   const points = ref<CalibrationPoint[]>([])
@@ -257,6 +283,15 @@ export function useCalibrationWizard(
   // AUT-299: Calibration temperature for temperature compensation
   const calibrationTemperature = ref<number>(25.0)
   const calibrationTemperatureSource = ref<string>('manual')
+
+  // ── P1a: EC live preview (AUT-490 / AUT-488) ────────────────────────────────
+  // AUT-488: These fields may not yet exist in the WS payload —
+  // optional-chaining + null-safe defaults prevent crashes on missing fields.
+  const previewEcUsCm = ref<number | null>(null)
+  const previewAvailable = ref<boolean>(false)
+  const lastStable = ref<boolean | null>(null)
+  const lastAdcStddev = ref<number | null>(null)
+  const lastTemperatureUsed = ref<number | null>(null)
 
   function clearMeasureCooldownTimer(): void {
     if (measureCooldownTimerId.value !== null) {
@@ -358,6 +393,18 @@ export function useCalibrationWizard(
       measurementTriggerAt.value = null
       lifecycleState.value = 'pending'
       lifecycleMessage.value = 'Frische Messung empfangen.'
+
+      // P1a: Extract EC preview fields (AUT-490 / AUT-488 optional-chaining).
+      // preview_ec_us_cm may be absent when backend does not yet compute it.
+      const ecPreview = typeof data.preview_ec_us_cm === 'number' ? data.preview_ec_us_cm : null
+      previewEcUsCm.value = ecPreview
+      // preview_available defaults to true when we have a valid raw value and no explicit false flag.
+      previewAvailable.value = typeof data.preview_available === 'boolean'
+        ? data.preview_available
+        : Number.isFinite(ecPreview) && ecPreview !== null
+      lastStable.value = typeof data.stable === 'boolean' ? data.stable : null
+      lastAdcStddev.value = typeof data.adc_stddev === 'number' ? data.adc_stddev : null
+      lastTemperatureUsed.value = typeof data.temperature_used === 'number' ? data.temperature_used : null
     }
   })
 
@@ -409,7 +456,36 @@ export function useCalibrationWizard(
   }
 
   // ── Computed ────────────────────────────────────────────────────────────
-  const currentPreset = computed(() => SENSOR_TYPE_PRESETS[selectedSensorType.value])
+  const currentPreset = computed((): SensorTypePreset | undefined => {
+    if (selectedSensorType.value === 'ec') {
+      if (ecPreset.value === '1413_12880') {
+        // AUT-487: ec_linear_2point — reference_low=1413, reference_high=12880
+        return {
+          ...SENSOR_TYPE_PRESETS.ec_linear_2point,
+          point1Label: '1413 µS/cm Standardloesung (Referenz-Low)',
+          point1Ref: 1413,
+          point2Label: '12.880 µS/cm Standardloesung (Referenz-High)',
+          point2Ref: 12880,
+          calibrationMethod: 'ec_linear_2point',
+        }
+      }
+      if (ecPreset.value === '0_1413') {
+        // AUT-487: ec_linear_2point with 0+1413 — reference_low=0, reference_high=1413
+        return {
+          ...SENSOR_TYPE_PRESETS.ec_linear_2point,
+          point1Label: 'Luft / trocken (0 µS/cm, Referenz-Low)',
+          point1Ref: 0,
+          point2Label: '1413 µS/cm Standardloesung (Referenz-High)',
+          point2Ref: 1413,
+          calibrationMethod: 'ec_linear_2point',
+          point1Skippable: false,
+        }
+      }
+      // custom = 1-Punkt (ec_1point) — DEFAULT (B6 / P0a)
+      return SENSOR_TYPE_PRESETS.ec
+    }
+    return SENSOR_TYPE_PRESETS[selectedSensorType.value]
+  })
   const hasUnsavedWork = computed(() =>
     Boolean(currentSessionId.value) ||
     points.value.length > 0 ||
@@ -519,7 +595,7 @@ export function useCalibrationWizard(
   }
 
   async function persistPoint(
-    role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference',
+    role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference' | 'reference_low' | 'reference_high',
     point: CalibrationPoint,
     options: { confirmOverwrite?: boolean } = {},
   ): Promise<boolean> {
@@ -533,6 +609,8 @@ export function useCalibrationWizard(
       const roleLabel = role === 'buffer_high' ? 'High-Buffer'
         : role === 'buffer_low' ? 'Low-Buffer'
         : role === 'reference' ? 'Referenzloesung'
+        : role === 'reference_low' ? 'Referenz-Low (1413 µS/cm)'
+        : role === 'reference_high' ? 'Referenz-High (12880 µS/cm)'
         : role === 'dry' ? 'Trockenzustand'
         : 'Nasszustand'
       const overwriteConfirmed = await uiStore.confirm({
@@ -579,11 +657,17 @@ export function useCalibrationWizard(
   async function onPoint1Captured(point: CalibrationPoint): Promise<void> {
     const preset = currentPreset.value
 
-    let pointRole: 'buffer_high' | 'dry' | 'reference'
+    let pointRole: 'buffer_high' | 'dry' | 'reference' | 'reference_low'
     if (selectedSensorType.value === 'ph') {
       pointRole = 'buffer_high'
     } else if (selectedSensorType.value === 'ec') {
-      pointRole = 'reference'
+      if (preset?.calibrationMethod === 'ec_linear_2point') {
+        // AUT-487: EC 2-point linear — point1 = reference_low (the lower concentration)
+        pointRole = 'reference_low'
+      } else {
+        // EC 1-point (custom/default)
+        pointRole = 'reference'
+      }
     } else {
       pointRole = 'dry'
     }
@@ -591,7 +675,7 @@ export function useCalibrationWizard(
     const persisted = await persistPoint(pointRole, point, { confirmOverwrite: true })
     if (persisted) {
       // EC 1-point: go directly to confirm
-      // pH & Moisture 2-point: go to point2
+      // pH & Moisture 2-point, EC 2-point: go to point2
       if (preset?.expectedPoints === 1) {
         await submitCalibration()
       } else {
@@ -601,7 +685,17 @@ export function useCalibrationWizard(
   }
 
   async function onPoint2Captured(point: CalibrationPoint): Promise<void> {
-    const pointRole = selectedSensorType.value === 'ph' ? 'buffer_low' : 'wet'
+    const preset = currentPreset.value
+
+    let pointRole: 'buffer_low' | 'wet' | 'reference_high'
+    if (selectedSensorType.value === 'ph') {
+      pointRole = 'buffer_low'
+    } else if (selectedSensorType.value === 'ec' && preset?.calibrationMethod === 'ec_linear_2point') {
+      // AUT-487: EC 2-point linear — point2 = reference_high (the higher concentration)
+      pointRole = 'reference_high'
+    } else {
+      pointRole = 'wet'
+    }
 
     const persisted = await persistPoint(pointRole, point, { confirmOverwrite: true })
     if (persisted) {
@@ -636,12 +730,17 @@ export function useCalibrationWizard(
     try {
       const sessionId = await ensureSessionStarted()
 
-      // Get required roles based on sensor type
+      // Get required roles based on sensor type and calibration method
       let requiredRoles: Array<string> = []
       if (selectedSensorType.value === 'ph') {
         requiredRoles = ['buffer_high', 'buffer_low']
       } else if (selectedSensorType.value === 'ec') {
-        requiredRoles = ['reference']
+        if (preset.calibrationMethod === 'ec_linear_2point') {
+          // AUT-487: EC 2-point linear uses reference_low + reference_high
+          requiredRoles = ['reference_low', 'reference_high']
+        } else {
+          requiredRoles = ['reference']
+        }
       } else {
         requiredRoles = ['dry', 'wet']
       }
@@ -753,27 +852,30 @@ export function useCalibrationWizard(
     sampleTotal.value = targetSampleCount
 
     try {
-      if (!currentSessionId.value) {
-        if (!preset) {
-          throw new Error('Sensortyp-Preset nicht gefunden')
-        }
-        const session = await calibrationApi.startSession({
-          esp_id: selectedEspId.value,
-          gpio: selectedGpio.value,
-          sensor_type: selectedSensorType.value,
-          method: preset.calibrationMethod,
-          expected_points: preset.expectedPoints,
-        })
-        currentSessionId.value = session.id
-      }
+      // A4 / P0b: Session-Start beim ersten Capture-Trigger.
+      // calibration_temperature wird via ensureSessionStarted() mitgesendet (nicht separat PATCH).
+      // ensureSessionStarted() ist idempotent: gibt bestehende Session-ID zurück wenn vorhanden.
+      await ensureSessionStarted()
 
       if (targetSampleCount <= 1) {
-        // Single measurement — original path (all non-EC sensors)
         measurementTriggerAt.value = Date.now()
-        const triggerResult = await sensorsApi.triggerMeasurement(selectedEspId.value, selectedGpio.value)
+        const measureOptions: Parameters<typeof sensorsApi.triggerMeasurement>[2] = {
+          sensor_type: selectedSensorType.value,
+        }
+        const normalizedType = selectedSensorType.value.toLowerCase()
+        if (normalizedType === 'ec' || normalizedType === 'ph' || normalizedType === 'ec_2point') {
+          measureOptions.sample_count = 30
+          measureOptions.sample_delay_ms = 100
+          measureOptions.timeout_ms = 15000
+        }
+        const triggerResult = await sensorsApi.triggerMeasurement(
+          selectedEspId.value,
+          selectedGpio.value,
+          measureOptions,
+        )
         measurementRequestId.value = triggerResult.request_id
         lifecycleState.value = 'pending'
-        lifecycleMessage.value = `Messung angefordert (Request-ID: ${triggerResult.request_id}).`
+        lifecycleMessage.value = `Messung angefordert (30 ADC-Samples, Request-ID: ${triggerResult.request_id}).`
       } else {
         // PKG-03: Multi-sample robust path (EC: sampleCount=3)
         const collectedRaw: number[] = []
@@ -858,20 +960,22 @@ export function useCalibrationWizard(
     calibrationTemperatureSource.value = source
   }
 
-  async function overwritePoint(role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference', point: CalibrationPoint): Promise<void> {
+  async function overwritePoint(role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference' | 'reference_low' | 'reference_high', point: CalibrationPoint): Promise<void> {
     if (!currentSessionId.value) {
       throw new Error('Keine aktive Kalibrier-Session vorhanden')
     }
     await persistPoint(role, point, { confirmOverwrite: true })
   }
 
-  async function deletePoint(role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference'): Promise<void> {
+  async function deletePoint(role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference' | 'reference_low' | 'reference_high'): Promise<void> {
     if (!currentSessionId.value) {
       throw new Error('Keine aktive Kalibrier-Session vorhanden')
     }
     const roleLabel = role === 'buffer_high' ? 'High-Buffer'
       : role === 'buffer_low' ? 'Low-Buffer'
       : role === 'reference' ? 'Referenzloesung'
+      : role === 'reference_low' ? 'Referenz-Low (1413 µS/cm)'
+      : role === 'reference_high' ? 'Referenz-High (12880 µS/cm)'
       : role === 'dry' ? 'Trockenzustand'
       : 'Nasszustand'
     const confirmed = await uiStore.confirm({
@@ -890,11 +994,10 @@ export function useCalibrationWizard(
     points.value = points.value.filter((point) => point.point_role !== role)
 
     // Determine which phase to go back to
-    if (role === 'reference') {
-      phase.value = 'point1'
-    } else if (role === 'buffer_high' || role === 'dry') {
+    if (role === 'reference' || role === 'reference_low' || role === 'buffer_high' || role === 'dry') {
       phase.value = 'point1'
     } else {
+      // wet, reference_high, buffer_low
       phase.value = 'point2'
     }
   }
@@ -1026,7 +1129,8 @@ export function useCalibrationWizard(
       selectedEspId.value = parsed.selectedEspId
       selectedGpio.value = parsed.selectedGpio
       selectedSensorType.value = normalizeCalibrationSensorType(parsed.selectedSensorType)
-      ecPreset.value = parsed.ecPreset ?? '1413_12880'
+      // B6 / P0a: default to 'custom' (1-Punkt) when restoring draft without explicit preset
+      ecPreset.value = parsed.ecPreset ?? 'custom'
       points.value = Array.isArray(parsed.points) ? parsed.points : []
       currentSessionId.value = parsed.currentSessionId ?? null
       phase.value = parsed.phase ?? (options.skipSelect ? 'point1' : 'select')
@@ -1069,7 +1173,8 @@ export function useCalibrationWizard(
     if (!options.espId) selectedEspId.value = ''
     if (options.gpio === undefined) selectedGpio.value = null
     if (!options.sensorType) selectedSensorType.value = ''
-    ecPreset.value = '1413_12880'
+    // B6 / P0a: reset to default 1-Punkt preset
+    ecPreset.value = 'custom'
     points.value = []
     calibrationResult.value = null
     errorMessage.value = ''
@@ -1088,6 +1193,12 @@ export function useCalibrationWizard(
     sampleTotal.value = 0
     calibrationTemperature.value = 25.0
     calibrationTemperatureSource.value = 'manual'
+    // P1a: Reset EC preview state
+    previewEcUsCm.value = null
+    previewAvailable.value = false
+    lastStable.value = null
+    lastAdcStddev.value = null
+    lastTemperatureUsed.value = null
     clearDraft()
   }
 
@@ -1136,6 +1247,13 @@ export function useCalibrationWizard(
     // AUT-299: Calibration temperature for ATC
     calibrationTemperature,
     calibrationTemperatureSource,
+
+    // P1a: EC live preview (AUT-490 / AUT-488)
+    previewEcUsCm,
+    previewAvailable,
+    lastStable,
+    lastAdcStddev,
+    lastTemperatureUsed,
 
     // Presets
     sensorTypePresets: SENSOR_TYPE_PRESETS,

@@ -175,7 +175,7 @@ export function useDeviceActions(device: () => ESPDevice) {
     saveError.value = null
 
     try {
-      await espStore.updateDevice(espId.value, { name: newName ?? undefined })
+      await espStore.updateDevice(espId.value, { name: newName })
       isEditingName.value = false
       toast.success(newName ? `Gerätename: "${newName}"` : 'Gerätename entfernt')
       return { deviceId: espId.value, name: newName }

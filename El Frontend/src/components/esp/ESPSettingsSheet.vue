@@ -429,7 +429,7 @@ async function saveName() {
   saveError.value = ''
 
   try {
-    await espStore.updateDevice(deviceId, { name: newName || undefined })
+    await espStore.updateDevice(deviceId, { name: newName })
     isEditingName.value = false
     emit('name-updated', { deviceId, name: newName || '' })
   } catch (err: unknown) {

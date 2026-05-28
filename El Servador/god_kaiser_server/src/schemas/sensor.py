@@ -1216,3 +1216,20 @@ class TriggerMeasurementResponse(BaseModel):
             }
         }
     )
+
+
+class TriggerMeasurementRequest(BaseModel):
+    """Optional parameters for on-demand sensor measurement."""
+
+    sensor_type: Optional[str] = Field(
+        None, description="Sensor type for multi-value GPIO disambiguation"
+    )
+    sample_count: Optional[int] = Field(
+        None, ge=1, le=32, description="Number of ADC samples on ESP (EC/pH default: 30)"
+    )
+    sample_delay_ms: Optional[int] = Field(
+        None, ge=0, le=1000, description="Delay between ADC samples in ms (EC/pH default: 100)"
+    )
+    timeout_ms: Optional[int] = Field(
+        None, ge=1000, le=60000, description="Measurement timeout in ms (EC/pH default: 15000)"
+    )

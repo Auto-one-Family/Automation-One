@@ -557,29 +557,33 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
 
     try {
       // First, persist the update to the database
-      const dbDevice = await espApi.updateDevice(deviceId, update)
-      logger.info('espApi.updateDevice returned:', {
-        deviceId: dbDevice.device_id,
-        name: dbDevice.name,
+      await espApi.updateDevice(deviceId, update)
+
+      // PATCH returns DB metadata only (sensor_count, no sensors[]/actuators[]).
+      // Re-fetch merges debug+DB for mocks and enriches sensor/actuator configs for real ESPs.
+      const device = await espApi.getDevice(deviceId)
+      logger.info('Device re-fetched after update:', {
+        deviceId: getDeviceId(device),
+        name: device.name,
+        sensorCount: device.sensors?.length ?? device.sensor_count,
       })
 
-      // For Mock ESPs: Re-fetch to get complete data (merged from Debug Store + DB)
-      // The DB only returns partial data, but espApi.getDevice() merges both sources
-      let device: ESPDevice
-      if (isMock(deviceId)) {
-        logger.info('Mock ESP detected, re-fetching complete data from server')
-        device = await espApi.getDevice(deviceId)
-      } else {
-        device = dbDevice
-      }
-
-      // Update device in list
+      // Update device in list (preserve live arrays if enrichment failed transiently)
       const index = devices.value.findIndex(d =>
         getDeviceId(d) === getDeviceId(device)
       )
       if (index !== -1) {
-        devices.value[index] = device
-        logger.info('Device updated in list:', device.name)
+        const existing = devices.value[index]
+        devices.value[index] = {
+          ...device,
+          sensors: Array.isArray(device.sensors) && device.sensors.length > 0
+            ? device.sensors
+            : (existing.sensors ?? []),
+          actuators: Array.isArray(device.actuators) && device.actuators.length > 0
+            ? device.actuators
+            : (existing.actuators ?? []),
+        }
+        logger.info('Device updated in list:', devices.value[index].name)
       }
 
       return device

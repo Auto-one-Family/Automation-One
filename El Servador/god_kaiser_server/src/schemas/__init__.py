@@ -102,6 +102,7 @@ from .sensor import (
     SensorReading,
     SensorStats,
     SensorStatsResponse,
+    TriggerMeasurementRequest,
     TriggerMeasurementResponse,
 )
 
@@ -331,6 +332,7 @@ __all__ = [
     "SensorReading",
     "SensorStats",
     "SensorStatsResponse",
+    "TriggerMeasurementRequest",
     "TriggerMeasurementResponse",
     # Sensor Type Defaults (Phase 2A)
     "EffectiveConfigResponse",
