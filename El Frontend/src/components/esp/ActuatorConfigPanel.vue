@@ -19,7 +19,7 @@ import { AccordionSection } from '@/shared/design/primitives'
 import { useUiStore } from '@/shared/stores/ui.store'
 import { useGpioStatus } from '@/composables/useGpioStatus'
 import { supportsAuxGpio, ACTUATOR_TYPE_CONFIG } from '@/utils/actuatorDefaults'
-import { getGpioConfig } from '@/utils/gpioConfig'
+import { getGpioConfig, normalizeGpioHardwareType } from '@/utils/gpioConfig'
 import type { MockActuator } from '@/types'
 import AlertConfigSection from '@/components/devices/AlertConfigSection.vue'
 import RuntimeMaintenanceSection from '@/components/devices/RuntimeMaintenanceSection.vue'
@@ -174,6 +174,9 @@ const hasActuatorDatasheet = computed<boolean>(() => {
 const contextDevice = computed(() =>
   espStore.devices.find(d => espStore.getDeviceId(d) === props.espId),
 )
+const deviceHardwareType = computed(() =>
+  normalizeGpioHardwareType(contextDevice.value?.hardware_type),
+)
 const zoneContextLabel = computed(() =>
   (contextDevice.value as any)?.zone_name
   || (contextDevice.value as any)?.zone_id
@@ -193,7 +196,7 @@ const auxGpioOptions = computed(() => {
   const pins =
     meta.length > 0
       ? meta.filter(p => p.available && p.gpio !== props.gpio).map(p => p.gpio)
-      : getGpioConfig('ESP32_WROOM')
+      : getGpioConfig(deviceHardwareType.value)
           .filter(p => p.category !== 'avoid')
           .map(p => p.gpio)
           .filter(g => g !== props.gpio)

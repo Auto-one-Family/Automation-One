@@ -226,6 +226,42 @@ export const DEVICE_TYPE_LABELS: Record<string, string> = {
   'ESP32_S2': 'ESP32-S2',
   'ESP32_S3': 'ESP32-S3',
   'ESP32_C3': 'ESP32-C3',
+  'ESP32_WROOM': 'ESP32 WROOM',
+  'ESP32_S3_DEVKITC1': 'ESP32-S3',
+  'XIAO_ESP32_C3': 'XIAO C3',
+  'MOCK_ESP32_WROOM': 'Mock WROOM',
+}
+
+/** Short board labels for ESP device cards (hardware_type from esp store). */
+const BOARD_TYPE_LABELS: Record<string, string> = {
+  ESP32_WROOM: 'WROOM',
+  ESP32_WROOM_32: 'WROOM',
+  ESP32_WROOM32: 'WROOM',
+  ESP32_S3_DEVKITC1: 'S3',
+  ESP32_S3: 'S3',
+  XIAO_ESP32_C3: 'C3',
+  XIAO_ESP32C3: 'C3',
+  ESP32_C3: 'C3',
+  MOCK_ESP32: 'Mock',
+  MOCK_ESP32_WROOM: 'Mock WROOM',
+  MOCK_ESP32_S3_DEVKITC1: 'Mock S3',
+}
+
+/**
+ * Human-readable short label for ESP board hardware_type (card badges).
+ */
+export function getBoardTypeLabel(hardwareType?: string | null): string {
+  if (!hardwareType?.trim()) return 'WROOM'
+  const raw = hardwareType.trim()
+  if (BOARD_TYPE_LABELS[raw]) return BOARD_TYPE_LABELS[raw]
+  const upper = raw.toUpperCase()
+  if (BOARD_TYPE_LABELS[upper]) return BOARD_TYPE_LABELS[upper]
+  if (DEVICE_TYPE_LABELS[upper]) return DEVICE_TYPE_LABELS[upper]
+  if (upper.includes('S3')) return 'S3'
+  if (upper.includes('C3')) return 'C3'
+  if (upper.includes('WROOM')) return 'WROOM'
+  if (upper.startsWith('MOCK')) return 'Mock'
+  return raw
 }
 
 // =============================================================================

@@ -43,6 +43,7 @@ import { useESPStatus, getESPStatus } from '@/composables/useESPStatus'
 import { useIntentSignalsStore } from '@/shared/stores/intentSignals.store'
 import { espHealthPresentation } from '@/domain/esp/espHealth'
 import { useToast } from '@/composables/useToast'
+import { getBoardTypeLabel } from '@/utils/labels'
 import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
 import { formatUptimeShort, formatHeapSize } from '@/utils/formatters'
 import { getSensorLabel, getSensorUnit, getSensorDisplayName, getSensorConfig } from '@/utils/sensorDefaults'
@@ -168,10 +169,10 @@ const intentDisplay = computed(() => intentSignalsStore.getDisplayForEsp(espId.v
 const displayName = computed(() => props.device?.name || espId.value)
 
 const deviceType = computed(() => {
-  if (isMock.value) {
-    return (props.device as any).hardware_type || 'MOCK_ESP32_WROOM'
-  }
-  return props.device?.hardware_type || 'ESP32'
+  const hardwareType = isMock.value
+    ? props.device?.hardware_type || 'MOCK_ESP32_WROOM'
+    : props.device?.hardware_type || 'ESP32_WROOM'
+  return getBoardTypeLabel(hardwareType)
 })
 
 const wifiInfo = computed<WifiStrengthInfo>(() => getWifiStrength(props.device?.wifi_rssi))
