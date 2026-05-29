@@ -26,7 +26,12 @@
 
 import { computed, watch } from 'vue'
 import { useGpioStatus } from '@/composables/useGpioStatus'
-import { getRecommendedGpios, getGpioConfig } from '@/utils/gpioConfig'
+import { useEspStore } from '@/stores/esp'
+import {
+  getRecommendedGpios,
+  getGpioConfig,
+  normalizeGpioHardwareType,
+} from '@/utils/gpioConfig'
 import type { GpioPinStatus } from '@/types/gpio'
 
 // Icons from lucide-vue-next
@@ -83,6 +88,17 @@ const {
   refresh,
 } = useGpioStatus(computed(() => props.espId))
 
+const espStore = useEspStore()
+
+/** Board type from esp store (SSOT: ESPDevice.hardware_type). */
+const contextDevice = computed(() =>
+  espStore.devices.find(d => espStore.getDeviceId(d) === props.espId),
+)
+
+const deviceHardwareType = computed(() =>
+  normalizeGpioHardwareType(contextDevice.value?.hardware_type),
+)
+
 // ════════════════════════════════════════════════════════════════
 // MOCK-ESP FALLBACK
 // ════════════════════════════════════════════════════════════════
@@ -95,10 +111,10 @@ const hasDynamicStatus = computed(() => gpioStatus.value !== null)
 
 /**
  * Static GPIO list for Mock-ESP fallback.
- * Uses ESP32_WROOM config when dynamic status is not available.
+ * Board-aware via device hardware_type (defaults to WROOM when unknown).
  */
 const staticFallbackPins = computed<GpioPinStatus[]>(() => {
-  const staticConfig = getGpioConfig('ESP32_WROOM')
+  const staticConfig = getGpioConfig(deviceHardwareType.value)
   return staticConfig
     .filter(pin => pin.category !== 'avoid') // Exclude "avoid" pins
     .map(pin => ({
