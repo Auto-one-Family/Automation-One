@@ -1,0 +1,28 @@
+# Phyta Frontend dev service (port 5174, parallel to el-frontend :5173)
+# Usage: docker compose -f docker-compose.yml -f docker-compose.phyta-frontend.yml up -d phyta-frontend
+
+services:
+  phyta-frontend:
+    build:
+      context: ./Phyta Frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: automationone-phyta-frontend
+    environment:
+      VITE_API_TARGET: http://el-servador:8000
+      VITE_WS_TARGET: ws://el-servador:8000
+    ports:
+      - "0.0.0.0:5174:5174"
+    volumes:
+      - "./Phyta Frontend/src:/app/src:ro"
+      - "./Phyta Frontend/public:/app/public:ro"
+      - "./Phyta Frontend/index.html:/app/index.html:ro"
+      - "./Phyta Frontend/vite.config.ts:/app/vite.config.ts:ro"
+      - "./Phyta Frontend/tsconfig.json:/app/tsconfig.json:ro"
+      - "./Phyta Frontend/tsconfig.app.json:/app/tsconfig.app.json:ro"
+    depends_on:
+      el-servador:
+        condition: service_healthy
+    networks:
+      - automationone-net
+    restart: unless-stopped

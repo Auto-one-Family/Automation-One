@@ -1,0 +1,45 @@
+@import './tokens.css';
+@import './glass.css';
+@import 'tailwindcss';
+
+@theme {
+  --color-dark-100: var(--color-text-primary);
+  --color-dark-200: var(--color-text-secondary);
+  --color-dark-300: var(--color-text-secondary);
+  --color-dark-400: var(--color-text-muted);
+  --color-dark-500: var(--color-text-muted);
+  --color-dark-800: var(--color-bg-tertiary);
+  --color-dark-900: var(--color-bg-secondary);
+  --color-accent: var(--color-accent);
+  --color-accent-bright: var(--color-accent-bright);
+  --color-success: var(--color-success);
+  --color-warning: var(--color-warning);
+  --color-danger: var(--color-error);
+  --color-iridescent-1: var(--color-iridescent-1);
+  --color-iridescent-2: var(--color-iridescent-2);
+  --color-glass-border: var(--glass-border);
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: 'Outfit', system-ui, sans-serif;
+    background: var(--color-bg-level-1);
+    color: var(--color-text-primary);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

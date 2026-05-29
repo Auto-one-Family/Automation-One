@@ -158,6 +158,11 @@ arbeitsbereiche/
 # Alte Frontend-Build-Kopie (lokal)
 El Frontend/dist.old/
 
+# Phyta Frontend (greenfield v2)
+Phyta Frontend/node_modules/
+Phyta Frontend/dist/
+Phyta Frontend/.env.local
+
 # Cursor/Claude lokale Worktrees
 .claude/worktrees/
 

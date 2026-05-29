@@ -18,7 +18,8 @@ import {
   getGpioWarning,
   getCategoryLabel,
   getCategoryColorClass,
-  getRecommendedGpios
+  getRecommendedGpios,
+  normalizeGpioHardwareType,
 } from '@/utils/gpioConfig'
 
 // =============================================================================
@@ -37,6 +38,19 @@ describe('getGpioConfig', () => {
     const pins = getGpioConfig('XIAO_ESP32_C3')
     expect(Array.isArray(pins)).toBe(true)
     expect(pins).toHaveLength(11)
+  })
+
+  it('returns S3 pin map for ESP32_S3_DEVKITC1', () => {
+    const pins = getGpioConfig('ESP32_S3_DEVKITC1')
+    expect(pins.length).toBeGreaterThanOrEqual(40)
+    expect(pins.find(p => p.gpio === 26)?.category).toBe('avoid')
+    expect(pins.find(p => p.gpio === 37)?.category).toBe('avoid')
+  })
+
+  it('maps ESP32_S3 alias to S3 DevKit config', () => {
+    const alias = getGpioConfig('ESP32_S3')
+    const direct = getGpioConfig('ESP32_S3_DEVKITC1')
+    expect(alias).toEqual(direct)
   })
 
   it('defaults to ESP32_WROOM when no parameter', () => {
@@ -60,6 +74,46 @@ describe('getGpioConfig', () => {
       expect(typeof pin.gpio).toBe('number')
       expect(Array.isArray(pin.features)).toBe(true)
     }
+  })
+})
+
+// =============================================================================
+// normalizeGpioHardwareType
+// =============================================================================
+
+describe('normalizeGpioHardwareType', () => {
+  it('maps S3 variants to ESP32_S3_DEVKITC1', () => {
+    expect(normalizeGpioHardwareType('ESP32_S3')).toBe('ESP32_S3_DEVKITC1')
+    expect(normalizeGpioHardwareType('MOCK_ESP32_S3_DEVKITC1')).toBe('ESP32_S3_DEVKITC1')
+  })
+
+  it('keeps WROOM default for unknown', () => {
+    expect(normalizeGpioHardwareType(undefined)).toBe('ESP32_WROOM')
+    expect(normalizeGpioHardwareType('ESP32_WROOM')).toBe('ESP32_WROOM')
+  })
+})
+
+// =============================================================================
+// ESP32-S3 strapping / flash reserved
+// =============================================================================
+
+describe('ESP32_S3_DEVKITC1 constraints', () => {
+  it('marks strapping pins 0, 3, 46 as caution', () => {
+    const pins = getGpioConfig('ESP32_S3_DEVKITC1')
+    expect(pins.find(p => p.gpio === 0)?.category).toBe('caution')
+    expect(pins.find(p => p.gpio === 3)?.category).toBe('caution')
+    expect(pins.find(p => p.gpio === 46)?.category).toBe('caution')
+  })
+
+  it('marks flash/psram range 26-37 as avoid', () => {
+    for (let gpio = 26; gpio <= 37; gpio += 1) {
+      expect(isGpioAvoid(gpio, 'ESP32_S3_DEVKITC1')).toBe(true)
+    }
+  })
+
+  it('WROOM GPIO 26 stays recommended (no S3 regression)', () => {
+    expect(isGpioRecommended(26, 'ESP32_WROOM')).toBe(true)
+    expect(isGpioAvoid(26, 'ESP32_WROOM')).toBe(false)
   })
 })
 
