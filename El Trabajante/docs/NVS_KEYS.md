@@ -163,6 +163,10 @@ String gpio_string = storageManager.getStringObj("subzone_" + subzone_id + "_gpi
 | `sensor_{i}_raw_mode` | bool | `true` | - | Raw ADC Mode (true) or Calibrated (false) |
 | `sensor_{i}_mode` | String | `"continuous"` | Max 16 chars | **✅ Phase 2C** Operating Mode (continuous, on_demand, paused, scheduled) |
 | `sensor_{i}_interval` | uint32_t | `30000` | 1000-300000 | **✅ Phase 2C** Measurement Interval in Milliseconds |
+| `sen_%d_if` | String | `""` | Max 16 chars | Interface type (`UART`, leer = legacy) — **Implementierung:** `config_manager.cpp` |
+| `sen_%d_urx` | uint8_t | `255` | 0-39 or 255 | UART RX pin (255 = unset; 0 = invalid) |
+| `sen_%d_utx` | uint8_t | `255` | 0-39 or 255 | UART TX pin (255 = unset; 0 = invalid) |
+| `sen_%d_ubd` | uint32_t | `9600` | 9600-115200 | UART baud rate (MH-Z19/SEN0220 default 9600) |
 
 **Note:** Sensor-Array-Elemente haben **keine Default-Values**. Keys werden nur geschrieben, wenn ein Sensor konfiguriert wird.
 
@@ -304,6 +308,14 @@ Since R20-P11: NVS writes are skipped for identical config pushes (0 writes) and
 
   - `sensor_{i}_interval` (uint32_t) - **✅ Phase 2C** Mess-Intervall in Millisekunden (1000-300000, default: 30000)
 
+  - `sen_{i}_if` (String) - Interface-Typ (z.B. `"UART"` für MH-Z19/SEN0220 CO2)
+
+  - `sen_{i}_urx` (uint8_t) - UART RX-Pin (255 = unset)
+
+  - `sen_{i}_utx` (uint8_t) - UART TX-Pin (255 = unset)
+
+  - `sen_{i}_ubd` (uint32_t) - UART Baudrate (default: 9600)
+
 ## Actuator Configuration
 
 - **Namespace**: `actuator_config`
@@ -404,7 +416,7 @@ Das System unterstützt **18 MQTT Topic-Patterns** (nicht nur 13):
 - WiFi: 7 Keys
 - Zone: 6 Keys
 - System: 6 Keys
-- Sensors: 1 + (8 × 20) = 161 Keys (bei 20 Sensoren, **+2 Keys Phase 2C: mode, interval**)
+- Sensors: 1 + (8 × 20) = 161 Keys (bei 20 Sensoren, **+2 Keys Phase 2C: mode, interval**; UART-CO2 optional +4 Keys pro Sensor: `sen_%d_if`, `sen_%d_urx`, `sen_%d_utx`, `sen_%d_ubd`)
 - Actuators: 1 + (10 × 20) = 201 Keys (bei 20 Aktoren)
 - Offline Rules: 3 Keys (ofr_ver, ofr_count, ofr_blob = Blob v1, **SAFETY-P4 + LE-01**)
 - **TOTAL: ~385 Keys** (bei voller Auslastung)

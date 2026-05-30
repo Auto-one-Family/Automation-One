@@ -15,25 +15,21 @@
 
 // Memory guard (ESP32 without PSRAM):
 // 15 slots consumed ~33 KB heap and repeatedly prevented CommTask creation on real devices.
-// 8 slots still absorb short bursts while preserving headroom for Core-0 network task startup.
+// Dev/WROOM: 8 slots still absorb short bursts while preserving headroom for Core-0 network task startup.
+// S3 N8R8: 16 slots × ~2180 B ≈ 35 KB DRAM (~9% free heap after queue init).
 // (AUT-344: older docs may still say 15 — single queue `g_publish_queue`, depth is PUBLISH_QUEUE_SIZE.)
-static const uint8_t  PUBLISH_QUEUE_SIZE      = 8;      // 8 * ~2180 B = ~18 KB heap
+#ifdef ESP32_S3_DEVKIT_MODE
+static const uint8_t  PUBLISH_QUEUE_SIZE           = 16;
+static const uint16_t PUBLISH_PAYLOAD_MAX_LEN      = 2048;
+static const uint8_t  PUBLISH_QUEUE_SHED_WATERMARK = 8;   // 50% of 16 slots
+#else
+static const uint8_t  PUBLISH_QUEUE_SIZE           = 8;      // 8 * ~2180 B = ~18 KB heap
+static const uint16_t PUBLISH_PAYLOAD_MAX_LEN      = 1536;
+static const uint8_t  PUBLISH_QUEUE_SHED_WATERMARK = 4;   // 50% of 8 slots
+#endif
 static const uint16_t PUBLISH_TOPIC_MAX_LEN   = 128;
 // AUT-134: Heartbeat payload can exceed 1KB during reconnect/config bursts.
-// 1536 B provides headroom without materially impacting heap safety.
-static const uint16_t PUBLISH_PAYLOAD_MAX_LEN = 1536;
-
-// AUT-55: When queue fill >= watermark, non-critical messages are proactively shed
-// to preserve slots for critical publishes (alerts, responses, intent_outcome).
-//
-// Why this matters for realtime actuator control:
-// if the queue runs too hot, transport writes become bursty and can block long enough
-// to delay actuator response/status feedback visible in frontend controls.
-//
-// Lower watermark = earlier pressure handling:
-// - reduces risk of blocking publish bursts
-// - favors control-path responsiveness over telemetry completeness under stress
-static const uint8_t  PUBLISH_QUEUE_SHED_WATERMARK = 4;  // 50% of 8 slots
+// 1536 B (Dev) / 2048 B (S3) provides headroom without materially impacting heap safety.
 
 struct PublishRequest {
     char    topic[PUBLISH_TOPIC_MAX_LEN];

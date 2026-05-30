@@ -15,12 +15,10 @@
 #define BOARD_TYPE "XIAO_ESP32C3"
 #define MAX_GPIO_PINS 12  // XIAO has limited GPIO pins (0-21, but many reserved)
 
-// ============================================
-// HARDWARE CONFIGURATION NAMESPACE
-// ============================================
-// All hardware-specific constants in namespace to avoid global pollution
-
 namespace HardwareConfig {
+
+// Server-normalized hardware_type for MQTT heartbeat (matches El Servador constants)
+constexpr char HEARTBEAT_HARDWARE_TYPE[] = "XIAO_ESP32_C3";
 
 // ============================================
 // RESERVED PINS (CRITICAL - DO NOT USE!)

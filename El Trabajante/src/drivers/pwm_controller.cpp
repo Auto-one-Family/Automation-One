@@ -12,12 +12,14 @@
 // ============================================
 #ifdef XIAO_ESP32C3
     #include "../config/hardware/xiao_esp32c3.h"
+#elif defined(ESP32_S3_DEVKIT_MODE)
+    #include "../config/hardware/esp32_s3_devkit.h"
 #else
     #include "../config/hardware/esp32_dev.h"
+#endif
 
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "PWM";
-#endif
 
 // ============================================
 // GLOBAL INSTANCE

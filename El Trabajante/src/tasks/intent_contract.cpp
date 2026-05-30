@@ -1261,11 +1261,13 @@ bool publishIntentOutcome(const char* flow,
     // Critical outcomes still persist to NVS and replay when publish fails.
     const uint8_t outcome_qos = 0;
     uint8_t outcome_retries = 3;
+#ifndef MQTT_USE_PUBSUBCLIENT
     const PublishQueuePressureStats pq_stats = getPublishQueuePressureStats();
     if (pq_stats.fill_level >= PUBLISH_QUEUE_SHED_WATERMARK) {
         // Under queue pressure, avoid retry storms and hand over to NVS replay path.
         outcome_retries = 0;
     }
+#endif
     bool ok = mqttClient.safePublish(topic, payload, outcome_qos, outcome_retries);
     bool persisted_for_replay = false;
     if (ok) {

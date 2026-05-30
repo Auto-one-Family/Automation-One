@@ -48,6 +48,11 @@
 #define ERROR_ONEWIRE_READ_TIMEOUT        1028  // Device read timeout
 #define ERROR_ONEWIRE_DUPLICATE_ROM       1029  // ROM-Code already registered
 
+#define ERROR_UART_INIT_FAILED            1033  // UART CO2 bus init failed
+#define ERROR_UART_READ_TIMEOUT           1034  // UART CO2 read timeout
+#define ERROR_UART_CHECKSUM_FAILED        1035  // UART CO2 frame checksum failed
+#define ERROR_UART_INVALID_PPM            1036  // UART CO2 PPM out of range
+
 #define ERROR_PWM_INIT_FAILED       1030
 #define ERROR_PWM_CHANNEL_FULL      1031
 #define ERROR_PWM_SET_FAILED        1032
@@ -369,6 +374,11 @@ inline const char* getErrorDescription(uint16_t error_code) {
     case ERROR_ONEWIRE_BUS_NOT_INITIALIZED: return "OneWire bus not initialized (call begin() first)";
     case ERROR_ONEWIRE_READ_TIMEOUT: return "OneWire device read timeout (device not responding)";
     case ERROR_ONEWIRE_DUPLICATE_ROM: return "OneWire ROM-Code already registered for another sensor";
+
+    case ERROR_UART_INIT_FAILED: return "Failed to initialize UART CO2 sensor";
+    case ERROR_UART_READ_TIMEOUT: return "UART CO2 read timeout";
+    case ERROR_UART_CHECKSUM_FAILED: return "UART CO2 frame checksum validation failed";
+    case ERROR_UART_INVALID_PPM: return "UART CO2 PPM value out of valid range";
 
     case ERROR_PWM_INIT_FAILED: return "Failed to initialize PWM controller";
     case ERROR_PWM_CHANNEL_FULL: return "All PWM channels already in use";

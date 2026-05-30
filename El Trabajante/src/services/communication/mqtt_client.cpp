@@ -9,6 +9,15 @@
 #include "../../utils/time_manager.h"
 #include "../../config/feature_flags.h"
 #include "../../config/firmware_version.h"
+
+#ifdef XIAO_ESP32C3
+    #include "../../config/hardware/xiao_esp32c3.h"
+#elif defined(ESP32_S3_DEVKIT_MODE)
+    #include "../../config/hardware/esp32_s3_devkit.h"
+#else
+    #include "../../config/hardware/esp32_dev.h"
+#endif
+
 #include <WiFi.h>
 #include <sdkconfig.h>
 #include <esp_system.h>
@@ -500,7 +509,7 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     // in loop() (CircuitBreaker OPEN → provisionManager.startAPModeForReconfig()).
     LOG_I(TAG, "[M2] ESP-IDF MQTT client started — connecting in background");
     // [FIX2-VERIFY] Log MQTT buffer config at connect time so serial monitor confirms
-    // OUTBOX=16384 (via sdkconfig CONFIG_MQTT_OUTBOX_SIZE_BYTES) is active.
+    // CONFIG_MQTT_OUTBOX_SIZE_BYTES from sdkconfig is active.
     // out_buffer_size is the transport send buffer (runtime); OUTBOX is compile-time sdkconfig.
     {
         char cfg_log[160];
@@ -509,11 +518,17 @@ bool MQTTClient::connect(const MQTTConfig& config) {
 #else
         const unsigned outbox_expiry_ms = 0U;
 #endif
+#if defined(CONFIG_MQTT_OUTBOX_SIZE_BYTES)
+        const unsigned outbox_size_bytes = static_cast<unsigned>(CONFIG_MQTT_OUTBOX_SIZE_BYTES);
+#else
+        const unsigned outbox_size_bytes = 16384U;
+#endif
         snprintf(cfg_log, sizeof(cfg_log),
                  "[FIX2-VERIFY] MQTT cfg: out_buffer=%u buffer=%u "
-                 "OUTBOX=16384(sdkconfig) expiry=%ums net_timeout=%dms",
+                 "OUTBOX=%u(sdkconfig) expiry=%ums net_timeout=%dms",
                  (unsigned)mqtt_cfg.out_buffer_size,
                  (unsigned)mqtt_cfg.buffer_size,
+                 outbox_size_bytes,
                  outbox_expiry_ms,
                  mqtt_cfg.network_timeout_ms);
         LOG_I(TAG, cfg_log);
@@ -884,7 +899,7 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
     } else if (msg_id == -2) {
         uint32_t full_count = g_publish_outbox_full_count.fetch_add(1) + 1;
         // [FIX5-VERIFY] Serial confirms outbox-full events with heap + counter so we
-        // can verify that OUTBOX=16384 (sdkconfig) reduces this count under burst load.
+        // can verify CONFIG_MQTT_OUTBOX_SIZE_BYTES reduces this count under burst load.
         {
             char outbox_log[112];
             snprintf(outbox_log, sizeof(outbox_log),
@@ -1900,6 +1915,7 @@ void MQTTClient::publishHeartbeat(bool force) {
     // [FIX5-VERIFY] firmware_version in core heartbeat — server can confirm which
     // firmware build is running without a separate API call or provisioning page.
     payload += "\"firmware_version\":\"" + String(KAISER_FIRMWARE_VERSION_STRING) + "\",";
+    payload += "\"hardware_type\":\"" + String(HardwareConfig::HEARTBEAT_HARDWARE_TYPE) + "\",";
     payload += "\"sensor_count\":" + String(sensorManager.getActiveSensorCount()) + ",";
     payload += "\"actuator_count\":" + String(actuatorManager.getActiveActuatorCount()) + ",";
     // Expose active offline-rule count so server-side drift detection can
