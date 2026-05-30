@@ -242,7 +242,11 @@ extern ConfigManager& configManager;
 
 **Backends:** **Standard (ohne Define, `esp32_dev`):** ESP-IDF MQTT (`esp_mqtt_client_handle_t`, `g_mqtt_connected`, Event-Handler `MQTT_EVENT_*`). **`MQTT_USE_PUBSUBCLIENT=1`** (seeed_xiao, Wokwi): PubSubClient + `offline_buffer_`, `setCallback`. Partition/SDK: `sdkconfig.defaults` (OUTBOX 16384, `CONFIG_MQTT_TASK_CORE_SELECTION_*`); S3-Env merged `sdkconfig.s3.defaults` (OUTBOX 65536, LWIP 32768, AUT-494).
 
-**SAFETY-RTOS M3 (nur ESP-IDF):** `void processPublishQueue()` leert `g_publish_queue` (Core 1 → Core 0); Aufruf aus `communication_task.cpp` nach `loop()`. `publish()` auf Core 1 enqueued. Queue-Konstanten: Basis-Sizing in `publish_queue_constants.h` (SIZE=10, SHED=5, AUT-481 P3); adaptive Drain 1–2/Tick (`publish_queue_policy.h`); S3 N8R8 (`ESP32_S3_DEVKIT_MODE`) überschreibt in `publish_queue.h` auf 16×2048 B, Shed-Watermark 8 (AUT-495).
+**SAFETY-RTOS M3 (nur ESP-IDF):** `void processPublishQueue()` leert `g_publish_queue` (Core 1 → Core 0); Aufruf aus `communication_task.cpp` nach `loop()`. `publish()` auf Core 1 enqueued. Queue-Konstanten: Basis-Sizing in `publish_queue_constants.h` (SIZE=10, SHED=5, AUT-481 P3); adaptive Drain 1–2/Tick (`publish_queue_policy.h`); S3 N8R8 (`ESP32_S3_DEVKIT_MODE`) überschreibt in `publish_queue.h` auf 16×2048 B, Shed-Watermark 8 (AUT-495). `tryQueuePublish()` Signatur: 7. Parameter `unsigned long defer_ms = 0` (Placeholder, AUT-484 Compat, aktuell ignoriert — deferred-scheduling noch nicht implementiert).
+
+**AUT-484 Publish-Pacing (nur ESP-IDF):** `deferRuntimeCriticalPublishPace_()` prüft ob `RUNTIME_CRITICAL_PUBLISH_INTER_PACE_MS=120ms` seit letztem kritischen Publish vergangen ist; bei Unterschreitung wird die Message in die Queue eingereiht statt direkt gesendet. Gilt für `isRealtimeResponsePublishTopic()` und `isIntentOutcomePublishTopic()` (außer `/system/intent_outcome/lifecycle`). Bootstrap-Subscriptions werden mit `SUBSCRIPTION_INTER_PACE_MS` Abstand verarbeitet um Subscribe-Burst beim Connect zu vermeiden.
+
+**AUT-539 TCP-Stack-Härtung (nur ESP-IDF):** keepalive=60s (statt 90s) in `main.cpp setup()`. `processManagedReconnect_()`: nach `managed_reconnect_attempts_ > 5` wird Hard-Reset durchgeführt (`esp_mqtt_client_stop()` + 200ms + `esp_mqtt_client_start()`) statt `esp_mqtt_client_reconnect()`, um CLOSE_WAIT-Zombie-Sockets zu bereinigen.
 
 **Dependencies:** WiFiManager, CircuitBreaker, TopicBuilder
 ```cpp

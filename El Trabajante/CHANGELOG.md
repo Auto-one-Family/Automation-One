@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] - TCP-Stack-Härtung + Publish-Pacing - 2026-05-30
+
+### Fixed
+
+- **AUT-539 Fix 1 (vendor):** SO_KEEPALIVE auf ESP-IDF-Transport-Layer gesetzt via
+  `esp_transport_tcp_set_keep_alive()` (idle=10s, interval=5s, count=3). Verhindert
+  TCP-Half-Open/Socket-Leak im Reconnect-Loop nach NAT-Timeout.
+- **AUT-539 Fix 2 (`mqtt_client.cpp`):** `processManagedReconnect_()` führt Hard-Reset
+  (`esp_mqtt_client_stop()` + 200ms + `esp_mqtt_client_start()`) nach >5 Soft-Reconnect-
+  Versuchen durch. Behebt finales Stuck-State bei CLOSE_WAIT-Zombie-Socket.
+- **AUT-539 Fix 3 (`main.cpp`):** `mqtt_config.keepalive` von 90s auf 60s reduziert.
+  5 PINGREQ/5min statt 3, gibt mehr Marge gegen FritzBox-NAT-Timeout (~300s).
+- **AUT-484 (`mqtt_client.cpp`):** Runtime-Critical-Publish-Pacing via
+  `deferRuntimeCriticalPublishPace_()` — Mindestabstand `RUNTIME_CRITICAL_PUBLISH_INTER_PACE_MS=120ms`
+  zwischen intent_outcome/realtime-response Publishes. Schützt keepalive/TCP bei Burst.
+- **AUT-484 (`mqtt_client.cpp`):** Bootstrap-Subscription-Pacing — nach jeder
+  config-subscription wird `SUBSCRIPTION_INTER_PACE_MS` Verzögerung auf nächste Subscription
+  gesetzt. Verhindert Subscribe-Burst beim Verbindungsaufbau.
+- **Compile-Fix (`publish_queue.h/.cpp`):** `tryQueuePublish()` akzeptiert jetzt optionales
+  7. Argument `unsigned long defer_ms = 0` (Placeholder für zukünftige deferred-publish-
+  Unterstützung, aktuell ignoriert). Behebt Build-Fehler durch AUT-484-Call-Site.
+
+---
+
 ## [1.0.0] - Phase 1 Core Infrastructure - 2025-11-14
 
 ### Added

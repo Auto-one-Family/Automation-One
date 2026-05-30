@@ -3153,8 +3153,12 @@ def process_sensor_data(payload):
 **ESP32-Verhalten:**
 1. Lokaler Offline-Buffer (max 100 Messages)
 2. Exponential-Backoff-Reconnect (1s → 2s → 4s → ... → max 60s)
-3. Weiterhin Sensor-Readings (im Buffer)
-4. Heartbeat-Status → `mqtt_connected: false`
+3. **AUT-539 Fix 2:** Nach >5 fehlgeschlagenen Soft-Reconnects (`managed_reconnect_attempts_ > 5`)
+   wird Hard-Reset ausgelöst: `esp_mqtt_client_stop()` + 200ms Pause + `esp_mqtt_client_start()`.
+   Behebt TCP-Half-Open-Zombie-Sockets (CLOSE_WAIT), bei denen `esp_mqtt_client_reconnect()`
+   in `esp_transport_close()` hängt. `managed_reconnect_attempts_` wird danach auf 0 zurückgesetzt.
+4. Weiterhin Sensor-Readings (im Buffer)
+5. Heartbeat-Status → `mqtt_connected: false`
 
 **Recovery:**
 1. Reconnect erfolgreich
