@@ -1410,7 +1410,22 @@ void MQTTClient::processManagedReconnect_() {
                    " last_errno=" + String(last_transport_errno_));
     // #endregion
 
-    esp_err_t err = esp_mqtt_client_reconnect(mqtt_client_);
+    esp_err_t err;
+    if (managed_reconnect_attempts_ > 5) {
+        /* AUT-539 Fix 2: Hard-Reset after 5 failed soft-reconnects.
+         * esp_mqtt_client_reconnect() hangs on CLOSE_WAIT zombie socket in
+         * esp_transport_close() — recovery loop breaks. stop+start mirrors the
+         * initial connect path (Z.467-472) and forces full transport teardown
+         * including socket close. */
+        ESP_LOGW(TAG, "[AUT-539] Hard-Reset MQTT-Client nach %u Soft-Reconnect-Versuchen",
+                 (unsigned)managed_reconnect_attempts_);
+        esp_mqtt_client_stop(mqtt_client_);
+        vTaskDelay(pdMS_TO_TICKS(200));
+        err = esp_mqtt_client_start(mqtt_client_);
+        managed_reconnect_attempts_ = 0;
+    } else {
+        err = esp_mqtt_client_reconnect(mqtt_client_);
+    }
     if (err != ESP_OK) {
         LOG_W(TAG, String("[INC-EA5484] managed reconnect request failed: ") + esp_err_to_name(err));
         // Keep managed reconnect active even after transient ESP_FAIL/INVALID_STATE.

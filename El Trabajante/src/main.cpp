@@ -3233,7 +3233,9 @@ void setup() {
   mqtt_config.client_id = configManager.getESPId();
   mqtt_config.username = wifi_config.mqtt_username;  // Can be empty (Anonymous)
   mqtt_config.password = wifi_config.mqtt_password;  // Can be empty (Anonymous)
-  mqtt_config.keepalive = 90;
+  // AUT-539 Fix 3: 90s -> 60s. FritzBox-NAT-Timeout typ. 300s.
+  // k=60 -> 5 PINGREQ/5min Marge; k=90 wuerde nur 3 erlauben.
+  mqtt_config.keepalive = 60;
   mqtt_config.timeout = 10;
 
   if (!mqttClient.connect(mqtt_config)) {
