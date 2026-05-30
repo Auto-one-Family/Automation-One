@@ -1123,11 +1123,23 @@ void routeIncomingMessage(const char* t, const char* p) {
     // ─── Broadcast emergency ─────────────────────────────────────────────────
     String broadcast_emergency_topic = String(TopicBuilder::buildBroadcastEmergencyTopic());
     if (topic == broadcast_emergency_topic) {
+        // MQTT retain deletion uses zero-length payload (server startup / mosquitto_pub -r -n).
+        // Must not surface as ERROR 3016 — no command intent, no fail-safe stop.
+        if (payload.length() == 0) {
+            LOG_D(TAG, "Broadcast emergency: empty payload (MQTT retain deletion), ignoring");
+            return;
+        }
+
         // Server payload includes command, reason, issued_by, timestamp (ISO-string ~32 chars),
         // devices_stopped, actuators_stopped — minimum ~300 bytes; 512 gives safe headroom.
         IntentMetadata metadata = extractIntentMetadataFromPayload(payload.c_str(), "emergency");
         DynamicJsonDocument doc(512);
         DeserializationError error = deserializeJson(doc, payload);
+
+        if (error == DeserializationError::EmptyInput) {
+            LOG_D(TAG, "Broadcast emergency: EmptyInput (retain deletion), ignoring");
+            return;
+        }
 
         if (error) {
             uint32_t parse_count = g_emergency_parse_error_count.fetch_add(1) + 1;
