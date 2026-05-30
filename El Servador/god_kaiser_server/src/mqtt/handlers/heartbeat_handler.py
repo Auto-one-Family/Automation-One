@@ -1421,6 +1421,23 @@ class HeartbeatHandler:
             wifi_ip = payload.get("wifi_ip")
             if wifi_ip:
                 esp_device.ip_address = wifi_ip
+            heartbeat_hardware_type = payload.get("hardware_type")
+            if heartbeat_hardware_type and esp_device.hardware_type != "MOCK_ESP32":
+                if heartbeat_hardware_type not in constants.HARDWARE_TYPES:
+                    logger.warning(
+                        "Unknown hardware_type '%s' from %s heartbeat — storing as reported",
+                        heartbeat_hardware_type,
+                        esp_device.device_id,
+                    )
+                if heartbeat_hardware_type != esp_device.hardware_type:
+                    logger.info(
+                        "Updating hardware_type for %s: %s -> %s",
+                        esp_device.device_id,
+                        esp_device.hardware_type,
+                        heartbeat_hardware_type,
+                    )
+                    esp_device.hardware_type = heartbeat_hardware_type
+                current_metadata["hardware_type"] = heartbeat_hardware_type
             current_metadata["last_uptime"] = payload.get("uptime")
             current_metadata["last_sensor_count"] = payload.get(
                 "sensor_count", payload.get("active_sensors", 0)

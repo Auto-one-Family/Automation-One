@@ -1,9 +1,19 @@
 # Pi-Deployment-Konfiguration — Grundeinstellungen & Anpassungsbericht
 
-**Stand:** 2026-05-11  
+**Stand:** 2026-05-29  
 **Ziel:** AutomationOne auf Raspberry Pi (Linux, aarch64, Docker) reproduzierbar deployen.  
 **Kontext:** Entwicklung unter Windows, Produktion auf Pi (z.B. Host `growy.local`).  
 **Doku-Pfad:** `docs/pi-deployment-config.md` (Block A–D: allgemeine Pi-Konfiguration; **Block E:** referenziert NVMe-Migration und Agent-Lauf auf Host **growy2**, Projektverzeichnis **`/home/robin/autoone`**).
+
+### Produktions-Hosts (Vier-Systeme-Modell, Stand 2026-05-29)
+
+| System | Host | LAN-IP | Slack-Channel | Risiko |
+|--------|------|--------|---------------|--------|
+| pi-elbherb (LPAP) | `growy2` | `192.168.178.67` | `#pi-elbherb` (`C0B5HJP66JX`) | STRICT |
+| pi-home (Cannabis-Indoor) | `AutoOne44` | `192.168.0.2` | `#pi-home` (`C0B5LJ89161`) | MEDIUM |
+| dev-local (Robins Win-PC) | — | localhost | `#dev-local` (`C0B70F0TNPK`) | FREE |
+
+> **Hinweis:** Frühere Briefings nannten pi-elbherb fälschlich `192.168.0.211`. Kanonische Quelle ist der Live-Channel `#pi-elbherb` bzw. `.claude/rules/slack-linear-konvention.md`. Deploy-Skripte (`scripts/deploy/*`) nutzen weiterhin `PI_SSH_HOST`-Override.
 
 ---
 
@@ -435,3 +445,4 @@ Aus `El Servador/god_kaiser_server/src/core/config.py` und `.env.example`:
 - **ESP32:** ESP_DISCOVERY_*, ESP_HEARTBEAT_TIMEOUT, ESP_CONNECTION_TIMEOUT
 - **Maintenance:** SENSOR_DATA_RETENTION_*, COMMAND_HISTORY_*, AUDIT_LOG_*, HEARTBEAT_LOG_*, DB_BACKUP_*
 - **Resilience:** CIRCUIT_BREAKER_*, RETRY_*, TIMEOUT_*, OFFLINE_BUFFER_*
+- **Sheets Export (AUT-442+):** SHEETS_EXPORT_ENABLED, SHEETS_SA_CREDENTIALS_PATH, SHEETS_SPREADSHEET_ID, SHEETS_SCOPES, SHEETS_EXPORT_INTERVAL_MINUTES, SHEETS_EXPORT_SENSOR_BATCH_SIZE, SHEETS_EXPORT_HISTORY_BATCH_SIZE, SHEETS_EXPORT_CORRELATION_WINDOW_SECONDS, SHEETS_TAB_GRANULARITY, SHEETS_RETRY_MAX_ATTEMPTS, SHEETS_RETRY_MAX_BACKOFF_SECONDS, SHEETS_BATCH_MIN_SIZE_FOR_SPLIT

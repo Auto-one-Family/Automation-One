@@ -30,6 +30,11 @@ def validate_gpio(gpio: int, board_type: str) -> tuple[bool, Optional[str]]:
             return False, f"GPIO {gpio} is out of range for XIAO ESP32-C3 (0-21)"
         if gpio in constants.GPIO_RESERVED_XIAO_ESP32C3:
             return False, f"GPIO {gpio} is reserved (USB pins) on XIAO ESP32-C3"
+    elif board_type == constants.HARDWARE_TYPE_ESP32_S3_DEVKITC1:
+        if gpio not in constants.GPIO_RANGE_ESP32_S3_DEVKITC1:
+            return False, f"GPIO {gpio} is out of range for ESP32-S3 DevKitC-1 (0-48)"
+        if gpio in constants.GPIO_RESERVED_ESP32_S3_DEVKITC1:
+            return False, f"GPIO {gpio} is reserved on ESP32-S3 DevKitC-1"
     else:
         return False, f"Unknown board type: {board_type}"
 
