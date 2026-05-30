@@ -35,6 +35,19 @@ from .topics import TopicBuilder
 
 logger = get_logger(__name__)
 
+# Suppress LWT messages delivered within this many seconds after server startup.
+# Two scenarios must be handled:
+#   1. Retained LWT (is_retained=True): broker replays stored will from before the restart.
+#   2. Session-takeover LWT (is_retained=False): when the ESP reconnects at the same time
+#      the server starts, the broker kicks the old session ("session taken over") and
+#      publishes the LWT as a fresh PUBLISH — paho sees msg.retain=False. The S3 check
+#      only on is_retained misses this and marks the device offline immediately.
+# 120s covers: server startup (~30s) + ESP reconnect + full state-push grace window
+# (STATE_PUSH_RECONNECT_DELAY_SECONDS=30s) + safety buffer. During this window the
+# health_check_esps job (every 60s) still marks genuinely offline devices via heartbeat
+# timeout, so no device can appear online indefinitely due to this suppression.
+_STARTUP_LWT_SUPPRESS_SECONDS = 120
+
 
 def _agent_debug_log(
     *,
@@ -89,6 +102,7 @@ class Subscriber:
         self.client = mqtt_client or MQTTClient.get_instance()
         self.handlers: Dict[str, Callable] = {}
         self._inbound_inbox = get_inbound_inbox_service()
+        self._startup_time = time.monotonic()
 
         # Capture main event loop for async handler execution
         # CRITICAL: SQLAlchemy AsyncEngine is bound to this loop
@@ -201,7 +215,7 @@ class Subscriber:
         """
         return self.client.subscribe(topic, qos)
 
-    def _route_message(self, topic: str, payload_str: str, retain: bool = False) -> None:
+    def _route_message(self, topic: str, payload_str: str, is_retained: bool = False) -> None:
         """
         Route incoming message to appropriate handler.
 
@@ -211,12 +225,30 @@ class Subscriber:
         Args:
             topic: MQTT topic
             payload_str: Message payload (JSON string)
-            retain: Paho RETAIN flag on delivery (True when broker replays a retained message)
+            is_retained: True when the broker replayed a retained message (paho msg.retain)
         """
         try:
             if self._is_shutting_down:
                 logger.debug("Dropping MQTT message during shutdown: %s", topic)
                 return
+
+            # S3 fix (extended): Suppress ALL LWT messages within startup grace window.
+            # Covers two cases:
+            #   - Retained LWT (is_retained=True): broker replays stored will on subscribe.
+            #   - Session-takeover LWT (is_retained=False): concurrent ESP reconnect at
+            #     startup triggers a fresh LWT publish ("session taken over" in broker log).
+            # Both cases represent stale disconnect events, not the current session state.
+            if "/system/will" in topic:
+                elapsed = time.monotonic() - self._startup_time
+                if elapsed < _STARTUP_LWT_SUPPRESS_SECONDS:
+                    logger.info(
+                        "Suppressing startup LWT topic=%s retained=%s (%.1fs since start, grace=%ds)",
+                        topic,
+                        is_retained,
+                        elapsed,
+                        _STARTUP_LWT_SUPPRESS_SECONDS,
+                    )
+                    return
 
             # Skip empty payloads (used to clear retained messages per MQTT spec)
             if not payload_str or not payload_str.strip():
