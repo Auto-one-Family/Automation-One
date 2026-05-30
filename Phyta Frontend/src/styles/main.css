@@ -15,9 +15,20 @@
   --color-success: var(--color-success);
   --color-warning: var(--color-warning);
   --color-danger: var(--color-error);
+  --color-info: var(--color-info);
   --color-iridescent-1: var(--color-iridescent-1);
   --color-iridescent-2: var(--color-iridescent-2);
+  --color-iridescent-3: var(--color-iridescent-3);
   --color-glass-border: var(--glass-border);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-mono);
+  --text-xxs: var(--text-xxs);
+  --text-xs: var(--text-xs);
+  --text-sm: var(--text-sm);
+  --text-base: var(--text-base);
+  --text-lg: var(--text-lg);
+  --text-xl: var(--text-xl);
+  --text-2xl: var(--text-2xl);
 }
 
 @layer base {
@@ -28,9 +39,171 @@
   body {
     margin: 0;
     min-height: 100vh;
-    font-family: 'Outfit', system-ui, sans-serif;
+    font-family: var(--font-body);
     background: var(--color-bg-level-1);
     color: var(--color-text-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  #app {
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+  .phyta-page {
+    min-height: 100vh;
+    padding: var(--space-6);
+    background:
+      radial-gradient(ellipse 80% 50% at 50% -20%, color-mix(in srgb, var(--color-iridescent-2) 8%, transparent), transparent),
+      var(--color-bg-level-1);
+  }
+
+  .status-dot {
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: var(--radius-full);
+    flex-shrink: 0;
+  }
+
+  .status-dot--online {
+    background: var(--color-status-good);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--color-status-good) 60%, transparent);
+  }
+
+  .status-dot--stale {
+    background: var(--color-status-warning);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--color-status-warning) 45%, transparent);
+    outline: 1px solid color-mix(in srgb, var(--color-status-warning) 55%, var(--color-bg-level-1));
+    outline-offset: 1px;
+  }
+
+  .status-dot--offline {
+    background: var(--color-status-alarm);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--color-status-alarm) 55%, transparent);
+    outline: 1px solid color-mix(in srgb, var(--color-status-alarm) 70%, var(--color-bg-level-1));
+    outline-offset: 1px;
+  }
+
+  .status-dot--pending {
+    background: var(--color-iridescent-2);
+    animation: status-pulse 2s ease-in-out infinite;
+  }
+
+  .status-dot--unknown {
+    background: var(--color-text-muted);
+  }
+
+  .connection-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--glass-border);
+    background: var(--color-bg-secondary);
+    cursor: default;
+  }
+
+  .connection-indicator__dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: var(--radius-full);
+  }
+
+  .connection-indicator--live .connection-indicator__dot {
+    background: var(--color-success);
+    animation: connection-pulse 2s ease-in-out infinite;
+  }
+
+  .connection-indicator--connecting .connection-indicator__dot {
+    background: var(--color-warning);
+    animation: connection-pulse 1.2s ease-in-out infinite;
+  }
+
+  .connection-indicator--offline .connection-indicator__dot {
+    background: var(--color-status-alarm);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--color-status-alarm) 45%, transparent);
+  }
+
+  .phyta-input {
+    width: 100%;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--glass-border);
+    background: var(--color-bg-secondary);
+    padding: var(--space-2) var(--space-3);
+    color: var(--color-text-primary);
+    font-size: var(--text-base);
+    transition: border-color var(--transition-fast);
+  }
+
+  .phyta-input:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 25%, transparent);
+  }
+
+  .phyta-btn-primary {
+    border-radius: var(--radius-md);
+    background: var(--color-accent);
+    color: var(--color-text-inverse);
+    font-weight: 600;
+    transition: opacity var(--transition-fast), transform var(--transition-fast);
+  }
+
+  .phyta-btn-primary:hover:not(:disabled) {
+    opacity: 0.92;
+  }
+
+  .phyta-btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    left: -100%;
+  }
+  to {
+    left: 200%;
+  }
+}
+
+@keyframes status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-iridescent-2) 50%, transparent);
+  }
+  50% {
+    opacity: 0.65;
+    box-shadow: 0 0 10px 2px color-mix(in srgb, var(--color-iridescent-2) 35%, transparent);
+  }
+}
+
+@keyframes connection-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-success) 45%, transparent);
+  }
+  50% {
+    opacity: 0.7;
+    box-shadow: 0 0 6px 2px color-mix(in srgb, var(--color-success) 35%, transparent);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 

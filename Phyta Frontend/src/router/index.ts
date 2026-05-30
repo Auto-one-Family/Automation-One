@@ -9,6 +9,12 @@ const router = createRouter({
       redirect: '/hardware',
     },
     {
+      path: '/login',
+      name: 'login',
+      component: () => import('@/views/LoginView.vue'),
+      meta: { guestOnly: true },
+    },
+    {
       path: '/hardware',
       name: 'hardware',
       component: () => import('@/views/HardwareGridView.vue'),
@@ -17,7 +23,7 @@ const router = createRouter({
     {
       path: '/auth-hint',
       name: 'auth-hint',
-      component: () => import('@/views/AuthHintView.vue'),
+      redirect: { name: 'login', query: { redirect: '/hardware' } },
     },
     {
       path: '/hardware/:espId/scan',
@@ -30,7 +36,14 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   if (to.meta.requiresAuth && !hasAuthToken()) {
-    return { name: 'auth-hint' }
+    return {
+      name: 'login',
+      query: { redirect: to.fullPath },
+    }
+  }
+  if (to.meta.guestOnly && hasAuthToken()) {
+    const redirect = typeof to.query.redirect === 'string' ? to.query.redirect : '/hardware'
+    return redirect.startsWith('/') ? redirect : '/hardware'
   }
   return true
 })

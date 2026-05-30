@@ -1,15 +1,20 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { Cpu } from 'lucide-vue-next'
 import { getDeviceId } from '@/api/esp'
+import { getDeviceDisplayName } from '@/composables/usePhytaDeviceDisplay'
 import {
+  formatLastContactHint,
   statusDotClass,
   statusLabel,
   usePhytaEspStatus,
+  type PhytaEspStatus,
 } from '@/composables/usePhytaEspHealth'
 import type { PhytaEspDevice } from '@/types/esp'
 
 interface Props {
   device: PhytaEspDevice
+  deviceIndex?: number
 }
 
 const props = defineProps<Props>()
@@ -20,9 +25,35 @@ const emit = defineEmits<{
 
 const deviceId = computed(() => getDeviceId(props.device))
 const status = usePhytaEspStatus(() => props.device)
-const displayName = computed(
-  () => props.device.name || props.device.zone_name || deviceId.value,
+const displayName = computed(() => getDeviceDisplayName(props.device, props.deviceIndex))
+const contactHint = computed(() =>
+  formatLastContactHint(props.device.last_seen, status.value),
 )
+const showRenameHint = computed(
+  () => !props.device.name?.trim() && props.deviceIndex != null,
+)
+
+const cardStateClass = computed(() => {
+  const s = status.value as PhytaEspStatus
+  if (s === 'offline') return 'esp-grid-card--offline'
+  if (s === 'pending_approval') return 'esp-grid-card--pending'
+  return ''
+})
+
+const statusBadgeClass = computed(() => {
+  switch (status.value) {
+    case 'online':
+      return 'text-success bg-success/10 border border-success/30'
+    case 'stale':
+      return 'text-warning bg-warning/10 border border-warning/30'
+    case 'offline':
+      return 'text-danger bg-danger/10 border border-danger/40'
+    case 'pending_approval':
+      return 'text-iridescent-2 bg-iridescent-2/10 border border-iridescent-2/30'
+    default:
+      return 'text-dark-400 bg-dark-800 border border-glass-border'
+  }
+})
 
 function onClick(event: MouseEvent): void {
   const el = event.currentTarget as HTMLElement
@@ -33,25 +64,47 @@ function onClick(event: MouseEvent): void {
 <template>
   <button
     type="button"
-    class="esp-grid-card glass-panel iridescent-border w-full text-left p-4 rounded-lg transition-shadow hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-    :aria-label="`ESP ${displayName} öffnen`"
+    class="esp-grid-card glass-panel iridescent-border water-reflection w-full text-left p-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+    :class="cardStateClass"
+    :data-esp-id="deviceId"
+    :aria-label="`Gerät ${displayName} öffnen`"
     @click="onClick"
   >
     <div class="flex items-start gap-3">
       <span
-        class="mt-1 h-3 w-3 shrink-0 rounded-full"
         :class="statusDotClass(status)"
-        :title="statusLabel(status)"
+        :title="contactHint || statusLabel(status)"
+        aria-hidden="true"
       />
       <div class="min-w-0 flex-1">
-        <h3 class="truncate text-base font-medium text-dark-100">
-          {{ displayName }}
-        </h3>
-        <p class="text-sm text-dark-400 font-mono truncate">{{ deviceId }}</p>
-        <p class="mt-1 text-xs text-dark-300">{{ statusLabel(status) }}</p>
+        <div class="flex items-center gap-2">
+          <Cpu :size="14" class="shrink-0 text-dark-400" aria-hidden="true" />
+          <h3 class="truncate text-base font-medium text-dark-100">
+            {{ displayName }}
+          </h3>
+        </div>
+        <p class="mt-0.5 text-xs text-dark-400 font-mono truncate">{{ deviceId }}</p>
+        <p
+          v-if="showRenameHint"
+          class="mt-1 text-xxs text-dark-400 italic"
+        >
+          Noch kein Name — in Detailansicht anpassen
+        </p>
+        <p
+          class="mt-2 inline-flex items-center rounded-full px-2 py-0.5 text-xxs font-semibold"
+          :class="statusBadgeClass"
+        >
+          {{ statusLabel(status) }}
+        </p>
+        <p
+          v-if="contactHint"
+          class="mt-1 text-xxs text-dark-400"
+        >
+          {{ contactHint }}
+        </p>
         <p
           v-if="device.sensor_count != null || device.actuator_count != null"
-          class="mt-2 text-xs text-dark-400"
+          class="mt-2 font-mono text-xxs text-dark-400 tabular-nums"
         >
           {{ device.sensor_count ?? 0 }} Sensoren · {{ device.actuator_count ?? 0 }} Aktoren
         </p>
@@ -59,9 +112,3 @@ function onClick(event: MouseEvent): void {
     </div>
   </button>
 </template>
-
-<style scoped>
-.esp-grid-card {
-  background: var(--glass-bg-l2, var(--glass-bg));
-}
-</style>

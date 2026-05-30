@@ -223,6 +223,8 @@
      ═══════════════════════════════════════════════════════════════════════════ */
   --backdrop-color:       rgba(7, 7, 13, 0.85);
   --backdrop-color-light: rgba(7, 7, 13, 0.60);
+  --orbital-backdrop-color: rgba(4, 6, 15, 0.65);
+  --orbital-backdrop-blur: 8px;
   --backdrop-blur:        8px;
   --backdrop-blur-light:  4px;
 

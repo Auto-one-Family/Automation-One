@@ -1,8 +1,27 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { getDeviceId, listDevices } from '@/api/esp'
+import { getDeviceId, listDevices, updateDeviceName } from '@/api/esp'
 import type { ActuatorStatusPayload, EspHealthPayload, PhytaEspDevice, SensorDataPayload } from '@/types/esp'
 import { normalizeSensorType } from '@/utils/sensorMatch'
+import axios from 'axios'
+
+function formatApiError(e: unknown, fallback: string): string {
+  if (axios.isAxiosError(e)) {
+    const detail = e.response?.data as { detail?: unknown } | undefined
+    if (typeof detail?.detail === 'string') return detail.detail
+    if (Array.isArray(detail?.detail)) {
+      return detail.detail
+        .map((item: { msg?: string }) => item?.msg)
+        .filter(Boolean)
+        .join('; ')
+    }
+    if (e.response?.status === 422) {
+      return 'Ungültige API-Anfrage (z. B. page_size > 100). Bitte Seite neu laden.'
+    }
+    return e.message || fallback
+  }
+  return e instanceof Error ? e.message : fallback
+}
 
 export const ZONE_UNASSIGNED = '__unassigned__'
 
@@ -36,7 +55,7 @@ export const useEspStore = defineStore('phyta-esp', () => {
     try {
       devices.value = await listDevices()
     } catch (e) {
-      error.value = e instanceof Error ? e.message : 'ESP-Liste konnte nicht geladen werden'
+      error.value = formatApiError(e, 'ESP-Liste konnte nicht geladen werden')
       throw e
     } finally {
       isLoading.value = false
@@ -53,7 +72,8 @@ export const useEspStore = defineStore('phyta-esp', () => {
     if (!device?.sensors?.length) return
     const sensor = device.sensors.find((s) => matchSensorToEvent(s, data))
     if (!sensor) return
-    sensor.raw_value = data.raw_value ?? data.value ?? sensor.raw_value
+    const next = data.raw_value ?? data.value
+    if (next != null) sensor.raw_value = next
     sensor.unit = data.unit ?? sensor.unit
     sensor.quality = data.quality ?? sensor.quality
   }
@@ -76,6 +96,14 @@ export const useEspStore = defineStore('phyta-esp', () => {
     if (data.status) device.status = data.status
   }
 
+  async function renameDevice(espId: string, name: string): Promise<void> {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    await updateDeviceName(espId, trimmed)
+    const device = findDevice(espId)
+    if (device) device.name = trimmed
+  }
+
   return {
     devices,
     isLoading,
@@ -87,6 +115,7 @@ export const useEspStore = defineStore('phyta-esp', () => {
     applySensorData,
     applyActuatorStatus,
     applyEspHealth,
+    renameDevice,
   }
 })
 

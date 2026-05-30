@@ -30,6 +30,8 @@ export interface PhytaActuatorConfig {
   config_id?: string
   gpio: number
   actuator_type: string
+  /** Original ESP32 logical type (pump, valve, relay) — not interface type (digital). */
+  hardware_type?: string | null
   name?: string
   state?: string
   pwm_value?: number
@@ -38,6 +40,12 @@ export interface PhytaActuatorConfig {
 export interface EspDeviceListResponse {
   success: boolean
   data: PhytaEspDevice[]
+  pagination?: {
+    page: number
+    page_size: number
+    total_items: number
+    total_pages: number
+  }
 }
 
 export interface SensorDataPayload {

@@ -1,55 +1,66 @@
 <script setup lang="ts">
-/** Palette types per M-1/M-2 verify (level + fan/heater/light excluded). */
-const SENSOR_TYPES = [
-  { id: 'ds18b20', label: 'Temperatur (OneWire)' },
-  { id: 'sht31', label: 'Temp+Feuchte (I2C)' },
-  { id: 'bme280', label: 'BME280 (I2C)' },
-  { id: 'ph', label: 'pH (Analog)' },
-  { id: 'ec', label: 'EC (Analog)' },
-  { id: 'moisture', label: 'Boden (Analog)' },
-  { id: 'bh1750', label: 'Licht (I2C)' },
-  { id: 'co2', label: 'CO₂ (I2C)' },
-  { id: 'flow', label: 'Durchfluss' },
-] as const
+import { buildPaletteItems } from '@/utils/componentPalette'
 
-const ACTUATOR_TYPES = [
-  { id: 'pump', label: 'Pumpe' },
-  { id: 'valve', label: 'Ventil' },
-  { id: 'pwm', label: 'PWM' },
-  { id: 'relay', label: 'Relais' },
-] as const
+const emit = defineEmits<{
+  dragStart: []
+  dropped: []
+}>()
+
+const { sensors, actuators } = buildPaletteItems()
 
 function onDragStart(event: DragEvent, type: string, kind: 'sensor' | 'actuator'): void {
   event.dataTransfer?.setData('application/phyta-component', JSON.stringify({ type, kind }))
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
+  emit('dragStart')
 }
+
+function collapseAfterDrop(): void {
+  emit('dropped')
+}
+
+defineExpose({ collapseAfterDrop })
 </script>
 
 <template>
   <div
-    class="palette-drawer glass-panel border-b border-glass-border px-4 py-3"
+    class="palette-drawer"
     role="toolbar"
-    aria-label="Komponenten-Palette"
+    aria-label="Komponenten hinzufügen"
   >
-    <p class="mb-2 text-xs uppercase tracking-wide text-dark-400">Komponenten</p>
-    <div class="flex flex-wrap gap-2 overflow-x-auto pb-1">
-      <span
-        v-for="s in SENSOR_TYPES"
-        :key="s.id"
+    <div class="palette-drawer__row">
+      <button
+        v-for="item in sensors"
+        :key="item.id"
+        type="button"
         draggable="true"
-        class="cursor-grab rounded-md border border-glass-border bg-dark-900 px-3 py-1.5 text-xs text-dark-200"
-        @dragstart="onDragStart($event, s.id, 'sensor')"
+        class="palette-chip palette-chip--compact palette-chip--sensor"
+        :aria-label="`${item.label} hinzufügen`"
+        :title="`${item.label}${item.hint ? ` — ${item.hint}` : ''}`"
+        @dragstart="onDragStart($event, item.id, 'sensor')"
       >
-        {{ s.label }}
-      </span>
-      <span
-        v-for="a in ACTUATOR_TYPES"
-        :key="a.id"
+        <span class="palette-chip__icon" aria-hidden="true">
+          <component :is="item.icon" :size="12" />
+        </span>
+        <span class="palette-chip__label">{{ item.shortLabel }}</span>
+      </button>
+
+      <span class="palette-drawer__divider" aria-hidden="true" />
+
+      <button
+        v-for="item in actuators"
+        :key="item.id"
+        type="button"
         draggable="true"
-        class="cursor-grab rounded-md border border-iridescent-1/40 bg-dark-900 px-3 py-1.5 text-xs text-dark-200"
-        @dragstart="onDragStart($event, a.id, 'actuator')"
+        class="palette-chip palette-chip--compact palette-chip--actuator"
+        :aria-label="`${item.label} hinzufügen`"
+        :title="`${item.label}${item.hint ? ` — ${item.hint}` : ''}`"
+        @dragstart="onDragStart($event, item.id, 'actuator')"
       >
-        {{ a.label }}
-      </span>
+        <span class="palette-chip__icon" aria-hidden="true">
+          <component :is="item.icon" :size="12" />
+        </span>
+        <span class="palette-chip__label">{{ item.shortLabel }}</span>
+      </button>
     </div>
   </div>
 </template>

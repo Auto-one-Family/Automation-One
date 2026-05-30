@@ -49,15 +49,15 @@ export function usePhytaEspStatus(device: MaybeRefOrGetter<PhytaEspDevice>) {
 export function statusDotClass(status: PhytaEspStatus): string {
   switch (status) {
     case 'online':
-      return 'bg-success shadow-[0_0_8px_var(--color-success)]'
+      return 'status-dot status-dot--online'
     case 'stale':
-      return 'bg-warning'
+      return 'status-dot status-dot--stale'
     case 'pending_approval':
-      return 'bg-iridescent-2 animate-pulse'
+      return 'status-dot status-dot--pending'
     case 'offline':
-      return 'bg-dark-400'
+      return 'status-dot status-dot--offline'
     default:
-      return 'bg-dark-500'
+      return 'status-dot status-dot--unknown'
   }
 }
 
@@ -74,4 +74,46 @@ export function statusLabel(status: PhytaEspStatus): string {
     default:
       return 'Unbekannt'
   }
+}
+
+/** Relative offline/stale hint for operator cards. */
+export function formatLastContactHint(
+  lastSeen: string | null | undefined,
+  status: PhytaEspStatus,
+): string | null {
+  if (status === 'online') return null
+  if (!lastSeen) {
+    return status === 'offline' ? 'Kein Kontakt' : null
+  }
+
+  const ageMs = Date.now() - new Date(lastSeen).getTime()
+  if (ageMs < 0) return null
+
+  const minutes = Math.floor(ageMs / 60_000)
+  const hours = Math.floor(minutes / 60)
+
+  if (status === 'offline') {
+    if (minutes < 1) return 'Offline seit wenigen Sekunden'
+    if (minutes < 60) {
+      return minutes === 1 ? 'Offline seit 1 Minute' : `Offline seit ${minutes} Minuten`
+    }
+    if (hours < 24) {
+      return hours === 1 ? 'Offline seit 1 Stunde' : `Offline seit ${hours} Stunden`
+    }
+    return 'Seit gestern offline'
+  }
+
+  if (status === 'stale') {
+    if (minutes < 1) return 'Letzter Kontakt vor wenigen Sekunden'
+    if (minutes < 60) {
+      return minutes === 1
+        ? 'Letzter Kontakt vor 1 Minute'
+        : `Letzter Kontakt vor ${minutes} Minuten`
+    }
+    return hours === 1
+      ? 'Letzter Kontakt vor 1 Stunde'
+      : `Letzter Kontakt vor ${hours} Stunden`
+  }
+
+  return null
 }
