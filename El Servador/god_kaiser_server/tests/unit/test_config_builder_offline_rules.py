@@ -74,14 +74,14 @@ def _cooling_condition(esp_id: str, gpio: int = 4, sensor_type: str = "sht31_tem
     }
 
 
-def _actuator_action(esp_id: str, gpio: int = 18) -> dict:
+def _actuator_action(esp_id: str, gpio: int = 18, duration_seconds: int = 0) -> dict:
     return {
         "type": "actuator_command",
         "esp_id": esp_id,
         "gpio": gpio,
         "command": "ON",
         "value": 1.0,
-        "duration_seconds": 0,
+        "duration_seconds": duration_seconds,
     }
 
 
@@ -120,6 +120,7 @@ class TestExtractOfflineRuleUnit:
         # Cooling fields must be zero (heating mode)
         assert result["activate_above"] == 0.0
         assert result["deactivate_below"] == 0.0
+        assert result["max_on_seconds"] == 0
 
     # ------------------------------------------------------------------
     # 2. Local cooling rule
@@ -145,6 +146,7 @@ class TestExtractOfflineRuleUnit:
         # Heating fields must be zero (cooling mode)
         assert result["activate_below"] == 0.0
         assert result["deactivate_above"] == 0.0
+        assert result["max_on_seconds"] == 0
 
     # ------------------------------------------------------------------
     # 3. Cross-ESP rule: sensor on ESP_A, actuator on ESP_B → excluded
@@ -215,7 +217,7 @@ class TestExtractOfflineRuleUnit:
                 "end_minute": 0,
                 "timezone": "Europe/Berlin",
             },
-            actions=[_actuator_action(ESP_ID_A, gpio=25)],
+            actions=[_actuator_action(ESP_ID_A, gpio=25, duration_seconds=7)],
         )
 
         result = builder._extract_offline_rule(rule, ESP_ID_A)
@@ -227,6 +229,38 @@ class TestExtractOfflineRuleUnit:
         assert result["time_filter"]["enabled"] is True
         assert result["time_filter"]["start_hour"] == 6
         assert result["time_filter"]["end_hour"] == 18
+        assert result["max_on_seconds"] == 7
+
+    def test_time_window_only_rule_uses_legacy_duration_alias(self):
+        """Legacy action field `duration` is mapped to max_on_seconds in offline rule."""
+        builder = self._builder()
+        rule = _make_rule(
+            rule_name="irrigation_schedule_legacy_duration",
+            trigger_conditions={
+                "type": "time_window",
+                "start_hour": 13,
+                "start_minute": 0,
+                "end_hour": 13,
+                "end_minute": 1,
+                "timezone": "Europe/Berlin",
+            },
+            actions=[
+                {
+                    "type": "actuator_command",
+                    "esp_id": ESP_ID_A,
+                    "gpio": 15,
+                    "command": "ON",
+                    "value": 1.0,
+                    "duration": 5,
+                }
+            ],
+        )
+
+        result = builder._extract_offline_rule(rule, ESP_ID_A)
+
+        assert result is not None
+        assert result["sensor_value_type"] == ConfigPayloadBuilder.TIME_WINDOW_ONLY_SENSOR_TYPE_ON
+        assert result["max_on_seconds"] == 5
 
     def test_time_window_only_rule_without_on_action_is_skipped(self):
         """time_window-only with OFF action is skipped to avoid ambiguous inverse behavior."""

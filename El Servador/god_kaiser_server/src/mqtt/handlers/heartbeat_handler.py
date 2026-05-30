@@ -76,10 +76,13 @@ RECONNECT_THRESHOLD_SECONDS = 150
 STATE_PUSH_COOLDOWN_SECONDS = 120
 ADOPTION_GRACE_SECONDS = 2.0
 SESSION_STARTUP_REJECT_WINDOW_SECONDS = 1.0
-# INC-EA5484: ESP needs time to finish QoS handshakes for 12 bootstrap subscriptions
-# before zone/assign arrives. Without delay, TCP send buffer fills (EAGAIN) and
-# MQTT client freezes until broker keepalive timeout (90s).
-STATE_PUSH_RECONNECT_DELAY_SECONDS = 3.0
+# INC-EA5484 / AUT-346: After a long broker outage (e.g. server restart), the ESP
+# reconnects with a full QoS OUTBOX backlog accumulated during the disconnect.
+# Draining the outbox + completing 12 bootstrap subscription handshakes takes up to
+# ~32s (observed). Pushing zone/assign before the outbox is drained causes TCP
+# EAGAIN → MQTT client freeze → broker keepalive timeout (90s) → second disconnect.
+# 30s gives the ESP enough margin to stabilize before any server-side state push.
+STATE_PUSH_RECONNECT_DELAY_SECONDS = 30.0
 
 # Config-Push: Cooldown between auto config pushes (prevent mismatch loop).
 # Keep this below one heartbeat period (60s) so a lost first push can recover

@@ -892,7 +892,11 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
                      (unsigned)full_count, topic.c_str(), (unsigned)ESP.getFreeHeap());
             LOG_W(TAG, outbox_log);
         }
-        circuit_breaker_.recordFailure();
+        // AUT-390: OUTBOX full = ESP-seitiger Backpressure (TCP-Buffer voll oder IDF-Queue erschoepft).
+        // Das ist KEIN Broker-Ausfall — der Broker ist erreichbar, aber der ESP kann momentan
+        // nicht mehr senden. recordFailure() hier wuerde den CB in ~250ms oeffnen (5 Failures
+        // bei 50ms-Takt) und den Heartbeat blockieren → Broker-Keepalive-Timeout (90s).
+        // Echter Broker-Ausfall landet als MQTT_EVENT_DISCONNECTED → recordFailure() dort.
         // Avoid recursive publishIntentOutcome when the failing publish IS intent_outcome
         // (publishIntentOutcome already persists to NVS on publish failure).
         if (isCriticalPublishTopic(topic) && topic.indexOf("/system/intent_outcome") < 0) {
@@ -1644,10 +1648,11 @@ void MQTTClient::processPublishQueue() {
                      "[OUTBOX-TRACE][QUEUE] OUTBOX full #%u topic=%.60s heap=%u",
                      (unsigned)cnt, req.topic, (unsigned)ESP.getFreeHeap());
             LOG_W(TAG, q_log);
-            // AUT-359: Drain-Feedback-Symmetrie zu publish() Z. 733 —
-            // OUTBOX-full ist Backpressure-Signal Richtung Broker/IDF und
-            // wird auch im Direktpfad als CB-Failure gezaehlt.
-            circuit_breaker_.recordFailure();
+            // AUT-390: OUTBOX full im Drain-Pfad = gleicher Backpressure-Grund wie im
+            // Direktpfad (publish() AUT-390-Fix) — recordFailure() entfernt.
+            // Die Retry-Logik weiter unten (should_retry) behandelt OUTBOX-full korrekt:
+            // kritische Messages werden bis 3× wiederholt, Sensor-Data ggf. gesheddet.
+            // CB-Failure nur bei echtem Broker-Ausfall (MQTT_EVENT_DISCONNECTED).
         } else if (msg_id == -1) {
             // AUT-359: Drain-Feedback-Symmetrie zu publish() Z. 765-776 —
             // -1 ist „connected but error“; nur dann CB-Failure zaehlen,

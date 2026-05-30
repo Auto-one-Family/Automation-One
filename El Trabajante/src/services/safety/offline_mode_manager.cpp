@@ -44,6 +44,9 @@ static uint8_t  s_eval_override_logged      = 0;
 static uint8_t  s_eval_cal_inactive_logged  = 0;
 static uint8_t  s_eval_time_skip_logged     = 0;
 static bool     s_eval_prev_nan[MAX_OFFLINE_RULES] = {false};
+static uint16_t s_rule_max_on_seconds[MAX_OFFLINE_RULES] = {0};
+static unsigned long s_timewindow_on_deadline_ms[MAX_OFFLINE_RULES] = {0};
+static bool          s_timewindow_fired_in_window[MAX_OFFLINE_RULES] = {false};
 
 static void resetOfflineEvalLogState() {
     s_offline_first_eval       = true;
@@ -52,6 +55,8 @@ static void resetOfflineEvalLogState() {
     s_eval_cal_inactive_logged = 0;
     s_eval_time_skip_logged    = 0;
     memset(s_eval_prev_nan, 0, sizeof(s_eval_prev_nan));
+    memset(s_timewindow_on_deadline_ms, 0, sizeof(s_timewindow_on_deadline_ms));
+    memset(s_timewindow_fired_in_window, 0, sizeof(s_timewindow_fired_in_window));
 }
 
 // CRC-8/SMBUS — no lookup table to conserve Flash
@@ -543,6 +548,7 @@ static String formatOfflineRuleDetail(uint8_t idx, const OfflineRule& r) {
            " (" + sensor_part + ") → actuator GPIO " + formatGpioUi(r.actuator_gpio) + " | " + mode +
            " | heat: below=" + String(r.activate_below, 2) + " above=" + String(r.deactivate_above, 2) +
            " | cool: above=" + String(r.activate_above, 2) + " below=" + String(r.deactivate_below, 2) +
+           " | max_on_s=" + String(s_rule_max_on_seconds[idx]) +
            " | tf=" + tf_buf + " days_mask=0x" + String(r.days_of_week_mask, HEX) +
            " | enabled=" + String(r.enabled ? "1" : "0") +
            " is_active=" + String(r.is_active ? "1" : "0");
@@ -655,6 +661,10 @@ void OfflineModeManager::evaluateOfflineRules() {
 
             uint8_t today_bit = (uint8_t)(1u << current_wday);
             if ((rule.days_of_week_mask & today_bit) == 0) {
+                if (isTimeWindowOnlyRule(rule)) {
+                    s_timewindow_fired_in_window[i] = false;
+                    s_timewindow_on_deadline_ms[i] = 0;
+                }
                 if (rule.is_active) {
                     bool off_ok = actuatorManager.controlActuatorBinary(rule.actuator_gpio, false);
                     if (!off_ok) {
@@ -672,6 +682,10 @@ void OfflineModeManager::evaluateOfflineRules() {
             if (!isInsideTimeWindow(current_hour, current_minute,
                                             rule.start_hour, rule.start_minute,
                                             rule.end_hour, rule.end_minute)) {
+                if (isTimeWindowOnlyRule(rule)) {
+                    s_timewindow_fired_in_window[i] = false;
+                    s_timewindow_on_deadline_ms[i] = 0;
+                }
                 if (rule.is_active) {
                     bool off_ok = actuatorManager.controlActuatorBinary(rule.actuator_gpio, false);
                     if (!off_ok) {
@@ -691,6 +705,45 @@ void OfflineModeManager::evaluateOfflineRules() {
 
         if (isTimeWindowOnlyRule(rule)) {
             bool desired_state = getTimeWindowTargetState(rule);
+            uint16_t max_on_seconds = s_rule_max_on_seconds[i];
+            if (!desired_state) {
+                s_timewindow_fired_in_window[i] = false;
+                s_timewindow_on_deadline_ms[i] = 0;
+            }
+
+            if (desired_state && max_on_seconds > 0) {
+                if (rule.is_active) {
+                    if (s_timewindow_on_deadline_ms[i] == 0) {
+                        s_timewindow_on_deadline_ms[i] =
+                            millis() + (static_cast<unsigned long>(max_on_seconds) * 1000UL);
+                    }
+                    if (millis() >= s_timewindow_on_deadline_ms[i]) {
+                        bool off_ok = actuatorManager.controlActuatorBinary(rule.actuator_gpio, false);
+                        if (!off_ok) {
+                            LOG_W(TAG, String("[SAFETY-P4] Rule ") + String(i) +
+                                       ": max_on_seconds OFF failed for GPIO " +
+                                       String(rule.actuator_gpio));
+                            continue;
+                        }
+                        rule.is_active = false;
+                        s_timewindow_on_deadline_ms[i] = 0;
+                        s_timewindow_fired_in_window[i] = true;
+                        if (!saveOfflineRulesToNVS()) {
+                            LOG_E(TAG, String("[CONFIG] Rule ") + String(i) +
+                                       ": failed to persist max_on_seconds OFF transition");
+                        }
+                        LOG_I(TAG, String("[SAFETY-P4] Rule ") + String(i) +
+                                   ": max_on_seconds elapsed -> GPIO " +
+                                   String(rule.actuator_gpio) + " OFF");
+                    }
+                    continue;
+                }
+
+                if (s_timewindow_fired_in_window[i]) {
+                    continue;  // One-shot per active time window.
+                }
+            }
+
             if (desired_state != rule.is_active) {
                 bool ctrl_ok = actuatorManager.controlActuatorBinary(rule.actuator_gpio, desired_state);
                 if (!ctrl_ok) {
@@ -701,6 +754,13 @@ void OfflineModeManager::evaluateOfflineRules() {
                     continue;
                 }
                 rule.is_active = desired_state;
+                if (desired_state && max_on_seconds > 0) {
+                    s_timewindow_on_deadline_ms[i] =
+                        millis() + (static_cast<unsigned long>(max_on_seconds) * 1000UL);
+                    s_timewindow_fired_in_window[i] = false;
+                } else if (!desired_state) {
+                    s_timewindow_on_deadline_ms[i] = 0;
+                }
                 if (!saveOfflineRulesToNVS()) {
                     LOG_E(TAG, String("[CONFIG] Rule ") + String(i) +
                                ": failed to persist time-window-only state in blob-v3");
@@ -836,6 +896,8 @@ bool OfflineModeManager::parseOfflineRules(JsonObject obj) {
                    " in payload, using first " + String(MAX_OFFLINE_RULES) + " (MAX_OFFLINE_RULES)");
     }
 
+    memset(s_rule_max_on_seconds, 0, sizeof(s_rule_max_on_seconds));
+
     OfflineRule previous_rules[MAX_OFFLINE_RULES];
     uint8_t     previous_count = offline_rule_count_;
     memcpy(previous_rules, offline_rules_, sizeof(OfflineRule) * previous_count);
@@ -880,6 +942,7 @@ bool OfflineModeManager::parseOfflineRules(JsonObject obj) {
         offline_rules_[i].end_minute   = 0;
         offline_rules_[i].days_of_week_mask = 0x7F;  // Backward compat: all days active
         offline_rules_[i].timezone_mode = static_cast<uint8_t>(OfflineRuleTimezone::UTC);
+        s_rule_max_on_seconds[i] = 0;
         if (r.containsKey("time_filter")) {
             JsonObject tf = r["time_filter"];
             offline_rules_[i].time_filter_enabled = tf["enabled"] | false;
@@ -899,6 +962,11 @@ bool OfflineModeManager::parseOfflineRules(JsonObject obj) {
                 }
             }
         }
+        unsigned long max_on_raw = r["max_on_seconds"] | 0UL;
+        if (max_on_raw > 65535UL) {
+            max_on_raw = 65535UL;
+        }
+        s_rule_max_on_seconds[i] = static_cast<uint16_t>(max_on_raw);
     }
 
     offline_rule_count_ = count;
@@ -938,6 +1006,8 @@ void OfflineModeManager::logOfflineRulesSummary(const char* source_label) {
 }
 
 void OfflineModeManager::loadOfflineRulesFromNVS() {
+    memset(s_rule_max_on_seconds, 0, sizeof(s_rule_max_on_seconds));
+
     nvs_handle_t handle;
     esp_err_t err = nvs_open("offline", NVS_READONLY, &handle);
     if (err == ESP_ERR_NVS_NOT_FOUND) {

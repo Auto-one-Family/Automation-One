@@ -55,7 +55,7 @@ allowed-tools: Read
 | `/esp/devices/{esp_id}/alert-config` | GET | JWT | Device-Level Alert-Config abrufen |
 | `/esp/discovery` | GET | JWT | Network Discovery Results |
 
-### Sensors (`/sensors`) - 18 Endpoints
+### Sensors (`/sensors`) - 19 Endpoints
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
@@ -65,6 +65,7 @@ allowed-tools: Read
 | `/sensors/{esp_id}/{gpio}` | POST | Operator | Sensor erstellen/aktualisieren (ESP+GPIO) |
 | `/sensors/{esp_id}/{config_id}` | DELETE | Operator | Sensor-Config löschen (by UUID, Sensordaten bleiben erhalten) |
 | `/sensors/data` | GET | JWT | Query Sensor-Daten (historisch, filterbar nach zone_id, subzone_id, resolution, before_timestamp) |
+| `/sensors/export` | GET | JWT | Sensor-Daten als CSV streamen (mind. esp_id\|zone_id\|subzone_id; Query: columns CSV-Liste, resolution raw\|1m\|5m\|1h\|1d, start_time, end_time; `columns=''` → 422; Dateiname-Fallback: esp_id → zone_id → subzone_id → all; zone_id/subzone_id leer bei aggregierten Rows) |
 | `/sensors/{sensor_id}/data` | GET | JWT | Sensor-Daten (historisch) |
 | `/sensors/{sensor_id}/stats` | GET | JWT | Sensor-Statistiken. Query: `sensor_type` (Multi-Value-Filter) |
 | `/sensors/types` | GET | JWT | Alle Sensor-Typen |

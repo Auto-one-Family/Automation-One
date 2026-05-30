@@ -116,8 +116,14 @@ function Get-LokiLastLogAgeSeconds {
     }
     $values = $lokiData.data.result | Select-Object -First 1 | ForEach-Object { $_.values }
     if ($values -and $values.Count -gt 0) {
-        $tsNs = [long]$values[0][0]
-        return [int](($nowNs - $tsNs) / 1000000000)
+        # Loki timestamps are nanosecond strings; parse as [double] to avoid PS 5.1 int64 precision loss
+        $tsNs = [double]([string]$values[0][0])
+        $ageSeconds = [long](($nowNs - $tsNs) / 1000000000)
+        # Sanity check: age must be positive and reasonable (< 30 days = 2592000)
+        if ($ageSeconds -ge 0 -and $ageSeconds -lt 2592000) {
+            return [int]$ageSeconds
+        }
+        return -1
     }
     return -1
 }
@@ -196,18 +202,18 @@ if (-not $live.ok) {
 # 3. PostgreSQL
 # ---------------------------------------------------------------------------
 
-$pgResult = docker exec automationone-postgres pg_isready -U god_kaiser -d god_kaiser_db 2>$null
+$pgResult = docker compose --project-directory $ProjectRoot exec -T postgres pg_isready -U god_kaiser -d god_kaiser_db 2>$null
 $pgOk = ($LASTEXITCODE -eq 0)
 
 $pgConnections = $null
 if ($pgOk) {
-    $pgConnections = docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -t -c "SELECT count(*) FROM pg_stat_activity;" 2>$null
+    $pgConnections = docker compose --project-directory $ProjectRoot exec -T postgres psql -U god_kaiser -d god_kaiser_db -t -c "SELECT count(*) FROM pg_stat_activity;" 2>$null
     if ($pgConnections) { $pgConnections = $pgConnections.Trim() }
 }
 
 $pgSize = $null
 if ($pgOk) {
-    $pgSize = docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -t -c "SELECT pg_size_pretty(pg_database_size('god_kaiser_db'));" 2>$null
+    $pgSize = docker compose --project-directory $ProjectRoot exec -T postgres psql -U god_kaiser -d god_kaiser_db -t -c "SELECT pg_size_pretty(pg_database_size('god_kaiser_db'));" 2>$null
     if ($pgSize) { $pgSize = $pgSize.Trim() }
 }
 
@@ -361,7 +367,7 @@ $result.services.logs = $logChecks
 # 11. Alembic Migration
 # ---------------------------------------------------------------------------
 
-$alembicCurrent = docker exec automationone-server alembic current 2>$null
+$alembicCurrent = docker compose --project-directory $ProjectRoot exec -T el-servador alembic current 2>$null
 if ($alembicCurrent) {
     $result.services.alembic = [ordered]@{
         status  = "ok"
