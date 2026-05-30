@@ -243,17 +243,17 @@ async def lifespan(app: FastAPI):
 
         # Step 2b: Clear stale retained emergency-stop message from broker.
         # Emergency-Stop is a one-shot command, not persistent state.
-        # A retained message would replay on every reconnect/restart,
-        # causing spurious CRITICAL logs and alert noise.
+        # A retained message replays on every ESP subscribe/reconnect (INC-3016).
         if connected:
             try:
-                mqtt_client.publish(
-                    "kaiser/broadcast/emergency",
-                    "",  # Empty payload clears retained message
-                    qos=0,
-                    retain=True,
-                )
-                logger.info("Cleared retained emergency-stop message from broker")
+                from .mqtt.topics import TopicBuilder
+
+                emergency_topic = TopicBuilder.build_emergency_broadcast_topic()
+                if mqtt_client.clear_retained_message(emergency_topic):
+                    logger.info(
+                        "Cleared retained emergency-stop message from broker (%s)",
+                        emergency_topic,
+                    )
             except Exception as e:
                 logger.debug("Failed to clear retained emergency message: %s", e)
 

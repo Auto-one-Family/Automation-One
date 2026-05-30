@@ -245,7 +245,7 @@ DEFAULT_SENSOR_MAPPINGS: List[Dict[str, Any]] = [
     # Interface-specific fields (OneWire, I2C, SPI)
     #
     # Diese Felder werden für Bus-basierte Sensoren benötigt:
-    # - interface_type: ANALOG, DIGITAL, I2C, ONEWIRE, SPI
+    # - interface_type: ANALOG, DIGITAL, I2C, ONEWIRE, UART, SPI
     # - onewire_address: 16-char hex ROM-Code für DS18B20 etc.
     # - i2c_address: 7-bit I2C Adresse (0x00-0x7F)
     #
@@ -272,6 +272,28 @@ DEFAULT_SENSOR_MAPPINGS: List[Dict[str, Any]] = [
         "field_type": "int",
         "required": False,
         "default": 0,
+    },
+    # UART CO₂ (SEN0220 / MH-Z19) — consumed by firmware when UART driver is ready (AUT-527)
+    {
+        "source": "sensor_metadata.uart_rx_pin",
+        "target": "uart_rx_pin",
+        "field_type": "int",
+        "required": False,
+        "default": 0,
+    },
+    {
+        "source": "sensor_metadata.uart_tx_pin",
+        "target": "uart_tx_pin",
+        "field_type": "int",
+        "required": False,
+        "default": 0,
+    },
+    {
+        "source": "sensor_metadata.uart_baud",
+        "target": "uart_baud",
+        "field_type": "int",
+        "required": False,
+        "default": 9600,
     },
 ]
 

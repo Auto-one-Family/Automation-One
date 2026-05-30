@@ -509,6 +509,22 @@ class MQTTClient:
             increment_mqtt_publish_error()
             return False
 
+    def clear_retained_message(self, topic: str, qos: int = 0) -> bool:
+        """
+        Delete a broker retained message per MQTT 3.1.1 (zero-length payload, retain=True).
+
+        One-shot command topics (e.g. ``kaiser/broadcast/emergency``) must not keep retain;
+        stale retained payloads replay on ESP subscribe and previously caused firmware 3016.
+
+        Note: Connected subscribers still receive one empty delivery (MQTT spec). Firmware
+        treats empty broadcast-emergency payloads as retain-deletion and ignores them.
+        """
+        if not topic:
+            logger.warning("clear_retained_message: empty topic rejected")
+            return False
+        logger.info("Clearing retained MQTT message on topic: %s", topic)
+        return self.publish(topic, "", qos=qos, retain=True)
+
     def set_on_message_callback(self, callback: Callable):
         """
         Set global message callback.

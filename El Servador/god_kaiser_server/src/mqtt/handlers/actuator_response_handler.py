@@ -36,6 +36,7 @@ from ...core.metrics import (
 from ...core.logging_config import get_logger
 from ...db.repositories import ActuatorRepository, CommandContractRepository, ESPRepository
 from ...db.session import resilient_session
+from ...services.actuator_orphan_guard import is_orphan_external_actuator_failure
 from ...services.device_response_contract import canonicalize_actuator_response
 from ...services.event_contract_serializers import serialize_actuator_response_event
 from ..topics import TopicBuilder
@@ -225,6 +226,25 @@ class ActuatorResponseHandler:
                         "Response will be logged without device reference."
                     )
                     # Don't fail - still log the response for debugging
+                    return True
+
+                actuator_config = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
+                if is_orphan_external_actuator_failure(
+                    success=success,
+                    correlation_id=correlation_id,
+                    command=command,
+                    has_actuator_config=actuator_config is not None,
+                ):
+                    logger.info(
+                        "Orphan external actuator response suppressed (no server intent, "
+                        "gpio not configured): esp_id=%s gpio=%s command=%s correlation_id=%s message=%s",
+                        esp_id_str,
+                        gpio,
+                        command,
+                        correlation_id,
+                        message,
+                    )
+                    await session.commit()
                     return True
 
                 # Step 6: Log command response to history
