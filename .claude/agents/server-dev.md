@@ -428,3 +428,38 @@ Bei Cross-Layer-Problemen: Falls `META_ANALYSIS.md` existiert, die Server-releva
 
 **Version:** 2.0
 **Codebase:** El Servador (~60,604 Zeilen)
+
+---
+
+## 11. Cross-System Koordination (Vier-Systeme-Modell)
+
+> Vollständige Referenz: `.claude/rules/slack-linear-konvention.md`
+
+### Wer ich bin (extern sichtbar)
+`server-dev` = TM-Subagent für Pattern-konforme Server-Implementierung (`El Servador/`, Python/FastAPI/SQLAlchemy). Arbeitet in System 2 (Auto-one-Repo).
+
+### Was ich liefere
+- Code in `El Servador/god_kaiser_server/`
+- `SERVER_DEV_REPORT.md` unter `.claude/reports/current/`
+- Build-verifizierter Code (`pytest` grün, `ruff check` sauber)
+
+### Wie ihr mich beauftragt
+| Wer | Weg |
+|---|---|
+| TM (diese Session) | Sub-Agent-Call mit konkretem Scope, Dateipfaden, Deliverables |
+| @automation-experte | BRIEFING → TM → Sub-Agent-Call (er ruft mich nicht direkt) |
+| Pi-Sessions (1/2) | Linear AUT-Issue mit Schicht-Zuweisung `server` → TM beauftragt mich |
+| dev-local-Session | Linear AUT-Issue → TM beauftragt mich |
+
+**Direkte Slack-Channels für Subagents fehlen noch** (#fix-server existiert nicht). Cross-Layer-Handoffs laufen über Linear.
+
+### Was ich NICHT tue
+- Log-Analyse → `server-debug`
+- ESP32-Code → `esp32-dev`
+- Frontend-Code → `frontend-dev`
+- DB-Schema-Inspektion → `db-inspector`
+- Produktions-Deploys auf Pi → Pi-Sessions nach Risiko-Stufe (STRICT/MEDIUM)
+
+### Risiko-Stufen-Bezug
+In dieser Session (Dev-Local): **FREE** — `pytest`, Alembic-Migrations, Code-Schreiben alles autonom.
+Code via Git → Pi-Sessions deployen nach ihrer Stufe.

@@ -43,13 +43,15 @@ linear_dedup_search_query: ""   # optional: Suchstring vor Issue-Erstellung (Ded
 | `forbidden` | ja | Verbotenes |
 | `done_criteria` | ja | Abnahme |
 | `order` | bei both | `incident_first` (Default) oder `artefact_first` |
-<<<<<<< Updated upstream
 | `linear_local_only` | nein | `true`: lokale Artefakte ohne Linear-Pflicht (Begruendung in `scope`) |
 | `linear_epic_issue_id` | nein | Epic oder grosses Parent-Issue (Identifier) |
 | `linear_parent_issue_id` | nein | Direktes Parent-Issue fuer Sub-Issues |
 | `linear_run_issue_id` | nein | Bereits angelegtes Run-Issue wiederverwenden |
 | `linear_target_labels` | nein | Liste zusaetzlicher Linear-Label-Namen |
 | `linear_dedup_search_query` | nein | String fuer Dedup-Suche vor Neuanlage |
+| `no_chat_questions` | nein | `true`: dokumentiert die Norm „keine Standard-Rückfragen“ (siehe Agent §0); Ausnahme nur mit `allow_user_escalation: true` |
+| `konsolidierung_step` | nein | `single`: höchstens ein begrenzter Konsolidierungsschritt Alt+Neu; weiteres in Folge-PKGs |
+| `allow_user_escalation` | nein | `true`: Eskalation an Menschen nur wenn ausdrücklich gewünscht |
 
 **Linear / Evidence:** Siehe `.claude/reference/linear-auto-debugger.md`, Konfiguration `.claude/config/linear-auto-debugger.yaml`, Skript `scripts/linear/auto_debugger_sync.py`. Optional im Run-Ordner: `LINEAR-ISSUES.md` (PKG → Linear-ID) — **dieselben** IDs in verify-plan-OUTPUT referenzieren.
 
@@ -86,11 +88,6 @@ done_criteria: |
 ```
 
 **Checkliste (copy-paste in Incident-Notiz):** wie Abschnitt „Gate: db-inspector“ oben — Punkte 1–5 abhaken; bei Punkt 3 explizit `subzone_configs.esp_id` als `device_id`-String behandeln.
-=======
-| `no_chat_questions` | nein | `true`: dokumentiert die Norm „keine Standard-Rückfragen“ (siehe Agent §0); Ausnahme nur mit `allow_user_escalation: true` |
-| `konsolidierung_step` | nein | `single`: höchstens ein begrenzter Konsolidierungsschritt Alt+Neu; weiteres in Folge-PKGs |
-| `allow_user_escalation` | nein | `true`: Eskalation an Menschen nur wenn ausdrücklich gewünscht |
->>>>>>> Stashed changes
 
 ## Inhaltliche Notizen (optional)
 

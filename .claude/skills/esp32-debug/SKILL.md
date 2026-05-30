@@ -24,6 +24,7 @@ context: inline
 | **Boot haengt** | [Boot-Sequenz](#2-boot-sequenz) | `grep -iE "STEP\|Phase\|ERROR"` |
 | **SafeMode** | [SafeMode-Trigger](#3-safemode-trigger) | `grep -i "safe.mode\|boot.loop"` |
 | **GPIO-Fehler** | [Error-Codes](#5-error-code-vollreferenz) | `grep -E "1001\|1002\|GPIO"` |
+| **ESP32-S3 Pins / ADC1** | `esp32-development/SKILL.md` § ESP32-S3 N8R8 | `esp32_s3_devkit.h`; ADC1 = GPIO 1–10, RESERVED 26–37 |
 | **Sensor-Problem** | [Datenfluesse](#4-datenfluesse) | `grep -E "1040\|1041\|sensor"` |
 | **MQTT offline** | [Circuit-Breaker](#8-circuit-breaker) | `grep -i "circuit\|MQTT\|3011"` |
 | **Watchdog** | [Error-Codes](#5-error-code-vollreferenz) | `grep -E "4070\|4071\|watchdog"` |

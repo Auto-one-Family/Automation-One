@@ -156,6 +156,7 @@ Jede Sub-Agent-Invocation muss enthalten:
 | `reference/patterns/` | COMMUNICATION_FLOWS, ARCHITECTURE_DEPENDENCIES |
 | `reference/debugging/` | LOG_LOCATIONS, CI_PIPELINE, ACCESS_LIMITATIONS |
 | `reference/testing/` | agent_profiles, flow_reference, TEST_WORKFLOW |
+| `rules/slack-linear-konvention.md` | Vier-Systeme-Modell, Slack-Channels, NEED-Format |
 | `reference/security/` | PRODUCTION_CHECKLIST |
 | `reference/TM_WORKFLOW.md` | Test-Flow, Dev-Flow, Agent-Aktivierungsreihenfolge |
 | `.claude/skills/mqtt-development/SKILL.md` | MQTT Pattern-First (Server + El Trabajante): Topics, QoS, Handler, LWT, Circuit Breaker, MQTTCommandBridge — mit Evidence-Tabelle |

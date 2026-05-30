@@ -7,11 +7,7 @@ allowed-tools: Read
 
 # Kommunikationsmuster & Datenflüsse
 
-<<<<<<< Updated upstream
 > **Version:** 2.11 | **Aktualisiert:** 2026-04-23
-=======
-> **Version:** 2.11 | **Aktualisiert:** 2026-04-10
->>>>>>> Stashed changes
 > **Quellen:** Code-Traces durch ESP32, Server, Frontend
 > **Verifiziert:** ✅ Alle Pfade mit Datei:Zeile dokumentiert
 

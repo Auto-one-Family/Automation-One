@@ -7,17 +7,10 @@ allowed-tools: Read
 
 # WebSocket Event Referenz
 
-<<<<<<< Updated upstream
-> **Version:** 3.19 | **Aktualisiert:** 2026-05-01
+> **Version:** 3.19 | **Aktualisiert:** 2026-05-29
 > **Endpoint:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt_token}`
 > **Quellen:** Vollständige Codebase-Analyse aller `broadcast` Aufrufe
 > **Event-Anzahl:** 47 relevante Event-Typen (44 serverseitige Broadcast-Events + 1 optionaler Plugin-Statuskanal + 2 Frontend-Contract-Integrationssignale)
-=======
-> **Version:** 3.16 | **Aktualisiert:** 2026-04-10
-> **Endpoint:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt_token}`
-> **Quellen:** Vollständige Codebase-Analyse aller `broadcast` Aufrufe
-> **Event-Anzahl:** 44 relevante Event-Typen (41 serverseitige Broadcast-Events + 1 optionaler Plugin-Statuskanal + 2 Frontend-Contract-Integrationssignale)
->>>>>>> Stashed changes
 
 ---
 
@@ -585,7 +578,6 @@ Sensor-Konfiguration wurde gelöscht (T08-Fix-D Ghost-Cleanup).
 
 ---
 
-<<<<<<< Updated upstream
 ### 4.4 plant_lifecycle_update
 
 Pflanzen-Lifecycle-Ereignis wurde eingetragen (Phase-Wechsel, Anmerkung, Ernte-Event).
@@ -620,8 +612,8 @@ Pflanzen-Lifecycle-Ereignis wurde eingetragen (Phase-Wechsel, Anmerkung, Ernte-E
 | `event_timestamp` | ISO 8601 | Zeitpunkt des Ereignisses |
 
 **Frontend-Handler:** `plants.store.ts` — aktualisiert Plant-Lifecycle-Liste und zeigt Toast.
-=======
-### 4.4 calibration_measurement_received
+
+### 4.5 calibration_measurement_received
 
 Rohmesswert aus der ESP-Sensorantwort, wenn der Server die Antwort fuer eine Kalibrier-Session oder zur Live-Anzeige auswertet (`CalibrationResponseHandler`).
 
@@ -648,16 +640,15 @@ Rohmesswert aus der ESP-Sensorantwort, wenn der Server die Antwort fuer eine Kal
 
 ---
 
-### 4.5 calibration_measurement_failed
+### 4.6 calibration_measurement_failed
 
 Fehlerpfad zur gleichen Sensorantwort-Kette (ESP meldet `success: false`, oder Antwort ohne `raw`/`raw_value` trotz `success: true`). **Server:** kein stiller Ersatzwert aus der Datenbank — ein veralteter Intervall-Messwert darf den Wizard nicht täuschen.
 
 **Code-Location:** [calibration_response_handler.py](El Servador/god_kaiser_server/src/mqtt/handlers/calibration_response_handler.py)
 
-**Payload (`data`):** u. a. `esp_id`, `gpio`, `error`; `intent_id` / `correlation_id` / `request_id` wie in 4.4, sofern in der MQTT-Payload vorhanden.
+**Payload (`data`):** u. a. `esp_id`, `gpio`, `error`; `intent_id` / `correlation_id` / `request_id` wie in 4.5, sofern in der MQTT-Payload vorhanden.
 
-**El Frontend:** Gleiche **Request-ID-Korrelation** wie bei 4.4; Fehleranzeige nur bei Match zum aktuellen `measurementRequestId`.
->>>>>>> Stashed changes
+**El Frontend:** Gleiche **Request-ID-Korrelation** wie bei 4.5; Fehleranzeige nur bei Match zum aktuellen `measurementRequestId`.
 
 ---
 

@@ -25,6 +25,7 @@ allowed-tools: Read, Write, Bash, Grep, Glob
 | Ich will... | Primäre Quelle | Zugriff |
 |-------------|----------------|---------|
 | **Schema prüfen** | [Section 3: Schema-Übersicht](#3-schema-übersicht) | `docker exec -it automationone-postgres psql -U god_kaiser -d god_kaiser_db` |
+| **ESP32-S3 / hardware_type** | [Section 13: ESP32-S3 Schema & Audits](#13-esp32-s3-in-god_kaiser_db--schema--audits-aut-528-s5d) | Verteilungs-Query Section 8 |
 | **Migration-Status** | [Section 4: Alembic Migrations](#4-alembic-migrations) | `alembic current` |
 | **Cleanup-Status** | [Section 6: Retention & Cleanup](#6-retention--cleanup) | Health-Endpoint |
 | **Index-Performance** | [Section 5: Indizes](#5-indizes-esp_heartbeat_logs) | `pg_stat_user_indexes` |
@@ -111,7 +112,7 @@ docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c \
 
 | Tabelle | Funktion | Wichtige Constraints |
 |---------|----------|---------------------|
-| `esp_devices` | Device Registry | `device_id` UNIQUE; `mac_address` UNIQUE; Soft-Delete `deleted_at`/`deleted_by` |
+| `esp_devices` | Device Registry | `device_id` UNIQUE; `mac_address` UNIQUE; **`hardware_type` VARCHAR(50) NOT NULL** (kanonisch, kein separates `board_type`); Soft-Delete `deleted_at`/`deleted_by` |
 | `sensor_configs` | Sensor-Config pro GPIO | FK `esp_id` → `esp_devices.id` CASCADE; FK `temp_sensor_config_id` → `sensor_configs.id` SET NULL; **kein** UNIQUE-Constraint auf Spalten-Kombination |
 | `sensor_data` | Time-Series Messwerte | FK `esp_id` → `esp_devices.id` SET NULL; FK `plant_id` → `plants.plant_id` SET NULL; UNIQUE `uq_sensor_data_esp_gpio_type_timestamp`; `ON CONFLICT DO NOTHING` |
 | `actuator_configs` | Aktuator-Config + Safety | FK `esp_id` → `esp_devices.id` CASCADE; UNIQUE `(esp_id, gpio)` |
@@ -413,6 +414,27 @@ SELECT device_id, name, last_seen
 FROM esp_devices
 WHERE last_seen < NOW() - INTERVAL '7 days'
 AND device_id NOT LIKE 'MOCK_%';
+
+-- hardware_type-Verteilung (gesamt, ohne Soft-Delete)
+SELECT hardware_type, COUNT(*) AS cnt
+FROM esp_devices
+WHERE deleted_at IS NULL
+GROUP BY hardware_type
+ORDER BY cnt DESC;
+
+-- hardware_type pro Zone (TM-Audit: WROOM vs S3-Mix)
+SELECT zone_id, hardware_type, COUNT(*) AS cnt
+FROM esp_devices
+WHERE deleted_at IS NULL
+GROUP BY zone_id, hardware_type
+ORDER BY zone_id NULLS LAST, hardware_type;
+
+-- Neueste Devices inkl. hardware_type (Post-Discovery-Verify)
+SELECT device_id, hardware_type, status, created_at
+FROM esp_devices
+WHERE deleted_at IS NULL
+ORDER BY created_at DESC
+LIMIT 10;
 ```
 
 ### Sensor-Configs
@@ -650,7 +672,93 @@ Pro Befund mindestens **eine** Referenz zu Handler/Repo (`El Servador/god_kaiser
 
 ---
 
-## 13. Regeln
+## 13. ESP32-S3 in god_kaiser_db — Schema & Audits (AUT-528 S5d)
+
+> **Search-vor-Create (2026-05-29):** Keine Alembic-Rev `add_hardware_target_to_esp_devices` im Repo. Kanonisches Feld ist **`hardware_type`** auf `esp_devices` (bereits vor AUT-523 vorhanden). AUT-525 (Done) erweiterte **`constants.py`** + **`gpio_validation_service.py`** — **keine DDL-Migration**, 41 Tabellen strukturell unangetastet.
+
+### Was sich ändert (und was nicht)
+
+| Bereich | Änderung | Inspector-Hinweis |
+|---------|----------|-------------------|
+| `esp_devices.hardware_type` | VARCHAR(50), NOT NULL, schon vor AUT-523 | Gültige Werte: `ESP32_WROOM`, `ESP32_S3_DEVKITC1`, `XIAO_ESP32_C3`; Mock-Devices oft `MOCK_ESP32` (Heartbeat-Pfad, nicht in `HARDWARE_TYPES`-Konstante) |
+| Spalte `board_type` | **Existiert nicht** — TM-Entscheidung AUT-523 D2 | In Audits/Migrations-Reviews **nicht** anlegen oder erwarten |
+| `sensor_configs` / `actuator_configs` | Schema **identisch** | S3-Sensoren nutzen GPIO 1–10 (ADC1) statt WROOM 32–39; Plausibilität nur via `gpio_validation_service`, nicht via DB-Constraint |
+| `sensor_data` / `actuator_states` | Schema **identisch** | Metadata bleibt `{"raw_mode": true}` — keine S3-spezifischen Metadata-Keys |
+| UNIQUE / FK CASCADE | **Unverändert** | z. B. `uq_sensor_data_esp_gpio_type_timestamp`, CASCADE auf `sensor_configs`/`actuator_configs` |
+| Soft-Delete | **Unverändert** | `esp_devices.deleted_at`/`deleted_by`, `zones.deleted_at`/`deleted_by` |
+
+### Bestand vs. neue S3-Devices
+
+- Bestand: typischerweise `hardware_type = 'ESP32_WROOM'` (NOT NULL seit Anfang).
+- Neue S3-Devices: `ESP32_S3_DEVKITC1` per Heartbeat-Discovery (`heartbeat_handler.py` L1424–1439) — **kein Backfill-Skript nötig**.
+- Heartbeat-Spiegel optional in `device_metadata` → Key `hardware_type`.
+
+### Migrations-Review — hardware_type sichtbar machen
+
+Bei jeder Alembic-Rev, die `esp_devices` berührt:
+
+```bash
+# Repo: neue Revisionen auf esp_devices / hardware_type prüfen
+grep -r "esp_devices\|hardware_type\|board_type" El\ Servador/god_kaiser_server/alembic/versions/ --include="*.py"
+
+# Live: Spalte + NULL-Rate
+docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c \
+  "SELECT column_name, data_type, is_nullable, column_default
+   FROM information_schema.columns
+   WHERE table_name = 'esp_devices' AND column_name IN ('hardware_type','board_type');"
+
+# Alembic-HEAD vs. angewendet
+docker exec automationone-server python -m alembic current
+docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c \
+  "SELECT version_num FROM alembic_version;"
+```
+
+**Red Flags im Review:** neue Spalte `board_type`, DDL an `sensor_configs`/`actuator_configs`/`sensor_data`/`actuator_states` nur für Board-Typ, fehlende NOT NULL auf `hardware_type`, Doppel-Migration nach AUT-525.
+
+### Schema-Audit-Workflow (TM / Inspector)
+
+```
+1. Alembic heads + alembic_version abgleichen (Section 4)
+2. information_schema: esp_devices.hardware_type vorhanden, board_type fehlt
+3. Verteilungs-Query (Section 8 ESP-Devices): global + pro zone_id
+4. Stichprobe S3-Device: hardware_type = ESP32_S3_DEVKITC1 + sensor_configs.gpio IN 1–10 (LIMIT)
+5. sensor_data.metadata: raw_mode=true (keine board-Felder) — Stichprobe LIMIT 20
+6. Soft-Delete-Invarianten (VERTRAG.md INV SQL 5 + 6)
+```
+
+### Verify nach AUT-523 S1–S2 (Copy-paste)
+
+```sql
+-- Neueste Devices: S3 zeigt ESP32_S3_DEVKITC1
+SELECT device_id, hardware_type, status, last_seen
+FROM esp_devices
+WHERE deleted_at IS NULL
+ORDER BY created_at DESC
+LIMIT 10;
+
+-- GPIO-Werte S3 vs WROOM (Werte-Drift, kein Schema-Drift)
+SELECT e.hardware_type, sc.gpio, sc.sensor_type, COUNT(*) AS cnt
+FROM sensor_configs sc
+JOIN esp_devices e ON e.id = sc.esp_id
+WHERE e.deleted_at IS NULL
+GROUP BY e.hardware_type, sc.gpio, sc.sensor_type
+ORDER BY e.hardware_type, sc.gpio
+LIMIT 50;
+```
+
+### Code-Referenzen (Evidence, kein DDL durch Inspector)
+
+| Was | Pfad |
+|-----|------|
+| Modell-Spalte | `El Servador/god_kaiser_server/src/db/models/esp.py` → `hardware_type` |
+| Gültige Typen | `src/core/constants.py` → `HARDWARE_TYPES`, `HARDWARE_TYPE_ESP32_S3_DEVKITC1` |
+| Pin-Validierung (Server) | `src/services/gpio_validation_service.py` |
+| Heartbeat-Persistenz | `src/mqtt/handlers/heartbeat_handler.py` |
+| QA-Skript AUT-525 | `scripts/qa/check_esp_devices_schema.py` |
+
+---
+
+## 14. Regeln
 
 - **NIEMALS** Produktcode ändern oder erstellen
 - **NIEMALS** DDL/DML auf der DB im Standard-Lauf (nur `SELECT` mit `LIMIT`); siehe `.claude/reference/db-inspector/SICHERHEITSREVIEW.md`

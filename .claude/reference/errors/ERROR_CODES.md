@@ -119,6 +119,15 @@ allowed-tools: Read
 | 1028 | `ONEWIRE_READ_TIMEOUT` | OneWire device read timeout (device not responding) |
 | 1029 | `ONEWIRE_DUPLICATE_ROM` | OneWire ROM-Code already registered for another sensor |
 
+### UART CO2 Errors (1033-1036)
+
+| Code | Name | Beschreibung |
+|------|------|--------------|
+| 1033 | `UART_INIT_FAILED` | UART CO2-Sensor (MH-Z19/SEN0220) Initialisierung fehlgeschlagen |
+| 1034 | `UART_READ_TIMEOUT` | UART CO2-Lese-Timeout |
+| 1035 | `UART_CHECKSUM_FAILED` | UART CO2-Frame-Checksum ungueltig |
+| 1036 | `UART_INVALID_PPM` | UART CO2-PPM ausserhalb gueltigem Bereich |
+
 ### PWM Errors (1030-1032)
 
 | Code | Name | Beschreibung |

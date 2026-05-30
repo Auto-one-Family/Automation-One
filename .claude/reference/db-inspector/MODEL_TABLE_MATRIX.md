@@ -5,7 +5,7 @@
 
 | Modellklasse (Datei) | Tabelle | Wichtigste Constraints / Hinweise |
 |----------------------|---------|-----------------------------------|
-| `ESPDevice` (`esp.py`) | `esp_devices` | `device_id` unique; `zone_id` → `zones.zone_id` (SET NULL); Soft-Delete u. a. `deleted_at` (Modell `esp.py`) |
+| `ESPDevice` (`esp.py`) | `esp_devices` | `device_id` unique; **`hardware_type` VARCHAR(50) NOT NULL** (`ESP32_WROOM`, `ESP32_S3_DEVKITC1`, `XIAO_ESP32_C3`, ggf. `MOCK_ESP32`); kein `board_type`; `zone_id` → `zones.zone_id` (SET NULL); Soft-Delete u. a. `deleted_at` (Modell `esp.py`); S3-Erweiterung AUT-525 = Applikationscode only, **keine Alembic-Rev** |
 | `SensorConfig` (`sensor.py`) | `sensor_configs` | FK `esp_id` → `esp_devices.id` CASCADE; FK `temp_sensor_config_id` → `sensor_configs.id` SET NULL; kein UNIQUE-Constraint (wurde in `fix_null_coalesce_unique` umgebaut); `sensor_kind` CHECK ('continuous','snapshot'); `device_scope` CHECK; `measurement_freshness_hours`, `calibration_interval_days` |
 | `SensorData` (`sensor.py`) | `sensor_data` | FK `esp_id` → `esp_devices.id` ON DELETE SET NULL; **UNIQUE** `uq_sensor_data_esp_gpio_type_timestamp` (`esp_id`, `gpio`, `sensor_type`, `timestamp`); `zone_id` / `subzone_id` Messzeitpunkt |
 | `ActuatorConfig` (`actuator.py`) | `actuator_configs` | FK → `esp_devices` CASCADE |

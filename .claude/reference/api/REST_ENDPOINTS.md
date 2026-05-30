@@ -7,11 +7,11 @@ allowed-tools: Read
 
 # REST API Referenz
 
-> **Version:** 4.5 | **Aktualisiert:** 2026-05-08
+> **Version:** 4.6 | **Aktualisiert:** 2026-05-29
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
-> **Endpoint-Anzahl:** ~255 Endpoints (inkl. Zone Context, Backups, Export, Schema Registry, Dashboards, IntentOutcomes, MultispeQ, Plants)
+> **Endpoint-Anzahl:** ~256 Endpoints (inkl. Zone Context, Backups, Sheets-Export Admin, Export, Schema Registry, Dashboards, IntentOutcomes, MultispeQ, Plants)
 
 ---
 
@@ -441,6 +441,12 @@ allowed-tools: Read
 | `/backups/database/{backup_id}` | DELETE | Admin | Einzelnes Backup löschen |
 | `/backups/database/{backup_id}/restore` | POST | Admin | Wiederherstellen (confirm=true) |
 | `/backups/database/cleanup` | POST | Admin | Alte Backups aufräumen |
+
+### Admin Sheets Export (`/admin/sheets-export`) - 1 Endpoint (AUT-446)
+
+| Endpoint | Method | Auth | Beschreibung |
+|----------|--------|------|--------------|
+| `/admin/sheets-export/reset-cursor` | POST | Admin | Sheets-Export-Cursor zurücksetzen (Body: `cursor_name` — `sheets_export_sensor_cursor`, `sheets_export_history_cursor` oder `sheets_export_logic_cursor`; nächster Export-Lauf startet von Anfang; audit-logged) |
 
 ### Export (`/export`) - 5 Endpoints (Phase K4 Wissensinfrastruktur)
 
