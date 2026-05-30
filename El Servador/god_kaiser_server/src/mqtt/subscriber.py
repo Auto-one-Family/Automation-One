@@ -369,7 +369,7 @@ class Subscriber:
                         payload,
                         effective_correlation_id,
                         inbox_event_id,
-                        retain,
+                        is_retained,
                     )
                 except RuntimeError as submit_err:
                     submit_msg = str(submit_err).lower()
