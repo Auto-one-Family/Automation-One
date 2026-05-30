@@ -47,6 +47,7 @@ async def test_stale_terminal_event_skips_history_write():
                     "src.mqtt.handlers.actuator_response_handler.ActuatorRepository"
                 ) as mock_actuator_repo_class:
                     mock_actuator_repo = MagicMock()
+                    mock_actuator_repo.get_by_esp_and_gpio = AsyncMock(return_value=MagicMock())
                     mock_actuator_repo.log_command = AsyncMock()
                     mock_actuator_repo_class.return_value = mock_actuator_repo
 
@@ -97,6 +98,7 @@ async def test_non_stale_terminal_event_writes_history():
                     "src.mqtt.handlers.actuator_response_handler.ActuatorRepository"
                 ) as mock_actuator_repo_class:
                     mock_actuator_repo = MagicMock()
+                    mock_actuator_repo.get_by_esp_and_gpio = AsyncMock(return_value=MagicMock())
                     mock_actuator_repo.log_command = AsyncMock()
                     mock_actuator_repo_class.return_value = mock_actuator_repo
 
@@ -120,3 +122,59 @@ async def test_non_stale_terminal_event_writes_history():
                             assert args[0] == "actuator_response"
                             assert isinstance(args[1], dict)
                             assert kwargs.get("correlation_id") == payload["correlation_id"]
+
+
+@pytest.mark.asyncio
+async def test_orphan_external_actuator_response_skips_history_and_ws():
+    handler = ActuatorResponseHandler()
+    topic = "kaiser/god/esp/ESP_TEST/actuator/0/response"
+    payload = {
+        "esp_id": "ESP_TEST",
+        "gpio": 0,
+        "command": "UNKNOWN_COMMAND",
+        "value": 0.0,
+        "success": False,
+        "message": "Actuator not configured on GPIO 0. Configure via API first.",
+        "ts": int(datetime.now(timezone.utc).timestamp()),
+        "correlation_id": "missing-corr:act:ESP_TEST:1780019956",
+    }
+
+    with patch("src.mqtt.handlers.actuator_response_handler.resilient_session") as mock_session:
+        mock_db = MagicMock()
+        mock_db.commit = AsyncMock()
+        mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch(
+            "src.mqtt.handlers.actuator_response_handler.CommandContractRepository"
+        ) as mock_contract_repo_class:
+            mock_contract_repo = MagicMock()
+            mock_contract_repo.upsert_terminal_event_authority = AsyncMock(
+                return_value=(MagicMock(), False)
+            )
+            mock_contract_repo_class.return_value = mock_contract_repo
+
+            with patch(
+                "src.mqtt.handlers.actuator_response_handler.ESPRepository"
+            ) as mock_esp_repo_class:
+                mock_esp_repo = MagicMock()
+                mock_esp_repo.get_by_device_id = AsyncMock(return_value=MagicMock(id="esp-uuid"))
+                mock_esp_repo_class.return_value = mock_esp_repo
+
+                with patch(
+                    "src.mqtt.handlers.actuator_response_handler.ActuatorRepository"
+                ) as mock_actuator_repo_class:
+                    mock_actuator_repo = MagicMock()
+                    mock_actuator_repo.get_by_esp_and_gpio = AsyncMock(return_value=None)
+                    mock_actuator_repo.log_command = AsyncMock()
+                    mock_actuator_repo_class.return_value = mock_actuator_repo
+
+                    with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
+                        mock_ws = AsyncMock()
+                        mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
+
+                        result = await handler.handle_actuator_response(topic, payload)
+
+                        assert result is True
+                        mock_actuator_repo.log_command.assert_not_called()
+                        mock_ws.broadcast.assert_not_called()

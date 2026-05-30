@@ -389,14 +389,27 @@ class ConfigPayloadBuilder:
             iface = getattr(sensor, "interface_type", None)
             if iface and iface.upper() in ("I2C", "ONEWIRE"):
                 continue
-            if sensor.gpio in used_gpios:
-                sensor_name = sensor.sensor_name or sensor.sensor_type
-                raise ConfigConflictError(
-                    f"GPIO {sensor.gpio} Konflikt: Sensor '{sensor_name}' "
-                    f"kollidiert mit {used_gpios[sensor.gpio]}"
-                )
+
             sensor_name = sensor.sensor_name or sensor.sensor_type
-            used_gpios[sensor.gpio] = f"sensor:{sensor_name}"
+            pins_to_register: list[int] = []
+            if sensor.gpio is not None:
+                pins_to_register.append(sensor.gpio)
+
+            if iface and iface.upper() == "UART":
+                meta = sensor.sensor_metadata or {}
+                for key in ("uart_rx_pin", "uart_tx_pin"):
+                    pin_val = meta.get(key)
+                    if isinstance(pin_val, int):
+                        pins_to_register.append(pin_val)
+
+            for pin in sorted(set(pins_to_register)):
+                if pin in used_gpios:
+                    raise ConfigConflictError(
+                        f"GPIO {pin} Konflikt: Sensor '{sensor_name}' "
+                        f"kollidiert mit {used_gpios[pin]}"
+                    )
+                used_gpios[pin] = f"sensor:{sensor_name}"
+            continue
 
         for actuator in active_actuators:
             if actuator.gpio in used_gpios:

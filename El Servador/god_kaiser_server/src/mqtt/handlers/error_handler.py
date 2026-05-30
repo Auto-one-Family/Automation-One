@@ -39,7 +39,8 @@ from ...core.error_codes import (
 from ...core.logging_config import get_logger
 from ...core.metrics import increment_contract_unknown_code, increment_esp_error
 from ...core.resilience import ServiceUnavailableError
-from ...db.repositories import AuditLogRepository, ESPRepository
+from ...db.repositories import ActuatorRepository, AuditLogRepository, ESPRepository
+from ...services.actuator_orphan_guard import should_suppress_actuator_not_found_error_broadcast
 from ...db.session import resilient_session
 from ...services.ai_service import ErrorAnalysisRequest, ai_service
 from ...services.event_contract_serializers import serialize_error_event
@@ -153,6 +154,7 @@ class ErrorEventHandler:
                 async with resilient_session() as session:
                     esp_repo = ESPRepository(session)
                     audit_repo = AuditLogRepository(session)
+                    actuator_repo = ActuatorRepository(session)
 
                     # Step 4: Lookup ESP device (follows sensor_handler pattern)
                     esp_device = await esp_repo.get_by_device_id(esp_id_str)
@@ -239,48 +241,82 @@ class ErrorEventHandler:
                     )
 
                     # Step 8: WebSocket Broadcast (follows sensor_handler pattern)
-                    try:
-                        from ...websocket.manager import WebSocketManager
+                    suppress_operator_ui = False
+                    context_gpio = context_fields.get("gpio")
+                    if context_gpio is not None or error_code_int == 1052:
+                        actuator_config = None
+                        if context_gpio is not None:
+                            actuator_config = await actuator_repo.get_by_esp_and_gpio(
+                                esp_device.id, int(context_gpio)
+                            )
+                        elif error_code_int == 1052:
+                            from ...services.actuator_orphan_guard import (
+                                parse_gpio_from_actuator_error_message,
+                            )
 
-                        ws_manager = await WebSocketManager.get_instance()
-                        # Build title: short German label (message_de) or fallback
-                        error_title = (
-                            error_info.get("message_de", f"Fehler {error_code_int}")
-                            if error_info
-                            else f"Fehler {error_code_int}"
-                        )
-
-                        broadcast_payload = serialize_error_event(
-                            esp_id=esp_id_str,
-                            esp_name=esp_device.name or esp_id_str,
-                            error_log_id=error_log.id,
+                            parsed_gpio = parse_gpio_from_actuator_error_message(error_description)
+                            if parsed_gpio is not None:
+                                actuator_config = await actuator_repo.get_by_esp_and_gpio(
+                                    esp_device.id, parsed_gpio
+                                )
+                        suppress_operator_ui = should_suppress_actuator_not_found_error_broadcast(
                             error_code=error_code_int,
-                            severity=severity,
-                            category=payload.get("category"),
-                            title=error_title,
                             message=error_description,
-                            troubleshooting=(error_info["troubleshooting"] if error_info else []),
-                            user_action_required=(
-                                error_info["user_action_required"] if error_info else False
-                            ),
-                            recoverable=(error_info["recoverable"] if error_info else True),
-                            docs_link=(error_info.get("docs_link") if error_info else None),
-                            context=payload.get("context", {}),
-                            timestamp=payload.get("timestamp"),
+                            context_gpio=int(context_gpio) if context_gpio is not None else None,
+                            has_actuator_config=actuator_config is not None,
                         )
-                        broadcast_payload.update(
-                            {
-                                "contract_violation": canonical.is_contract_violation,
-                                "contract_code": canonical.contract_code,
-                                "contract_reason": canonical.contract_reason,
-                                "raw_severity": canonical.raw_fields.get("raw_severity"),
-                                "raw_category": canonical.raw_fields.get("raw_category"),
-                            }
+
+                    if suppress_operator_ui:
+                        logger.info(
+                            "Orphan actuator error_event suppressed from operator UI: "
+                            "esp_id=%s error_code=%s message=%s",
+                            esp_id_str,
+                            error_code_int,
+                            error_description,
                         )
-                        await ws_manager.broadcast("error_event", broadcast_payload)
-                        logger.debug(f"WebSocket broadcast completed for error_event: {esp_id_str}")
-                    except Exception as e:
-                        logger.warning(f"Failed to broadcast error event via WebSocket: {e}")
+                    else:
+                        try:
+                            from ...websocket.manager import WebSocketManager
+
+                            ws_manager = await WebSocketManager.get_instance()
+                            # Build title: short German label (message_de) or fallback
+                            error_title = (
+                                error_info.get("message_de", f"Fehler {error_code_int}")
+                                if error_info
+                                else f"Fehler {error_code_int}"
+                            )
+
+                            broadcast_payload = serialize_error_event(
+                                esp_id=esp_id_str,
+                                esp_name=esp_device.name or esp_id_str,
+                                error_log_id=error_log.id,
+                                error_code=error_code_int,
+                                severity=severity,
+                                category=payload.get("category"),
+                                title=error_title,
+                                message=error_description,
+                                troubleshooting=(error_info["troubleshooting"] if error_info else []),
+                                user_action_required=(
+                                    error_info["user_action_required"] if error_info else False
+                                ),
+                                recoverable=(error_info["recoverable"] if error_info else True),
+                                docs_link=(error_info.get("docs_link") if error_info else None),
+                                context=payload.get("context", {}),
+                                timestamp=payload.get("timestamp"),
+                            )
+                            broadcast_payload.update(
+                                {
+                                    "contract_violation": canonical.is_contract_violation,
+                                    "contract_code": canonical.contract_code,
+                                    "contract_reason": canonical.contract_reason,
+                                    "raw_severity": canonical.raw_fields.get("raw_severity"),
+                                    "raw_category": canonical.raw_fields.get("raw_category"),
+                                }
+                            )
+                            await ws_manager.broadcast("error_event", broadcast_payload)
+                            logger.debug(f"WebSocket broadcast completed for error_event: {esp_id_str}")
+                        except Exception as e:
+                            logger.warning(f"Failed to broadcast error event via WebSocket: {e}")
 
                     return True
 

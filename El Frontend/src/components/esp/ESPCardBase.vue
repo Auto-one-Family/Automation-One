@@ -14,6 +14,7 @@
 
 import { computed, toRef } from 'vue'
 import { useESPStatus } from '@/composables/useESPStatus'
+import { getBoardTypeLabel } from '@/utils/labels'
 import type { ESPDevice } from '@/api/esp'
 
 export interface ESPCardBaseProps {
@@ -52,6 +53,12 @@ const actionsVisible = computed(() =>
 const badgeText = computed(() => isMock.value ? 'MOCK' : 'REAL')
 const badgeClass = computed(() => isMock.value ? 'esp-card-base__badge--mock' : 'esp-card-base__badge--real')
 
+const boardBadgeText = computed(() => {
+  const hw = props.esp.hardware_type
+  if (!hw?.trim()) return null
+  return getBoardTypeLabel(hw)
+})
+
 /** Size class for the card based on variant */
 const sizeClass = computed(() => `esp-card-base--${props.variant}`)
 </script>
@@ -78,7 +85,16 @@ const sizeClass = computed(() => `esp-card-base--${props.variant}`)
           {{ displayName }}
         </slot>
       </span>
-      <span class="esp-card-base__badge" :class="badgeClass">{{ badgeText }}</span>
+      <div class="esp-card-base__badges">
+        <span class="esp-card-base__badge" :class="badgeClass">{{ badgeText }}</span>
+        <span
+          v-if="boardBadgeText"
+          class="esp-card-base__badge esp-card-base__badge--board"
+          :title="esp.hardware_type ?? undefined"
+        >
+          {{ boardBadgeText }}
+        </span>
+      </div>
       <div v-if="actionsVisible" class="esp-card-base__actions">
         <slot name="actions" :device-id="deviceId" :is-online="isOnline" :is-mock="isMock" />
       </div>
@@ -201,6 +217,13 @@ const sizeClass = computed(() => `esp-card-base--${props.variant}`)
   font-size: var(--text-sm);
 }
 
+.esp-card-base__badges {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .esp-card-base__badge {
   flex-shrink: 0;
   padding: 1px 0.375rem;
@@ -208,6 +231,12 @@ const sizeClass = computed(() => `esp-card-base--${props.variant}`)
   font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: var(--tracking-wide);
+}
+
+.esp-card-base__badge--board {
+  background-color: rgba(148, 163, 184, 0.12);
+  color: var(--color-text-secondary);
+  border: 1px solid rgba(148, 163, 184, 0.25);
 }
 
 .esp-card-base__badge--mock {

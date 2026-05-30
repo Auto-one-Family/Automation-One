@@ -15,6 +15,7 @@
 import { defineStore } from 'pinia'
 import { useToast } from '@/composables/useToast'
 import { createLogger } from '@/utils/logger'
+import { shouldSuppressActuatorNotFoundErrorToast } from '@/utils/actuatorOrphanGuard'
 import type { ESPDevice } from '@/api/esp'
 
 const logger = createLogger('NotificationStore')
@@ -54,6 +55,26 @@ export const useNotificationStore = defineStore('notification', () => {
     const errorCode = data.error_code as number | undefined
     const userActionRequired = data.user_action_required as boolean | undefined
     const troubleshooting = data.troubleshooting as string[] | undefined
+    const context = data.context as Record<string, unknown> | undefined
+    const contextGpio = typeof context?.gpio === 'number' ? context.gpio : null
+
+    if (
+      shouldSuppressActuatorNotFoundErrorToast({
+        errorCode,
+        message: msg,
+        contextGpio,
+        espId,
+        devices,
+        getDeviceId,
+      })
+    ) {
+      logger.debug('Suppress orphan actuator not-found error toast', {
+        esp_id: espId,
+        error_code: errorCode,
+        context_gpio: contextGpio,
+      })
+      return
+    }
 
     const toast = useToast()
     const deviceName = espId

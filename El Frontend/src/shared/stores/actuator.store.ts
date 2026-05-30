@@ -19,6 +19,7 @@ import { reactive, computed } from 'vue'
 import { useToast } from '@/composables/useToast'
 import { createLogger } from '@/utils/logger'
 import { CONTRACT_OPERATOR_ACTION, extractCorrelationId, extractRequestId, validateContractEvent } from '@/utils/contractEventMapper'
+import { isOrphanExternalActuatorFailure } from '@/utils/actuatorOrphanGuard'
 import { websocketService } from '@/services/websocket'
 import type { ESPDevice } from '@/api/esp'
 import { listIntentOutcomes } from '@/api/intentOutcomes'
@@ -892,6 +893,27 @@ export const useActuatorStore = defineStore('actuator', () => {
     const issuedBy = (typeof data.issued_by === 'string' && data.issued_by.trim().length > 0)
       ? data.issued_by.trim()
       : existingIntent?.issuedBy
+
+    if (
+      isOrphanExternalActuatorFailure({
+        success,
+        correlationId,
+        command,
+        espId,
+        gpio,
+        devices,
+        getDeviceId,
+        hasExistingIntent: Boolean(existingIntent),
+      })
+    ) {
+      logger.debug('Suppress orphan external actuator failure toast', {
+        esp_id: espId,
+        gpio,
+        correlation_id: correlationId,
+        command,
+      })
+      return
+    }
 
     if (
       existingIntent &&

@@ -44,6 +44,11 @@ from ...core.exceptions import (
     ValidationException,
 )
 from ...core.logging_config import get_logger
+from ...core.sensor_interface_inference import (
+    infer_interface_type as _infer_interface_type,
+    merge_uart_metadata as _merge_uart_metadata,
+    uart_fields_from_metadata as _uart_fields_from_metadata,
+)
 from ...db.models.sensor import SensorConfig
 from ...db.models.enums import DataSource
 from ...db.repositories import (
@@ -171,6 +176,7 @@ def _model_to_response(
         description=(sensor.sensor_metadata or {}).get("description"),
         unit=(sensor.sensor_metadata or {}).get("unit"),
         measurement_role=(sensor.sensor_metadata or {}).get("measurement_role"),
+        **_uart_fields_from_metadata(sensor.sensor_metadata),
         # Config status from ESP32 verification (Phase 2: write-after-verification)
         config_status=sensor.config_status,
         config_error=sensor.config_error,
@@ -233,7 +239,16 @@ def _schema_to_model_fields(request: SensorConfigCreate) -> dict:
     if request.measurement_role is not None:
         sensor_metadata["measurement_role"] = request.measurement_role
 
-    return {
+    if interface_type == "UART":
+        _merge_uart_metadata(
+            sensor_metadata,
+            logical_gpio=request.gpio,
+            uart_rx_pin=request.uart_rx_pin,
+            uart_tx_pin=request.uart_tx_pin,
+            uart_baud=request.uart_baud,
+        )
+
+    model_fields: dict = {
         "sensor_type": normalize_sensor_type(request.sensor_type),
         "sensor_name": request.name or "",  # Schema: name -> Model: sensor_name
         "enabled": request.enabled,
@@ -249,7 +264,7 @@ def _schema_to_model_fields(request: SensorConfigCreate) -> dict:
         # MULTI-VALUE SENSOR SUPPORT (I2C/OneWire)
         # =========================================================================
         "interface_type": interface_type,
-        "i2c_address": request.i2c_address,
+        "i2c_address": None if interface_type == "UART" else request.i2c_address,
         "onewire_address": request.onewire_address,
         "provides_values": request.provides_values,
         # =========================================================================
@@ -273,6 +288,7 @@ def _schema_to_model_fields(request: SensorConfigCreate) -> dict:
         # AUT-299: Optional linked temperature sensor for ATC
         "temp_sensor_config_id": request.temp_sensor_config_id,
     }
+    return model_fields
 
 
 # =============================================================================
@@ -825,7 +841,7 @@ async def create_or_update_sensor(
         mqtt_correlation_id: Optional[str] = None
         try:
             config_builder: ConfigPayloadBuilder = get_config_builder(db)
-            combined_config = await config_builder.build_combined_config(esp_id, db)
+            await config_builder.build_combined_config(esp_id, db)
             esp_service: ESPService = get_esp_service(db)
             schedule_result = await esp_service.trigger_config_push_debounced(
                 esp_id,
@@ -892,6 +908,39 @@ async def create_or_update_sensor(
         )
         # OneWire sensors can share GPIO (bus pin)
         # No GPIO validation needed
+    elif interface_type == "UART":
+        meta_preview = dict(request.metadata or {})
+        if request.uart_rx_pin is not None:
+            meta_preview["uart_rx_pin"] = request.uart_rx_pin
+        if request.uart_tx_pin is not None:
+            meta_preview["uart_tx_pin"] = request.uart_tx_pin
+        rx_pin = meta_preview.get("uart_rx_pin", gpio)
+        tx_pin = meta_preview.get("uart_tx_pin", 17)
+
+        gpio_validator = GpioValidationService(
+            session=db, sensor_repo=sensor_repo, actuator_repo=actuator_repo, esp_repo=esp_repo
+        )
+        validation_result = await gpio_validator.validate_uart_pins(
+            esp_db_id=esp_device.id,
+            rx_pin=int(rx_pin),
+            tx_pin=int(tx_pin),
+            logical_gpio=gpio,
+            exclude_sensor_id=existing.id if existing else None,
+        )
+        if not validation_result.available:
+            logger.warning(
+                f"UART GPIO conflict for ESP {esp_id}, RX={rx_pin} TX={tx_pin}: "
+                f"{validation_result.conflict_type} - {validation_result.message}"
+            )
+            raise GpioConflictError(
+                gpio=gpio,
+                conflict_type=validation_result.conflict_type.value,
+                conflict_component=validation_result.conflict_component,
+                conflict_id=(
+                    str(validation_result.conflict_id) if validation_result.conflict_id else None
+                ),
+                message=validation_result.message,
+            )
     else:  # ANALOG or DIGITAL
         # Analog/Digital: Check GPIO conflict (exclusive)
         gpio_validator = GpioValidationService(
@@ -1002,6 +1051,9 @@ async def create_or_update_sensor(
             existing.onewire_address = request.onewire_address
         if request.i2c_address is not None:
             existing.i2c_address = request.i2c_address
+        existing.interface_type = model_fields["interface_type"]
+        if model_fields["interface_type"] == "UART":
+            existing.i2c_address = None
         # =========================================================================
         # WRITE-AFTER-VERIFICATION: Reset config_status to pending
         # Status will be updated to "applied" or "failed" by config_handler
@@ -1160,7 +1212,7 @@ async def create_or_update_sensor(
     mqtt_correlation_id: Optional[str] = None
     try:
         config_builder: ConfigPayloadBuilder = get_config_builder(db)
-        combined_config = await config_builder.build_combined_config(esp_id, db)
+        await config_builder.build_combined_config(esp_id, db)
 
         esp_service: ESPService = get_esp_service(db)
         schedule_result = await esp_service.trigger_config_push_debounced(
@@ -1312,7 +1364,7 @@ async def delete_sensor(
     mqtt_correlation_id: Optional[str] = None
     try:
         config_builder: ConfigPayloadBuilder = get_config_builder(db)
-        combined_config = await config_builder.build_combined_config(esp_id, db)
+        await config_builder.build_combined_config(esp_id, db)
 
         esp_service: ESPService = get_esp_service(db)
         schedule_result = await esp_service.trigger_config_push_debounced(
@@ -2139,31 +2191,6 @@ async def list_onewire_sensors(
 # =============================================================================
 # Helper Functions for Multi-Value Sensor Support
 # =============================================================================
-
-
-def _infer_interface_type(sensor_type: str) -> str:
-    """
-    Infer interface_type from sensor_type naming convention.
-
-    Rules:
-    - sht31*, bmp280*, bme280*, bh1750*, veml7700* → I2C
-    - ds18b20* → ONEWIRE
-    - Everything else → ANALOG (default)
-
-    Args:
-        sensor_type: Sensor type string (e.g., 'sht31_temp')
-
-    Returns:
-        Interface type: 'I2C', 'ONEWIRE', 'ANALOG', or 'DIGITAL'
-    """
-    sensor_lower = sensor_type.lower()
-
-    if any(s in sensor_lower for s in ["sht31", "bmp280", "bme280", "bh1750", "veml7700"]):
-        return "I2C"
-    elif "ds18b20" in sensor_lower:
-        return "ONEWIRE"
-    else:
-        return "ANALOG"
 
 
 async def _validate_i2c_config(

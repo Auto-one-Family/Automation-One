@@ -401,7 +401,11 @@ class GpioValidationService:
             )
 
         # I2C Pin Check: ANALOG/DIGITAL sensors cannot use I2C bus pins
-        if gpio in board_constraints.i2c_bus_pins and interface_type not in ("I2C", "ONEWIRE"):
+        if gpio in board_constraints.i2c_bus_pins and interface_type not in (
+            "I2C",
+            "ONEWIRE",
+            "UART",
+        ):
             rejection_reason = (
                 f"GPIO {gpio} is reserved for I2C bus on {hardware_type}. "
                 f"Only I2C or ONEWIRE sensors can use this pin. "
@@ -506,6 +510,34 @@ class GpioValidationService:
             esp_reported_owner=esp_gpio_status.get("owner") if esp_gpio_status else None,
             warning=adc_warning,
         )
+
+    async def validate_uart_pins(
+        self,
+        esp_db_id: uuid.UUID,
+        rx_pin: int,
+        tx_pin: int,
+        logical_gpio: int,
+        exclude_sensor_id: Optional[uuid.UUID] = None,
+    ) -> GpioValidationResult:
+        """
+        Validate logical slot, RX, and TX pins for UART sensors.
+
+        UART is not subject to ADC2+WiFi analog warnings (interface_type=UART).
+        """
+        pins_to_check = sorted({rx_pin, tx_pin, logical_gpio})
+        last_ok: Optional[GpioValidationResult] = None
+        for pin in pins_to_check:
+            result = await self.validate_gpio_available(
+                esp_db_id=esp_db_id,
+                gpio=pin,
+                exclude_sensor_id=exclude_sensor_id,
+                purpose="sensor",
+                interface_type="UART",
+            )
+            if not result.available:
+                return result
+            last_ok = result
+        return last_ok or GpioValidationResult(available=True)
 
     async def get_all_used_gpios(self, esp_db_id: uuid.UUID) -> List[Dict[str, Any]]:
         """

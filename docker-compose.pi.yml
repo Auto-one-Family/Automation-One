@@ -7,7 +7,7 @@ services:
       SERVER_RELOAD: "false"
       ENVIRONMENT: production
       LOG_LEVEL: WARNING
-      CORS_ALLOWED_ORIGINS: '["http://AutoOne44.local:5173","http://192.168.0.2:5173","http://localhost:5173"]'
+      CORS_ALLOWED_ORIGINS: '["http://AutoOne44.local:5173","http://192.168.0.2:5173","http://localhost:5173","http://AutoOne44.local:5174","http://192.168.0.2:5174","http://localhost:5174"]'
     volumes:
       # Remove dev source-mount — use baked image source instead
       - ./logs/server:/app/logs

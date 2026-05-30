@@ -2,7 +2,7 @@
  * GPIO Configuration Utility
  *
  * Provides ESP32 GPIO pin information with recommendations for sensors and actuators.
- * Based on ESP32-WROOM and XIAO ESP32-C3 hardware specifications.
+ * Based on ESP32-WROOM, ESP32-S3 DevKitC-1, and XIAO ESP32-C3 hardware specifications.
  */
 
 // =============================================================================
@@ -32,7 +32,27 @@ export interface GpioPin {
   notes?: string
 }
 
-export type HardwareType = 'ESP32_WROOM' | 'XIAO_ESP32_C3'
+export type HardwareType = 'ESP32_WROOM' | 'ESP32_S3_DEVKITC1' | 'XIAO_ESP32_C3'
+
+/**
+ * Map ESP device hardware_type (esp store) to gpioConfig board key.
+ * WROOM and C3 behaviour unchanged; S3 aliases fold to ESP32_S3_DEVKITC1.
+ */
+export function normalizeGpioHardwareType(hardwareType?: string | null): HardwareType {
+  if (!hardwareType) return 'ESP32_WROOM'
+  const key = hardwareType.trim().toUpperCase()
+  if (
+    key === 'ESP32_S3_DEVKITC1' ||
+    key === 'ESP32_S3' ||
+    key.startsWith('MOCK_ESP32_S3')
+  ) {
+    return 'ESP32_S3_DEVKITC1'
+  }
+  if (key === 'XIAO_ESP32_C3' || key === 'XIAO_ESP32C3' || key === 'ESP32_C3') {
+    return 'XIAO_ESP32_C3'
+  }
+  return 'ESP32_WROOM'
+}
 
 // =============================================================================
 // ESP32-WROOM GPIO CONFIGURATION
@@ -254,6 +274,126 @@ const ESP32_WROOM_PINS: GpioPin[] = [
 ]
 
 // =============================================================================
+// ESP32-S3 DevKitC-1 GPIO CONFIGURATION
+// Strapping: 0, 3, 46 (caution). Octal Flash/PSRAM: 26-37 (avoid).
+// =============================================================================
+
+const ESP32_S3_FLASH_RESERVED_GPIS = Array.from({ length: 12 }, (_, index) => 26 + index)
+
+const ESP32_S3_DEVKITC1_PINS: GpioPin[] = [
+  // === RECOMMENDED ===
+  { gpio: 1, category: 'recommended', label: 'GPIO 1', features: ['ADC', 'PWM'], recommendedFor: 'both' },
+  { gpio: 2, category: 'recommended', label: 'GPIO 2', features: ['ADC', 'PWM'], recommendedFor: 'both' },
+  { gpio: 4, category: 'recommended', label: 'GPIO 4', features: ['ADC', 'PWM'], recommendedFor: 'both' },
+  { gpio: 5, category: 'recommended', label: 'GPIO 5', features: ['ADC', 'PWM'], recommendedFor: 'both' },
+  { gpio: 7, category: 'recommended', label: 'GPIO 7', features: ['ADC', 'PWM'], recommendedFor: 'both' },
+  { gpio: 8, category: 'recommended', label: 'GPIO 8 (I2C SDA)', features: ['ADC', 'PWM', 'I2C'], recommendedFor: 'both', notes: 'Standard I2C Data (S3)' },
+  { gpio: 9, category: 'recommended', label: 'GPIO 9 (I2C SCL)', features: ['ADC', 'PWM', 'I2C'], recommendedFor: 'both', notes: 'Standard I2C Clock (S3)' },
+  { gpio: 10, category: 'recommended', label: 'GPIO 10', features: ['ADC', 'PWM'], recommendedFor: 'both' },
+  { gpio: 11, category: 'recommended', label: 'GPIO 11', features: ['ADC', 'PWM'], recommendedFor: 'both' },
+  { gpio: 12, category: 'recommended', label: 'GPIO 12', features: ['ADC', 'PWM'], recommendedFor: 'both' },
+  { gpio: 13, category: 'recommended', label: 'GPIO 13', features: ['ADC', 'PWM'], recommendedFor: 'both' },
+  { gpio: 14, category: 'recommended', label: 'GPIO 14', features: ['ADC', 'PWM'], recommendedFor: 'both' },
+  { gpio: 15, category: 'recommended', label: 'GPIO 15', features: ['ADC', 'PWM'], recommendedFor: 'both' },
+  { gpio: 16, category: 'recommended', label: 'GPIO 16', features: ['PWM'], recommendedFor: 'actuator' },
+  { gpio: 17, category: 'recommended', label: 'GPIO 17', features: ['PWM'], recommendedFor: 'actuator' },
+  { gpio: 18, category: 'recommended', label: 'GPIO 18', features: ['PWM'], recommendedFor: 'both' },
+  { gpio: 21, category: 'recommended', label: 'GPIO 21', features: ['PWM'], recommendedFor: 'both' },
+  { gpio: 38, category: 'recommended', label: 'GPIO 38', features: ['PWM'], recommendedFor: 'both' },
+  { gpio: 39, category: 'recommended', label: 'GPIO 39', features: ['PWM'], recommendedFor: 'both' },
+  { gpio: 40, category: 'recommended', label: 'GPIO 40', features: ['PWM'], recommendedFor: 'both' },
+  { gpio: 41, category: 'recommended', label: 'GPIO 41', features: ['PWM'], recommendedFor: 'both' },
+  { gpio: 42, category: 'recommended', label: 'GPIO 42', features: ['PWM'], recommendedFor: 'both' },
+  { gpio: 47, category: 'recommended', label: 'GPIO 47', features: ['PWM'], recommendedFor: 'both' },
+  { gpio: 48, category: 'recommended', label: 'GPIO 48', features: ['PWM'], recommendedFor: 'both' },
+
+  // === AVAILABLE ===
+  { gpio: 6, category: 'available', label: 'GPIO 6', features: ['ADC', 'PWM'], recommendedFor: 'both' },
+  { gpio: 22, category: 'available', label: 'GPIO 22', features: ['PWM'], recommendedFor: 'both' },
+  { gpio: 23, category: 'available', label: 'GPIO 23', features: ['PWM'], recommendedFor: 'both' },
+  { gpio: 24, category: 'available', label: 'GPIO 24', features: ['PWM'], recommendedFor: 'both' },
+  { gpio: 25, category: 'available', label: 'GPIO 25', features: ['PWM'], recommendedFor: 'both' },
+
+  // === CAUTION (strapping / USB) ===
+  {
+    gpio: 0,
+    category: 'caution',
+    label: 'GPIO 0 (Strapping)',
+    features: [],
+    recommendedFor: 'both',
+    warning: 'Strapping-Pin — Boot-Verhalten beeinflusst, nur mit Vorsicht',
+  },
+  {
+    gpio: 3,
+    category: 'caution',
+    label: 'GPIO 3 (Strapping / JTAG)',
+    features: [],
+    recommendedFor: 'both',
+    warning: 'Strapping-Pin — JTAG/Boot, nur mit Vorsicht',
+  },
+  {
+    gpio: 19,
+    category: 'caution',
+    label: 'GPIO 19 (USB D-)',
+    features: ['UART'],
+    recommendedFor: 'both',
+    warning: 'Native USB auf DevKitC-1 — Mit Vorsicht verwenden',
+  },
+  {
+    gpio: 20,
+    category: 'caution',
+    label: 'GPIO 20 (USB D+)',
+    features: ['UART'],
+    recommendedFor: 'both',
+    warning: 'Native USB auf DevKitC-1 — Mit Vorsicht verwenden',
+  },
+  {
+    gpio: 45,
+    category: 'caution',
+    label: 'GPIO 45 (Strapping)',
+    features: [],
+    recommendedFor: 'both',
+    warning: 'Strapping-Pin — Vcc-Spannung beim Boot, mit Vorsicht',
+  },
+  {
+    gpio: 46,
+    category: 'caution',
+    label: 'GPIO 46 (Strapping)',
+    features: [],
+    recommendedFor: 'both',
+    warning: 'Strapping-Pin — Boot-Verhalten beeinflusst, nur mit Vorsicht',
+  },
+
+  // === AVOID (Flash/PSRAM 26-37, UART download) ===
+  ...ESP32_S3_FLASH_RESERVED_GPIS.map(
+    (gpio): GpioPin => ({
+      gpio,
+      category: 'avoid',
+      label: `GPIO ${gpio} (Flash/PSRAM)`,
+      features: [],
+      recommendedFor: 'both',
+      warning: 'Octal Flash/PSRAM reserviert — NICHT VERWENDEN',
+    })
+  ),
+  {
+    gpio: 43,
+    category: 'avoid',
+    label: 'GPIO 43 (UART0 TX)',
+    features: ['UART'],
+    recommendedFor: 'both',
+    warning: 'UART0 Download — NICHT VERWENDEN',
+  },
+  {
+    gpio: 44,
+    category: 'avoid',
+    label: 'GPIO 44 (UART0 RX)',
+    features: ['UART'],
+    recommendedFor: 'both',
+    warning: 'UART0 Download — NICHT VERWENDEN',
+  },
+]
+
+// =============================================================================
 // XIAO ESP32-C3 GPIO CONFIGURATION
 // =============================================================================
 
@@ -348,6 +488,7 @@ const XIAO_ESP32_C3_PINS: GpioPin[] = [
 
 const GPIO_CONFIGS: Record<HardwareType, GpioPin[]> = {
   ESP32_WROOM: ESP32_WROOM_PINS,
+  ESP32_S3_DEVKITC1: ESP32_S3_DEVKITC1_PINS,
   XIAO_ESP32_C3: XIAO_ESP32_C3_PINS,
 }
 
@@ -361,8 +502,12 @@ const GPIO_CONFIGS: Record<HardwareType, GpioPin[]> = {
  * @param hardwareType - Hardware type (defaults to ESP32_WROOM)
  * @returns Array of GPIO pin configurations
  */
-export function getGpioConfig(hardwareType: HardwareType = 'ESP32_WROOM'): GpioPin[] {
-  return GPIO_CONFIGS[hardwareType] || GPIO_CONFIGS.ESP32_WROOM
+export function getGpioConfig(hardwareType: HardwareType | string = 'ESP32_WROOM'): GpioPin[] {
+  const normalized =
+    hardwareType in GPIO_CONFIGS
+      ? (hardwareType as HardwareType)
+      : normalizeGpioHardwareType(hardwareType)
+  return GPIO_CONFIGS[normalized] ?? GPIO_CONFIGS.ESP32_WROOM
 }
 
 /**
@@ -373,7 +518,7 @@ export function getGpioConfig(hardwareType: HardwareType = 'ESP32_WROOM'): GpioP
  * @returns Filtered array of available GPIO pins
  */
 export function getAvailablePins(
-  hardwareType: HardwareType = 'ESP32_WROOM',
+  hardwareType: HardwareType | string = 'ESP32_WROOM',
   usedPins: number[] = []
 ): GpioPin[] {
   const allPins = getGpioConfig(hardwareType)
@@ -387,7 +532,7 @@ export function getAvailablePins(
  * @param usedPins - Already used pins (will be marked as unavailable)
  */
 export function getGpiosByCategory(
-  hardwareType: HardwareType = 'ESP32_WROOM',
+  hardwareType: HardwareType | string = 'ESP32_WROOM',
   usedPins: number[] = []
 ): Record<GpioCategory, GpioPin[]> {
   const allPins = getGpioConfig(hardwareType)
@@ -413,7 +558,7 @@ export function getGpiosByCategory(
  * Get GPIO pins suitable for sensors.
  */
 export function getSensorGpios(
-  hardwareType: HardwareType = 'ESP32_WROOM',
+  hardwareType: HardwareType | string = 'ESP32_WROOM',
   usedPins: number[] = []
 ): GpioPin[] {
   return getAvailablePins(hardwareType, usedPins).filter(
@@ -427,7 +572,7 @@ export function getSensorGpios(
  * Get GPIO pins suitable for actuators.
  */
 export function getActuatorGpios(
-  hardwareType: HardwareType = 'ESP32_WROOM',
+  hardwareType: HardwareType | string = 'ESP32_WROOM',
   usedPins: number[] = []
 ): GpioPin[] {
   return getAvailablePins(hardwareType, usedPins).filter(
@@ -443,7 +588,7 @@ export function getActuatorGpios(
  */
 export function getGpioInfo(
   gpio: number,
-  hardwareType: HardwareType = 'ESP32_WROOM'
+  hardwareType: HardwareType | string = 'ESP32_WROOM'
 ): GpioPin | undefined {
   return getGpioConfig(hardwareType).find(pin => pin.gpio === gpio)
 }
@@ -453,7 +598,7 @@ export function getGpioInfo(
  */
 export function isGpioRecommended(
   gpio: number,
-  hardwareType: HardwareType = 'ESP32_WROOM'
+  hardwareType: HardwareType | string = 'ESP32_WROOM'
 ): boolean {
   const pin = getGpioInfo(gpio, hardwareType)
   return pin?.category === 'recommended'
@@ -464,7 +609,7 @@ export function isGpioRecommended(
  */
 export function isGpioAvoid(
   gpio: number,
-  hardwareType: HardwareType = 'ESP32_WROOM'
+  hardwareType: HardwareType | string = 'ESP32_WROOM'
 ): boolean {
   const pin = getGpioInfo(gpio, hardwareType)
   return pin?.category === 'avoid'
@@ -475,7 +620,7 @@ export function isGpioAvoid(
  */
 export function getGpioWarning(
   gpio: number,
-  hardwareType: HardwareType = 'ESP32_WROOM'
+  hardwareType: HardwareType | string = 'ESP32_WROOM'
 ): string | null {
   const pin = getGpioInfo(gpio, hardwareType)
   return pin?.warning || null
@@ -625,7 +770,7 @@ import type { GpioStatusResponse, GpioPinStatus } from '@/types/gpio'
  * @returns Enriched pin list with both static info and usage status
  */
 export function mergeGpioConfigWithStatus(
-  hardwareType: HardwareType,
+  hardwareType: HardwareType | string,
   dynamicStatus: GpioStatusResponse | null
 ): GpioPinStatus[] {
   const staticConfig = getGpioConfig(hardwareType)

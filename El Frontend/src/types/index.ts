@@ -303,7 +303,7 @@ export interface MockSensor {
   // Interface / Address Fields (for Orbital display)
   // ═══════════════════════════════════════════════════════════════════════════
   /** Interface type: I2C, ONEWIRE, ANALOG, DIGITAL, VIRTUAL */
-  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'VIRTUAL' | null
+  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'UART' | 'VIRTUAL' | null
   /** I2C address (0-127) for I2C sensors */
   i2c_address?: number | null
   /** OneWire ROM address for DS18B20 sensors (16 hex chars) */
@@ -418,8 +418,8 @@ export interface MockSensorConfig {
   onewire_address?: string
   /** I2C address for I2C sensors (e.g., SHT31: 0x44=68 or 0x45=69) */
   i2c_address?: number | null
-  /** Interface type for sensor (I2C, ONEWIRE, ANALOG, DIGITAL, VIRTUAL) */
-  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'VIRTUAL'
+  /** Interface type for sensor (I2C, ONEWIRE, ANALOG, DIGITAL, UART, VIRTUAL) */
+  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'UART' | 'VIRTUAL'
 }
 
 export interface MockActuatorConfig {
@@ -751,9 +751,15 @@ export interface SensorConfigCreate {
   // MULTI-VALUE SENSOR SUPPORT (I2C/OneWire)
   // =========================================================================
   /** Interface type: I2C, ONEWIRE, ANALOG, DIGITAL, VIRTUAL (auto-inferred if not provided) */
-  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'VIRTUAL'
+  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'UART' | 'VIRTUAL'
   /** I2C address (0-127) - required for I2C sensors */
   i2c_address?: number | null
+  /** UART: ESP RX pin (sensor TX) */
+  uart_rx_pin?: number | null
+  /** UART: ESP TX pin (sensor RX) */
+  uart_tx_pin?: number | null
+  /** UART baud (SEN0220: 9600) */
+  uart_baud?: number | null
   /** OneWire device ROM address - optional, server auto-generates if not provided */
   onewire_address?: string | null
   /** List of value types this sensor provides (for multi-value sensors) */
@@ -804,6 +810,10 @@ export interface SensorConfigResponse {
   warning_max: number | null
   /** I2C address (0-127) - backend returns as int */
   i2c_address?: number | null
+  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'UART' | 'VIRTUAL'
+  uart_rx_pin?: number | null
+  uart_tx_pin?: number | null
+  uart_baud?: number | null
   metadata: Record<string, unknown> | null
   // Config status from ESP32 verification (Phase 2: write-after-verification)
   config_status?: 'pending' | 'applied' | 'failed' | null

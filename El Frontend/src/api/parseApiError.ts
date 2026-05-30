@@ -65,8 +65,28 @@ export function parseApiError(error: AxiosError): StructuredApiError {
   }
 
   // FastAPI HTTPException format: { detail: "..." } or { detail: { code, message, ... } }
+  // Pydantic request validation (422): { detail: [{ loc, msg, type }, ...] }
   const detail = (response?.data as Record<string, unknown>)?.detail
   if (detail) {
+    if (Array.isArray(detail) && detail.length > 0) {
+      const messages = detail
+        .map((item) => {
+          if (!item || typeof item !== 'object') return null
+          const entry = item as { loc?: unknown[]; msg?: string }
+          const path = Array.isArray(entry.loc) ? entry.loc.filter((p) => p !== 'body').join('.') : ''
+          const msg = entry.msg ?? ''
+          return path ? `${path}: ${msg}` : msg
+        })
+        .filter((m): m is string => Boolean(m))
+      return {
+        code: 'VALIDATION_ERROR',
+        numericCode: null,
+        message: messages.join('; ') || 'Validierung fehlgeschlagen',
+        details: {},
+        requestId: typeof headerRequestId === 'string' ? headerRequestId : null,
+        statusCode,
+      }
+    }
     if (typeof detail === 'string') {
       return {
         code: 'HTTP_ERROR',

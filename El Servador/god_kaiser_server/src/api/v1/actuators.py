@@ -671,7 +671,7 @@ async def create_or_update_actuator(
     # Publish config to ESP32 via MQTT (using dependency-injected services)
     try:
         config_builder: ConfigPayloadBuilder = get_config_builder(db)
-        combined_config = await config_builder.build_combined_config(esp_id, db)
+        await config_builder.build_combined_config(esp_id, db)
 
         esp_service: ESPService = get_esp_service(db)
         schedule_result = await esp_service.trigger_config_push_debounced(
@@ -1425,7 +1425,7 @@ async def delete_actuator(
     # Publish updated config to ESP32 via MQTT (actuator removed from payload)
     try:
         config_builder: ConfigPayloadBuilder = get_config_builder(db)
-        combined_config = await config_builder.build_combined_config(esp_id, db)
+        await config_builder.build_combined_config(esp_id, db)
 
         esp_service: ESPService = get_esp_service(db)
         await esp_service.trigger_config_push_debounced(

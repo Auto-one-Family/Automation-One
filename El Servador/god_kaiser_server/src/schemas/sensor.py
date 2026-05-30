@@ -167,8 +167,8 @@ class SensorConfigCreate(SensorConfigBase):
     # =========================================================================
     interface_type: Optional[str] = Field(
         None,
-        pattern=r"^(I2C|ONEWIRE|ANALOG|DIGITAL)$",
-        description="Interface type: I2C, ONEWIRE, ANALOG, DIGITAL (auto-inferred if not provided)",
+        pattern=r"^(I2C|ONEWIRE|ANALOG|DIGITAL|UART)$",
+        description="Interface type: I2C, ONEWIRE, ANALOG, DIGITAL, UART (auto-inferred if not provided)",
     )
 
     i2c_address: Optional[int] = Field(
@@ -187,6 +187,26 @@ class SensorConfigCreate(SensorConfigBase):
     provides_values: Optional[List[str]] = Field(
         None,
         description="List of value types this sensor provides (for multi-value sensors, e.g., ['sht31_temp', 'sht31_humidity'])",
+    )
+
+    # UART (e.g. DFRobot SEN0220 / MH-Z19) — persisted in sensor_metadata, exposed on API
+    uart_rx_pin: Optional[int] = Field(
+        None,
+        ge=0,
+        le=48,
+        description="ESP RX pin (sensor TX). Default often equals logical gpio slot.",
+    )
+    uart_tx_pin: Optional[int] = Field(
+        None,
+        ge=0,
+        le=48,
+        description="ESP TX pin (sensor RX).",
+    )
+    uart_baud: Optional[int] = Field(
+        None,
+        ge=300,
+        le=921600,
+        description="UART baud rate (SEN0220/MH-Z19: 9600).",
     )
     # =========================================================================
 
@@ -389,6 +409,14 @@ class SensorConfigUpdate(BaseModel):
             "NULL = auto-discover same-ESP temperature sensor."
         ),
     )
+    interface_type: Optional[str] = Field(
+        None,
+        pattern=r"^(I2C|ONEWIRE|ANALOG|DIGITAL|UART)$",
+        description="Interface type override",
+    )
+    uart_rx_pin: Optional[int] = Field(None, ge=0, le=48)
+    uart_tx_pin: Optional[int] = Field(None, ge=0, le=48)
+    uart_baud: Optional[int] = Field(None, ge=300, le=921600)
 
 
 class SensorConfigResponse(SensorConfigBase, TimestampMixin):
@@ -426,7 +454,7 @@ class SensorConfigResponse(SensorConfigBase, TimestampMixin):
     # =========================================================================
     interface_type: str = Field(
         ...,
-        description="Interface type: I2C, ONEWIRE, ANALOG, DIGITAL",
+        description="Interface type: I2C, ONEWIRE, ANALOG, DIGITAL, UART",
     )
 
     i2c_address: Optional[int] = Field(
@@ -442,6 +470,19 @@ class SensorConfigResponse(SensorConfigBase, TimestampMixin):
     provides_values: Optional[List[str]] = Field(
         None,
         description="List of value types this sensor provides",
+    )
+
+    uart_rx_pin: Optional[int] = Field(
+        None,
+        description="ESP RX pin (from sensor_metadata.uart_rx_pin)",
+    )
+    uart_tx_pin: Optional[int] = Field(
+        None,
+        description="ESP TX pin (from sensor_metadata.uart_tx_pin)",
+    )
+    uart_baud: Optional[int] = Field(
+        None,
+        description="UART baud rate (from sensor_metadata.uart_baud)",
     )
     # =========================================================================
 
