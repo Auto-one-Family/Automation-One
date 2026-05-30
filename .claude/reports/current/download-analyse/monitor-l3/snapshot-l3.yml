@@ -1,0 +1,623 @@
+- generic [ref=e1]:
+  - generic [ref=e3]:
+    - complementary [ref=e4]:
+      - heading "AutomationOne" [level=1] [ref=e9]
+      - navigation [ref=e10]:
+        - generic [ref=e11]: Navigation
+        - link "Dashboard" [ref=e12] [cursor=pointer]:
+          - /url: /hardware
+          - img [ref=e14]
+          - generic [ref=e19]: Dashboard
+        - link "Regeln" [ref=e20] [cursor=pointer]:
+          - /url: /logic
+          - img [ref=e21]
+          - generic [ref=e25]: Regeln
+        - link "Komponenten" [ref=e26] [cursor=pointer]:
+          - /url: /sensors
+          - img [ref=e27]
+          - generic [ref=e29]: Komponenten
+        - generic [ref=e31]: Administration
+        - link "System" [ref=e32] [cursor=pointer]:
+          - /url: /system-monitor
+          - img [ref=e33]
+          - generic [ref=e35]: System
+        - link "Benutzer" [ref=e36] [cursor=pointer]:
+          - /url: /users
+          - img [ref=e37]
+          - generic [ref=e42]: Benutzer
+        - link "Kalibrierung" [ref=e43] [cursor=pointer]:
+          - /url: /calibration
+          - img [ref=e44]
+          - generic [ref=e45]: Kalibrierung
+        - link "Plugins" [ref=e46] [cursor=pointer]:
+          - /url: /plugins
+          - img [ref=e47]
+          - generic [ref=e49]: Plugins
+        - link "Postfach" [ref=e50] [cursor=pointer]:
+          - /url: /email
+          - img [ref=e51]
+          - generic [ref=e54]: Postfach
+      - generic [ref=e55]:
+        - link "Einstellungen" [ref=e56] [cursor=pointer]:
+          - /url: /settings
+          - img [ref=e57]
+          - generic [ref=e69]: Einstellungen
+        - generic [ref=e70]:
+          - generic [ref=e71]: A
+          - generic [ref=e72]:
+            - paragraph [ref=e73]: admin
+            - paragraph [ref=e74]: admin
+    - generic [ref=e75]:
+      - banner [ref=e76]:
+        - generic [ref=e78]: Monitor
+        - generic "Gerätestatus" [ref=e80]:
+          - button "1 Online" [ref=e81] [cursor=pointer]:
+            - generic [ref=e83]: 1 Online
+          - button "3 Offline" [ref=e84] [cursor=pointer]:
+            - generic [ref=e86]: 3 Offline
+          - generic "18 aktive Alarme" [ref=e87]:
+            - generic [ref=e88]: ⚠
+            - generic [ref=e89]: "18"
+          - generic "Gerätetyp-Filter" [ref=e91]:
+            - button "Alle 4" [ref=e92] [cursor=pointer]:
+              - text: Alle
+              - generic [ref=e93]: "4"
+            - button "Mock 0" [ref=e94] [cursor=pointer]:
+              - text: Mock
+              - generic [ref=e95]: "0"
+            - button "Real 4" [ref=e96] [cursor=pointer]:
+              - text: Real
+              - generic [ref=e97]: "4"
+        - generic [ref=e98]:
+          - button "18 aktive Alerts, Kritisch, durchschnittliche Lösungszeit 70.4h, 74 neue Benachrichtigungen, KPI-Zähler alle 30s; Liste per WebSocket oft schneller. Klicken für Details. Server-Inbox — Echtzeit-Fehler (error_event) nur als Toast." [ref=e101] [cursor=pointer]:
+            - generic [ref=e102]:
+              - img [ref=e103]
+              - generic [ref=e107]: Kritisch
+            - generic [ref=e108]: 18 aktive Alerts
+          - 'button "Not-Aus: Alle Aktoren sofort abschalten" [ref=e110] [cursor=pointer]':
+            - img [ref=e111]
+            - generic [ref=e115]: NOT-AUS
+          - generic "Server verbunden" [ref=e116]
+          - button "A" [ref=e119] [cursor=pointer]:
+            - generic [ref=e120]: A
+            - img [ref=e121]
+      - main [ref=e123]:
+        - generic [ref=e124]:
+          - generic [ref=e125]:
+            - navigation "Hauptansichten" [ref=e126]:
+              - link "Geräte" [ref=e127] [cursor=pointer]:
+                - /url: /hardware
+                - img [ref=e128]
+                - generic [ref=e133]: Geräte
+              - link "Monitor" [ref=e134] [cursor=pointer]:
+                - /url: /monitor
+                - img [ref=e135]
+                - generic [ref=e137]: Monitor
+              - link "Editor" [ref=e138] [cursor=pointer]:
+                - /url: /editor
+                - img [ref=e139]
+                - generic [ref=e144]: Editor
+            - 'status "Echtzeitverbindung: Live" [ref=e145]':
+              - generic [ref=e147]: Live
+          - generic [ref=e148]:
+            - main [ref=e150]:
+              - generic [ref=e252]:
+                - generic [ref=e253]:
+                  - generic [ref=e254]:
+                    - button "Zurück" [ref=e255] [cursor=pointer]:
+                      - img [ref=e256]
+                    - generic [ref=e258]:
+                      - button "Vorherige Zone" [disabled] [ref=e259]:
+                        - img [ref=e260]
+                      - generic [ref=e262]: Gewaechshaus
+                      - button "Nächste Zone" [ref=e263] [cursor=pointer]:
+                        - img [ref=e264]
+                    - generic [ref=e267]:
+                      - img [ref=e268]
+                      - generic [ref=e272]: Kritisch
+                    - link "Dashboard bearbeiten" [ref=e273] [cursor=pointer]:
+                      - /url: /editor/5193c8a1-b8c9-4fb7-9370-5723fb6d356d
+                      - img [ref=e274]
+                  - paragraph [ref=e277]: Alle 2 Geräte offline
+                  - group "Datenquelle filtern" [ref=e278]:
+                    - button "Alle" [ref=e279] [cursor=pointer]
+                    - button "Nur Real" [ref=e280] [cursor=pointer]
+                    - button "Nur Mock" [ref=e281] [cursor=pointer]
+                  - generic [ref=e283]:
+                    - generic [ref=e284]:
+                      - generic "Offline" [ref=e285]
+                      - generic "Zone-weit"
+                      - generic [ref=e287]: 6S · 2A
+                      - generic [ref=e288]: 20,8°C · 48,9%RH · 15%
+                      - generic [ref=e289]: Keine Subzone konfiguriert
+                    - generic [ref=e290]:
+                      - generic [ref=e291]: Sensoren
+                      - generic [ref=e292]:
+                        - generic [ref=e294] [cursor=pointer]:
+                          - generic [ref=e295]:
+                            - img [ref=e296]
+                            - generic "Luftfeuchte" [ref=e299]
+                            - generic [ref=e300]:
+                              - generic [ref=e301]: Real
+                              - generic [ref=e302]: Hybrid
+                              - generic [ref=e304]: Veraltet
+                          - generic [ref=e305]:
+                            - generic [ref=e306]: 48,9
+                            - generic [ref=e307]: "%RH"
+                          - generic [ref=e308]: 21.04.2026, 11:14
+                          - generic [ref=e309]: Keine Daten
+                          - generic [ref=e310]:
+                            - generic [ref=e311]: ESP_EA5484
+                            - generic [ref=e312]:
+                              - generic [ref=e313]: Keine Subzone
+                              - generic [ref=e314]:
+                                - img [ref=e315]
+                                - text: "Zuletzt: 21.04.2026, 11:14"
+                        - generic [ref=e319] [cursor=pointer]:
+                          - generic [ref=e320]:
+                            - img [ref=e321]
+                            - generic "Bodenfeuchte" [ref=e324]
+                            - generic [ref=e325]:
+                              - generic [ref=e326]: Real
+                              - generic [ref=e327]: Hybrid
+                              - generic [ref=e329]: Veraltet
+                          - generic [ref=e330]:
+                            - generic [ref=e331]: "11"
+                            - generic [ref=e332]: "%"
+                          - generic [ref=e333]: 21.04.2026, 11:14
+                          - generic [ref=e334]: Keine Daten
+                          - generic [ref=e335]:
+                            - generic [ref=e336]: ESP_EA5484
+                            - generic [ref=e337]:
+                              - generic [ref=e338]: Keine Subzone
+                              - generic [ref=e339]:
+                                - img [ref=e340]
+                                - text: "Zuletzt: 21.04.2026, 11:14"
+                        - generic [ref=e344] [cursor=pointer]:
+                          - generic [ref=e345]:
+                            - img [ref=e346]
+                            - generic "Bodenfeuchte" [ref=e349]
+                            - generic [ref=e350]:
+                              - generic [ref=e351]: Real
+                              - generic [ref=e352]: Hybrid
+                              - generic [ref=e354]: Veraltet
+                          - generic [ref=e355]:
+                            - generic [ref=e356]: "20"
+                            - generic [ref=e357]: "%"
+                          - generic [ref=e358]: 21.04.2026, 11:14
+                          - generic [ref=e359]: Keine Daten
+                          - generic [ref=e360]:
+                            - generic [ref=e361]: ESP_EA5484
+                            - generic [ref=e362]:
+                              - generic [ref=e363]: Keine Subzone
+                              - generic [ref=e364]:
+                                - img [ref=e365]
+                                - text: "Zuletzt: 21.04.2026, 11:14"
+                        - generic [ref=e369] [cursor=pointer]:
+                          - generic [ref=e370]:
+                            - img [ref=e371]
+                            - generic "VPD (berechnet)" [ref=e374]
+                            - img [ref=e376]
+                            - generic [ref=e378]:
+                              - generic [ref=e379]: Real
+                              - generic [ref=e380]: Hybrid
+                              - generic [ref=e382]: Veraltet
+                          - generic [ref=e383]:
+                            - generic [ref=e384]: 1,36
+                            - generic [ref=e385]: kPa
+                          - generic [ref=e386]: 21.04.2026, 11:14
+                          - generic [ref=e387]: Keine Daten
+                          - generic [ref=e388]:
+                            - generic [ref=e389]: ESP_EA5484
+                            - generic [ref=e390]:
+                              - generic [ref=e391]: Keine Subzone
+                              - generic [ref=e392]:
+                                - img [ref=e393]
+                                - text: "Zuletzt: 21.04.2026, 11:14"
+                        - generic [ref=e396]:
+                          - generic [ref=e397] [cursor=pointer]:
+                            - generic [ref=e398]:
+                              - img [ref=e399]
+                              - generic "Temp BAE1" [ref=e401]
+                              - generic [ref=e402]:
+                                - generic [ref=e403]: Real
+                                - generic [ref=e404]: Hybrid
+                                - generic [ref=e406]: Veraltet
+                            - generic [ref=e407]:
+                              - generic [ref=e408]: 19,7
+                              - generic [ref=e409]: °C
+                            - generic [ref=e410]: 21.04.2026, 11:14
+                            - generic [ref=e411]: Keine Daten
+                            - generic [ref=e412]:
+                              - generic [ref=e413]: ESP_EA5484
+                              - generic [ref=e414]:
+                                - generic [ref=e415]: Keine Subzone
+                                - generic [ref=e416]:
+                                  - img [ref=e417]
+                                  - text: "Zuletzt: 21.04.2026, 11:14"
+                          - generic [ref=e420]:
+                            - img [ref=e423]
+                            - button "Zeitreihe anzeigen" [active] [ref=e425] [cursor=pointer]:
+                              - img [ref=e426]
+                              - generic [ref=e428]: Zeitreihe anzeigen
+                        - generic [ref=e430] [cursor=pointer]:
+                          - generic [ref=e431]:
+                            - img [ref=e432]
+                            - generic "Temperatur" [ref=e434]
+                            - generic [ref=e435]:
+                              - generic [ref=e436]: Real
+                              - generic [ref=e437]: Hybrid
+                              - generic [ref=e439]: Veraltet
+                          - generic [ref=e440]:
+                            - generic [ref=e441]: 21,9
+                            - generic [ref=e442]: °C
+                          - generic [ref=e443]: 21.04.2026, 11:14
+                          - generic [ref=e444]: Keine Daten
+                          - generic [ref=e445]:
+                            - generic [ref=e446]: ESP_EA5484
+                            - generic [ref=e447]:
+                              - generic [ref=e448]: Keine Subzone
+                              - generic [ref=e449]:
+                                - img [ref=e450]
+                                - text: "Zuletzt: 21.04.2026, 11:14"
+                      - separator
+                      - generic [ref=e453]: Aktoren
+                      - generic [ref=e454]:
+                        - generic [ref=e455] [cursor=pointer]:
+                          - generic [ref=e456]:
+                            - img [ref=e458]
+                            - generic [ref=e461]:
+                              - generic [ref=e462]:
+                                - paragraph [ref=e463]: Befeuchter
+                                - generic [ref=e464]: Aus
+                              - paragraph [ref=e465]: ESP_EA5484 · Digital
+                              - paragraph [ref=e466]:
+                                - generic [ref=e467]: "Subzone:"
+                                - generic [ref=e468]: Keine Subzone
+                          - generic [ref=e470]:
+                            - generic [ref=e471]: Real
+                            - generic [ref=e472]: Hybrid
+                            - generic [ref=e473]: 21.04.2026, 11:14
+                            - generic [ref=e474]: "Rueckmeldung: letzter Stand"
+                          - generic [ref=e475]: Letzter bekannter Zustand; Rueckmeldung ist veraltet.
+                        - generic [ref=e476] [cursor=pointer]:
+                          - generic [ref=e477]:
+                            - img [ref=e479]
+                            - generic [ref=e482]:
+                              - generic [ref=e483]:
+                                - paragraph [ref=e484]: Digital GPIO 25
+                                - generic [ref=e485]: Aus
+                              - paragraph [ref=e486]: ESP_EA5484 · Digital
+                              - paragraph [ref=e487]:
+                                - generic [ref=e488]: "Subzone:"
+                                - generic [ref=e489]: Keine Subzone
+                          - generic [ref=e491]:
+                            - generic [ref=e492]: Real
+                            - generic [ref=e493]: Hybrid
+                            - generic [ref=e494]: 21.04.2026, 11:14
+                            - generic [ref=e495]: "Rueckmeldung: letzter Stand"
+                          - generic [ref=e496]: Letzter bekannter Zustand; Rueckmeldung ist veraltet.
+                - generic [ref=e498]:
+                  - generic [ref=e499]:
+                    - heading "Zonenweite Regeln (0)" [level=3] [ref=e500]
+                    - generic [ref=e501]: Wirken auf ganze Zone
+                  - generic [ref=e502]:
+                    - img [ref=e503]
+                    - paragraph [ref=e505]: Keine Automatisierungen für diese Zone
+                    - paragraph [ref=e506]: Regeln können im Regeln-Tab erstellt werden
+                    - button "Zum Regeln-Tab navigieren" [ref=e507] [cursor=pointer]:
+                      - img [ref=e508]
+                      - text: Zum Regeln-Tab
+                - generic [ref=e512]:
+                  - generic [ref=e513]:
+                    - generic [ref=e514]: T18-Test Dashboard
+                    - link "Im Editor bearbeiten" [ref=e515] [cursor=pointer]:
+                      - /url: /editor/a7fd54d6-ee87-4bf4-b59d-8f0d0e72732d
+                      - img [ref=e516]
+                  - generic [ref=e519]:
+                    - generic [ref=e520]:
+                      - generic:
+                        - button "Konfigurieren":
+                          - img
+                        - button "Entfernen":
+                          - img
+                      - generic [ref=e526]:
+                        - img [ref=e527]
+                        - combobox [ref=e529]:
+                          - option "Sensor wählen für Historische Zeitreihe" [disabled]
+                          - option "Temp BAE1"
+                          - option "moisture"
+                          - option "moisture"
+                          - option "sht31_humidity"
+                          - option "sht31_temp"
+                          - option "VPD (berechnet)"
+                    - generic [ref=e530]:
+                      - generic:
+                        - button "Konfigurieren":
+                          - img
+                        - button "Entfernen":
+                          - img
+                      - generic "Aktor-Status" [ref=e534]:
+                        - generic [ref=e535]:
+                          - img [ref=e536]
+                          - generic [ref=e538]: Kein Aktor konfiguriert
+                - generic [ref=e539]:
+                  - generic [ref=e540]:
+                    - generic [ref=e541]: Gewächshaus Dashboard
+                    - link "Im Editor bearbeiten" [ref=e542] [cursor=pointer]:
+                      - /url: /editor/5193c8a1-b8c9-4fb7-9370-5723fb6d356d
+                      - img [ref=e543]
+                  - generic [ref=e546]:
+                    - generic [ref=e547]:
+                      - generic:
+                        - button "Konfigurieren":
+                          - img
+                        - button "Entfernen":
+                          - img
+                      - generic [ref=e552]:
+                        - img [ref=e553]
+                        - combobox [ref=e555]:
+                          - option "Sensor wählen für Temp BAE1" [disabled] [selected]
+                          - option "Temp BAE1"
+                          - option "moisture"
+                          - option "moisture"
+                          - option "sht31_humidity"
+                          - option "sht31_temp"
+                          - option "VPD (berechnet)"
+                    - generic [ref=e556]:
+                      - generic:
+                        - button "Konfigurieren":
+                          - img
+                        - button "Entfernen":
+                          - img
+                      - generic [ref=e561]:
+                        - img [ref=e562]
+                        - combobox [ref=e564]:
+                          - option "Sensor wählen für Temperatur" [disabled] [selected]
+                          - option "Temp BAE1"
+                          - option "moisture"
+                          - option "moisture"
+                          - option "sht31_humidity"
+                          - option "sht31_temp"
+                          - option "VPD (berechnet)"
+                    - generic [ref=e565]:
+                      - generic:
+                        - button "Konfigurieren":
+                          - img
+                        - button "Entfernen":
+                          - img
+                      - generic [ref=e570]:
+                        - img [ref=e571]
+                        - combobox [ref=e573]:
+                          - option "Sensor wählen für Bodenfeuchte" [disabled] [selected]
+                          - option "Temp BAE1"
+                          - option "moisture"
+                          - option "moisture"
+                          - option "sht31_humidity"
+                          - option "sht31_temp"
+                          - option "VPD (berechnet)"
+                    - generic [ref=e574]:
+                      - generic:
+                        - button "Konfigurieren":
+                          - img
+                        - button "Entfernen":
+                          - img
+                      - generic [ref=e579]:
+                        - img [ref=e580]
+                        - combobox [ref=e582]:
+                          - option "Sensor wählen für Bodenfeuchte" [disabled] [selected]
+                          - option "Temp BAE1"
+                          - option "moisture"
+                          - option "moisture"
+                          - option "sht31_humidity"
+                          - option "sht31_temp"
+                          - option "VPD (berechnet)"
+                    - generic [ref=e583]:
+                      - generic:
+                        - button "Konfigurieren":
+                          - img
+                        - button "Entfernen":
+                          - img
+                      - generic [ref=e588]:
+                        - img [ref=e589]
+                        - combobox [ref=e591]:
+                          - option "Sensor wählen für Luftfeuchte" [disabled] [selected]
+                          - option "Temp BAE1"
+                          - option "moisture"
+                          - option "moisture"
+                          - option "sht31_humidity"
+                          - option "sht31_temp"
+                          - option "VPD (berechnet)"
+                    - generic [ref=e592]:
+                      - generic:
+                        - button "Konfigurieren":
+                          - img
+                        - button "Entfernen":
+                          - img
+                      - generic [ref=e597]:
+                        - img [ref=e598]
+                        - combobox [ref=e600]:
+                          - option "Sensor wählen für VPD (berechnet)" [disabled] [selected]
+                          - option "Temp BAE1"
+                          - option "moisture"
+                          - option "moisture"
+                          - option "sht31_humidity"
+                          - option "sht31_temp"
+                          - option "VPD (berechnet)"
+                    - generic [ref=e601]:
+                      - generic:
+                        - button "Konfigurieren":
+                          - img
+                        - button "Entfernen":
+                          - img
+                      - generic "digital" [ref=e605]:
+                        - generic [ref=e606]:
+                          - img [ref=e607]
+                          - generic [ref=e609]: Kein Aktor konfiguriert
+                    - generic [ref=e610]:
+                      - generic:
+                        - button "Konfigurieren":
+                          - img
+                        - button "Entfernen":
+                          - img
+                      - generic "Befeuchter" [ref=e614]:
+                        - generic [ref=e615]:
+                          - img [ref=e616]
+                          - generic [ref=e618]: Kein Aktor konfiguriert
+            - complementary [ref=e155]:
+              - generic [ref=e156]:
+                - generic [ref=e157]:
+                  - generic [ref=e158]: Cross-Zone Temperatur-Vergleich
+                  - link "Im Editor bearbeiten" [ref=e159] [cursor=pointer]:
+                    - /url: /editor/a88ea2f1-4954-4e35-a769-46bb57a8a84e
+                    - img [ref=e160]
+                - generic [ref=e163]:
+                  - generic [ref=e169]:
+                    - img [ref=e170]
+                    - combobox [ref=e172]:
+                      - option "Sensor wählen für Sensor-Karte" [disabled]
+                      - option "Temp BAE1"
+                      - option "moisture"
+                      - option "moisture"
+                      - option "sht31_humidity"
+                      - option "sht31_temp"
+                      - option "VPD (berechnet)"
+                  - generic [ref=e179]:
+                    - img [ref=e180]
+                    - combobox [ref=e182]:
+                      - option "Sensor wählen für Historische Zeitreihe" [disabled]
+                      - option "Temp BAE1"
+                      - option "moisture"
+                      - option "moisture"
+                      - option "sht31_humidity"
+                      - option "sht31_temp"
+                      - option "VPD (berechnet)"
+              - generic [ref=e183]:
+                - generic [ref=e184]:
+                  - generic [ref=e185]: Leer starten
+                  - link "Im Editor bearbeiten" [ref=e186] [cursor=pointer]:
+                    - /url: /editor/e5c4e7fa-9277-4732-9bbc-2d3653c7a08a
+                    - img [ref=e187]
+                - generic "Claude Assistant" [ref=e195]:
+                  - generic [ref=e619]:
+                    - generic [ref=e620]:
+                      - img [ref=e621]
+                      - text: Claude Assistant
+                    - button "Verlauf löschen" [disabled] [ref=e623]:
+                      - img [ref=e624]
+                  - generic [ref=e628]:
+                    - img [ref=e629]
+                    - paragraph [ref=e631]: Stelle eine Frage zum System, zu Sensoren oder zu Anomalien.
+                  - generic [ref=e632]:
+                    - textbox "Nachricht eingeben… (Enter = Senden, Shift+Enter = Zeilenumbruch)" [ref=e633]
+                    - button "Senden" [disabled] [ref=e634]:
+                      - img [ref=e635]
+              - generic [ref=e202]:
+                - generic [ref=e203]:
+                  - generic [ref=e204]: Leer starten
+                  - link "Im Editor bearbeiten" [ref=e205] [cursor=pointer]:
+                    - /url: /editor/fef578f7-efdf-4c8a-a14f-ecc1ca2fc71f
+                    - img [ref=e206]
+                - generic "Claude Assistant" [ref=e214]:
+                  - generic [ref=e638]:
+                    - generic [ref=e639]:
+                      - img [ref=e640]
+                      - text: Claude Assistant
+                    - button "Verlauf löschen" [disabled] [ref=e642]:
+                      - img [ref=e643]
+                  - generic [ref=e647]:
+                    - img [ref=e648]
+                    - paragraph [ref=e650]: Stelle eine Frage zum System, zu Sensoren oder zu Anomalien.
+                  - generic [ref=e651]:
+                    - textbox "Nachricht eingeben… (Enter = Senden, Shift+Enter = Zeilenumbruch)" [ref=e652]
+                    - button "Senden" [disabled] [ref=e653]:
+                      - img [ref=e654]
+              - generic [ref=e221]:
+                - generic [ref=e222]:
+                  - generic [ref=e223]: Cross-Zone Temperatur-Vergleich
+                  - link "Im Editor bearbeiten" [ref=e224] [cursor=pointer]:
+                    - /url: /editor/da87db19-a744-458a-920b-8e089c7f458c
+                    - img [ref=e225]
+                - generic [ref=e228]:
+                  - generic [ref=e234]:
+                    - img [ref=e235]
+                    - combobox [ref=e237]:
+                      - option "Sensor wählen für Sensor-Karte" [disabled]
+                      - option "Temp BAE1"
+                      - option "moisture"
+                      - option "moisture"
+                      - option "sht31_humidity"
+                      - option "sht31_temp"
+                      - option "VPD (berechnet)"
+                  - generic [ref=e244]:
+                    - img [ref=e245]
+                    - combobox [ref=e247]:
+                      - option "Sensor wählen für Historische Zeitreihe" [disabled]
+                      - option "Temp BAE1"
+                      - option "moisture"
+                      - option "moisture"
+                      - option "sht31_humidity"
+                      - option "sht31_temp"
+                      - option "VPD (berechnet)"
+          - button "Quick Actions öffnen" [ref=e249] [cursor=pointer]:
+            - img
+    - button "Quick Actions öffnen" [ref=e251] [cursor=pointer]:
+      - img
+  - generic "Benachrichtigungen"
+  - dialog "Temp BAE1" [ref=e658]:
+    - banner [ref=e659]:
+      - heading "Temp BAE1" [level=2] [ref=e661]
+      - button "Schließen" [ref=e662] [cursor=pointer]:
+        - img [ref=e663]
+    - generic [ref=e666]:
+      - generic [ref=e667]:
+        - generic [ref=e668]:
+          - generic [ref=e669]: ds18b20
+          - generic [ref=e670]: ·
+          - generic [ref=e671]: ESP_EA5484
+          - generic [ref=e672]: ·
+          - generic [ref=e673]: Gewaechshaus
+        - generic [ref=e674]:
+          - generic [ref=e675]: 19,7 °C
+          - img [ref=e676]
+        - generic [ref=e677]:
+          - generic [ref=e678]:
+            - img [ref=e679]
+            - text: Veraltet
+          - generic [ref=e682]:
+            - text: "Live jetzt:"
+            - strong [ref=e683]: 21.04.2026, 11:14
+          - generic [ref=e684]:
+            - text: "Historie bis:"
+            - strong [ref=e685]: keine Daten
+            - generic [ref=e686]: Snapshot
+      - generic [ref=e688]:
+        - button "1 Std" [ref=e689] [cursor=pointer]
+        - button "6 Std" [ref=e690] [cursor=pointer]
+        - button "12 Std" [ref=e691] [cursor=pointer]
+        - button "24 Std" [ref=e692] [cursor=pointer]
+        - button "7 Tage" [ref=e693] [cursor=pointer]
+        - button "Benutzerdefiniert" [ref=e694] [cursor=pointer]
+      - generic [ref=e695]:
+        - paragraph [ref=e696]: "Vergleichen mit:"
+        - generic [ref=e697]:
+          - button "Luftfeuchte %RH" [ref=e698] [cursor=pointer]:
+            - text: Luftfeuchte
+            - generic [ref=e700]: "%RH"
+          - button "Bodenfeuchte %" [ref=e701] [cursor=pointer]:
+            - text: Bodenfeuchte
+            - generic [ref=e703]: "%"
+          - button "Bodenfeuchte %" [ref=e704] [cursor=pointer]:
+            - text: Bodenfeuchte
+            - generic [ref=e706]: "%"
+          - button "VPD (berechnet) kPa" [ref=e707] [cursor=pointer]:
+            - text: VPD (berechnet)
+            - generic [ref=e709]: kPa
+          - button "Temperatur °C" [ref=e710] [cursor=pointer]:
+            - text: Temperatur
+            - generic [ref=e712]: °C
+      - generic [ref=e713]: Keine Daten für den gewählten Zeitraum.
+    - contentinfo [ref=e714]:
+      - button "Export" [ref=e716] [cursor=pointer]:
+        - img [ref=e717]
+        - text: Export
