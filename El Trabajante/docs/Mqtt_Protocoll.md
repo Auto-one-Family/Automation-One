@@ -1306,6 +1306,16 @@ kann `context` zusätzlich enthalten:
 "Burst-Druck (erwartet, deterministisch)" vs. "Fehler".
 
 **Payload-Schema (IST, PKG-01a Emitter):**
+
+Board-spezifische Queue-Konstanten (`publish_queue.h`, ESP-IDF-Pfad only):
+
+| Board | `PUBLISH_QUEUE_SIZE` | `PUBLISH_QUEUE_SHED_WATERMARK` | `PUBLISH_PAYLOAD_MAX_LEN` |
+|-------|----------------------|--------------------------------|---------------------------|
+| esp32_dev / WROOM | 8 | 4 | 1536 |
+| esp32-s3-devkitc-1 N8R8 | 16 | 8 | 2048 |
+
+Beispiel-Payload (esp32_dev, fill kurz vor Shed):
+
 ```json
 {
   "event": "entered_pressure",
@@ -1321,9 +1331,9 @@ kann `context` zusätzlich enthalten:
 Event-Werte: `"entered_pressure"` (Backpressure aktiv), `"recovered"` (aufgehoben).
 
 **Hysterese-Regeln (IST, AUT-481 P3):**
-- **`entered_pressure`:** `fill_level >= PUBLISH_QUEUE_SHED_WATERMARK` (**5**, 50 % von 10 Slots; SSOT `publish_queue_constants.h`)
+- **`entered_pressure`:** `fill_level >= PUBLISH_QUEUE_SHED_WATERMARK` (**5**, 50 % von 10 Slots; SSOT `publish_queue_constants.h`); S3 N8R8: SHED=8 von 16 Slots (Override in `publish_queue.h`)
 - **`recovered`:** zuvor im Druck-Zustand und `fill_level < publishQueuePressureRecoveredThreshold()` (**4**)
-- Kein Emit wenn `fill_level >= PUBLISH_QUEUE_SIZE` (**10**) — vermeidet zusätzliche Last bei gesättigter Queue (PKG-01a)
+- Kein Emit wenn `fill_level >= PUBLISH_QUEUE_SIZE` (**10** Standard, **16** S3) — vermeidet zusätzliche Last bei gesättigter Queue (PKG-01a)
 
 **Publish-Route:** Core-0 Communication-Task, 50 ms Takt — `MQTTClient::publish` mit QoS 0; **kein** Slot in `g_publish_queue`, damit das Event sich nicht selbst blockiert.
 
@@ -2820,7 +2830,7 @@ retry_count++;
 
 **Begründung:**
 1. **Performance:** QoS 2 hat 2x Overhead (PUBREC/PUBREL/PUBCOMP)
-2. **ESP32-Limitierungen:** Begrenzte MQTT OUTBOX (4096→16384 Bytes, AUT-331); QoS-2-Handshake erschöpfte OUTBOX bei rapid ON+OFF → TCP-Timeout → Crash
+2. **ESP32-Limitierungen:** Begrenzte MQTT OUTBOX (4096→16384 Bytes WROOM via `sdkconfig.defaults`, AUT-331; S3 N8R8: 65536 Bytes via `sdkconfig.s3.defaults`, AUT-494); QoS-2-Handshake erschöpfte OUTBOX bei rapid ON+OFF → TCP-Timeout → Crash
 3. **Duplikat-Detection:** God-Kaiser implementiert Idempotenz (intent_outcome + safety-epoch)
 4. **Praktikabilität:** QoS 1 + Duplikat-Detection = "effectively exactly once"
 5. **Simplicity:** Einheitliche QoS-Strategie im gesamten System

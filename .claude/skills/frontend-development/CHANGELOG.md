@@ -1,6 +1,5 @@
 ## Versions-Historie
 
-<<<<<<< Updated upstream
 **Version:** 9.98
 **Letzte Aktualisierung:** 2026-04-21
 
@@ -10,7 +9,9 @@
 - JS/TS-Farb-Fallbacks in Widget-/Monitor-Komponenten auf Token-Fallbackketten umgestellt (keine freien Hex-Fallbacks mehr in UI-Logik)
 - Verbleibende Hardcoded-Hexwerte bewusst auf Chart-Konfigurationen begrenzt (`views/SensorHistoryView.vue`, `components/charts/MultiSensorChart.vue`)
 - Verifikation: `npm run build` und `npx vue-tsc --noEmit` erfolgreich
-=======
+
+---
+
 **Version:** 10.7 (Skill-Meta)
 **Letzte Aktualisierung:** 2026-04-10
 
@@ -24,7 +25,6 @@
 
 **Version:** 9.97
 **Letzte Aktualisierung:** 2026-03-30
->>>>>>> Stashed changes
 
 ### Aenderungen in v9.97 (FIX-ED-1: Widget Smart Defaults — Range, Titel & Placement)
 

@@ -47,6 +47,7 @@ import type { DeviceMetadata } from '@/types/device-metadata'
 import { parseDeviceMetadata, mergeDeviceMetadata } from '@/types/device-metadata'
 import type { SensorConfigCreate } from '@/types'
 import PendingConfigBanner from './PendingConfigBanner.vue'
+import { useBoardLayout } from '@/composables/useBoardLayout'
 
 const configLogger = createLogger('SensorConfigPanel')
 
@@ -359,6 +360,14 @@ const isDigital = computed(() => props.sensorType.toLowerCase().includes('flow')
 const contextDevice = computed(() =>
   espStore.devices.find((device) => espStore.getDeviceId(device) === props.espId),
 )
+const deviceHardwareType = computed(() => contextDevice.value?.hardware_type ?? null)
+const {
+  layout: boardLayout,
+  isKnownBoard,
+  i2cDefaultLabel,
+  isReserved,
+  adc1Pins,
+} = useBoardLayout(deviceHardwareType)
 const contextSensor = computed(() => {
   const normalizedType = String(props.sensorType || '').toLowerCase()
   return (contextDevice.value?.sensors ?? []).find((sensor: any) =>
@@ -375,8 +384,7 @@ const subzoneContextLabel = computed(() =>
   (contextSensor.value as any)?.subzone_id || subzoneId.value || 'Zone-weit',
 )
 
-/** ADC1-only pins for analog sensors */
-const adc1Pins = [32, 33, 34, 35, 36, 39]
+/** ADC1-only pins for analog sensors — board-aware via useBoardLayout */
 
 /** I2C address options per sensor type */
 const i2cAddressOptions = computed(() => {
@@ -1222,13 +1230,21 @@ async function handleSave() {
           <span class="sensor-config__interface-badge">{{ interfaceType }}</span>
         </div>
 
+        <div v-if="!isKnownBoard" class="sensor-config__info-box sensor-config__info-box--warning">
+          Board-Typ unbekannt — manuelle Pin-Pruefung noetig. GPIO-Defaults koennen abweichen.
+        </div>
+        <div v-else-if="boardLayout" class="sensor-config__info-box">
+          Board: {{ boardLayout.label }}
+          <span v-if="isReserved(gpioPin)" class="sensor-config__reserved-badge">GPIO reserviert</span>
+        </div>
+
         <!-- ANALOG: GPIO (ADC1 only) + Range -->
         <template v-if="isAnalog">
           <div class="sensor-config__field">
             <label class="sensor-config__label">GPIO Pin (nur ADC1)</label>
             <select v-model.number="gpioPin" class="sensor-config__select">
               <option v-for="pin in adc1Pins" :key="pin" :value="pin">
-                GPIO {{ pin }}
+                GPIO {{ pin }}<template v-if="isReserved(pin)"> (reserviert)</template>
               </option>
             </select>
             <span class="sensor-config__helper">Analoge Sensoren koennen nur ADC1-Pins verwenden</span>
@@ -1249,7 +1265,9 @@ async function handleSave() {
         <template v-else-if="isI2C">
           <div class="sensor-config__info-box">
             I2C-Sensoren teilen sich den Bus &mdash; kein GPIO-Pin noetig.
-            Standard: SDA=GPIO 21, SCL=GPIO 22.
+            <template v-if="i2cDefaultLabel">
+              Standard: {{ i2cDefaultLabel }}.
+            </template>
           </div>
           <div class="sensor-config__field">
             <label class="sensor-config__label">I2C-Adresse</label>
@@ -1262,7 +1280,9 @@ async function handleSave() {
           <div class="sensor-config__field">
             <label class="sensor-config__label">I2C-Bus</label>
             <select v-model.number="i2cBus" class="sensor-config__select">
-              <option :value="0">Bus 0 &mdash; Wire (GPIO 21/22)</option>
+              <option :value="0">
+                Bus 0 &mdash; Wire<template v-if="i2cDefaultLabel"> ({{ i2cDefaultLabel }})</template>
+              </option>
               <option :value="1">Bus 1 &mdash; Wire1 (konfigurierbar)</option>
             </select>
           </div>
@@ -1865,6 +1885,22 @@ async function handleSave() {
   font-size: var(--text-xs);
   color: var(--color-info);
   line-height: var(--leading-normal);
+}
+
+.sensor-config__info-box--warning {
+  background: rgba(251, 191, 36, 0.08);
+  border-color: rgba(251, 191, 36, 0.25);
+  color: var(--color-warning);
+}
+
+.sensor-config__reserved-badge {
+  margin-left: var(--space-2);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--color-danger);
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
 .sensor-config__interface-badge-row {

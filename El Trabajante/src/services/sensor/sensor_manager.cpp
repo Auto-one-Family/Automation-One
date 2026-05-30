@@ -9,6 +9,7 @@
 #include "../../drivers/i2c_bus.h"
 #include "../../drivers/i2c_sensor_protocol.h"
 #include "../../drivers/onewire_bus.h"
+#include "../../drivers/mhz19_uart.h"
 #include "../../utils/topic_builder.h"
 #include "../../utils/logger.h"
 #include "../../utils/time_manager.h"
@@ -23,6 +24,86 @@
 
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "SENSOR";
+
+static const unsigned long MHZ19_WARMUP_MS = 180000;
+
+static bool hasValidUartPinConfig(const SensorConfig& config) {
+    return config.uart_rx_pin != 255 && config.uart_tx_pin != 255 &&
+           config.uart_rx_pin != 0 && config.uart_tx_pin != 0;
+}
+
+static bool isUartSensorConfig(const SensorConfig& config, const SensorCapability* capability) {
+    if (capability && capability->is_uart) {
+        return true;
+    }
+    if (config.interface_type.equalsIgnoreCase("UART")) {
+        return true;
+    }
+    return hasValidUartPinConfig(config);
+}
+
+static bool reserveUartSensorPins(GPIOManager* gpio_manager, const SensorConfig& config) {
+    if (!gpio_manager) {
+        return false;
+    }
+    if (!gpio_manager->isPinAvailable(config.uart_rx_pin)) {
+        LOG_E(TAG, "Sensor Manager: UART RX GPIO " + String(config.uart_rx_pin) + " not available");
+        return false;
+    }
+    if (!gpio_manager->requestPin(config.uart_rx_pin, "sensor", "co2_uart_rx")) {
+        LOG_E(TAG, "Sensor Manager: Failed to reserve UART RX GPIO " + String(config.uart_rx_pin));
+        return false;
+    }
+    if (!gpio_manager->isPinAvailable(config.uart_tx_pin)) {
+        gpio_manager->releasePin(config.uart_rx_pin);
+        LOG_E(TAG, "Sensor Manager: UART TX GPIO " + String(config.uart_tx_pin) + " not available");
+        return false;
+    }
+    if (!gpio_manager->requestPin(config.uart_tx_pin, "sensor", "co2_uart_tx")) {
+        gpio_manager->releasePin(config.uart_rx_pin);
+        LOG_E(TAG, "Sensor Manager: Failed to reserve UART TX GPIO " + String(config.uart_tx_pin));
+        return false;
+    }
+    if (config.gpio != config.uart_rx_pin && config.gpio != config.uart_tx_pin &&
+        gpio_manager->isPinAvailable(config.gpio)) {
+        gpio_manager->requestPin(config.gpio, "sensor", config.sensor_name.c_str());
+    }
+    return true;
+}
+
+static void releaseUartSensorPinsIfUnused(GPIOManager* gpio_manager,
+                                          const SensorConfig* removed,
+                                          const SensorConfig* sensors,
+                                          uint8_t sensor_count) {
+    if (!gpio_manager || !removed) {
+        return;
+    }
+    auto pinStillUsed = [&](uint8_t pin) {
+        for (uint8_t i = 0; i < sensor_count; i++) {
+            if (&sensors[i] == removed) {
+                continue;
+            }
+            if (!sensors[i].active) {
+                continue;
+            }
+            if (sensors[i].uart_rx_pin == pin || sensors[i].uart_tx_pin == pin ||
+                sensors[i].gpio == pin) {
+                return true;
+            }
+        }
+        return false;
+    };
+    if (!pinStillUsed(removed->uart_rx_pin)) {
+        gpio_manager->releasePin(removed->uart_rx_pin);
+    }
+    if (!pinStillUsed(removed->uart_tx_pin)) {
+        gpio_manager->releasePin(removed->uart_tx_pin);
+    }
+    if (removed->gpio != removed->uart_rx_pin && removed->gpio != removed->uart_tx_pin &&
+        !pinStillUsed(removed->gpio)) {
+        gpio_manager->releasePin(removed->gpio);
+    }
+}
 
 // SAFETY-RTOS M4: serialize manual vs autonomous measurement (same as performAllMeasurements).
 namespace {
@@ -198,6 +279,10 @@ static LocalConversion applyLocalConversion(const String& sensor_type, uint32_t 
     // BME280 Humidity: raw is 1024ths of percent
     if (sensor_type == "bme280_humidity") {
         return { (float)raw_value / 1024.0f, "%", true };
+    }
+    // CO2 (UART MH-Z19): raw PPM passthrough
+    if (sensor_type == "co2") {
+        return { (float)raw_value, "ppm", true };
     }
     // Unknown → raw passthrough (server handles conversion)
     return { (float)raw_value, "raw", false };
@@ -455,6 +540,23 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         existing->cb_state = SensorCBState::CLOSED;
         existing->consecutive_failures = 0;
 
+        if (isUartSensorConfig(config, capability)) {
+            if (!hasValidUartPinConfig(config)) {
+                LOG_E(TAG, "Sensor Manager: UART sensor missing uart_rx_pin/uart_tx_pin");
+                errorTracker.trackError(ERROR_UART_INIT_FAILED, ERROR_SEVERITY_ERROR,
+                                       "UART CO2 pins missing on update");
+                xSemaphoreGive(g_sensor_mutex);
+                return false;
+            }
+            if (!mhz19UartReader.begin(config.uart_rx_pin, config.uart_tx_pin, config.uart_baud)) {
+                errorTracker.trackError(ERROR_UART_INIT_FAILED, ERROR_SEVERITY_ERROR,
+                                       "UART CO2 begin failed on update");
+                xSemaphoreGive(g_sensor_mutex);
+                return false;
+            }
+            existing->uart_configured_at_ms = millis();
+        }
+
         // Phase 7: Persist to NVS immediately
         if (!configManager.saveSensorConfig(config)) {
             LOG_E(TAG, "Sensor Manager: Failed to persist sensor config to NVS");
@@ -571,6 +673,55 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
                  "' at address 0x" + String(effective_i2c_address, HEX) +
                  " (GPIO " + String(config.gpio) + " is I2C bus)" +
                  " [sensor_count=" + String(sensor_count_) + ", active=true]");
+
+        xSemaphoreGive(g_sensor_mutex);
+        return true;
+    }
+
+    bool is_uart_sensor = isUartSensorConfig(config, capability);
+
+    if (is_uart_sensor) {
+        if (!hasValidUartPinConfig(config)) {
+            LOG_E(TAG, "Sensor Manager: UART sensor missing uart_rx_pin/uart_tx_pin");
+            errorTracker.trackError(ERROR_UART_INIT_FAILED, ERROR_SEVERITY_ERROR,
+                                   "UART CO2 pins missing");
+            xSemaphoreGive(g_sensor_mutex);
+            return false;
+        }
+
+        if (!reserveUartSensorPins(gpio_manager_, config)) {
+            errorTracker.trackError(ERROR_GPIO_CONFLICT, ERROR_SEVERITY_ERROR,
+                                   "UART CO2 GPIO reservation failed");
+            xSemaphoreGive(g_sensor_mutex);
+            return false;
+        }
+
+        if (!mhz19UartReader.begin(config.uart_rx_pin, config.uart_tx_pin, config.uart_baud)) {
+            gpio_manager_->releasePin(config.uart_rx_pin);
+            gpio_manager_->releasePin(config.uart_tx_pin);
+            if (config.gpio != config.uart_rx_pin && config.gpio != config.uart_tx_pin) {
+                gpio_manager_->releasePin(config.gpio);
+            }
+            xSemaphoreGive(g_sensor_mutex);
+            return false;
+        }
+
+        sensors_[sensor_count_] = config;
+        sensors_[sensor_count_].active = true;
+        sensors_[sensor_count_].uart_configured_at_ms = millis();
+        sensor_count_++;
+
+        if (!configManager.saveSensorConfig(sensors_[sensor_count_ - 1])) {
+            LOG_E(TAG, "Sensor Manager: Failed to persist sensor config to NVS");
+        } else {
+            LOG_I(TAG, "  ✅ Configuration persisted to NVS");
+        }
+
+        LOG_I(TAG, "Sensor Manager: Configured UART CO2 '" + config.sensor_type +
+                 "' Serial2 rx=" + String(config.uart_rx_pin) +
+                 " tx=" + String(config.uart_tx_pin) +
+                 " baud=" + String(config.uart_baud) +
+                 " (logical GPIO " + String(config.gpio) + ")");
 
         xSemaphoreGive(g_sensor_mutex);
         return true;
@@ -766,12 +917,19 @@ bool SensorManager::removeSensor(uint8_t gpio, const String& onewire_address,
     // Check if this is an I2C sensor (don't release GPIO - managed by I2CBusManager)
     const SensorCapability* capability = findSensorCapability(config->sensor_type);
     bool is_i2c_sensor = (capability != nullptr && capability->is_i2c);
+    bool is_uart_sensor = isUartSensorConfig(*config, capability);
 
-    // Capture sensor_type before array shift invalidates the pointer
+    // Capture sensor_type and UART pins before array shift invalidates the pointer
     String removed_sensor_type = config->sensor_type;
+    uint8_t removed_uart_rx = config->uart_rx_pin;
+    uint8_t removed_uart_tx = config->uart_tx_pin;
 
-    // For non-I2C sensors: Only release GPIO if no other sensor remains on this GPIO
-    if (!is_i2c_sensor) {
+    // For UART sensors: release dedicated RX/TX pins (and logical slot if reserved)
+    if (is_uart_sensor) {
+        releaseUartSensorPinsIfUnused(gpio_manager_, config, sensors_, sensor_count_);
+        LOG_I(TAG, "  ℹ️ UART sensor - released rx=" + String(removed_uart_rx) +
+                 " tx=" + String(removed_uart_tx) + " if unused");
+    } else if (!is_i2c_sensor) {
         // Check if another sensor shares this GPIO (OneWire bus sharing)
         bool other_on_gpio = false;
         for (uint8_t i = 0; i < sensor_count_; i++) {
@@ -1002,6 +1160,35 @@ bool SensorManager::performMeasurementForConfig(SensorConfig* config, SensorRead
                 reading_out.error_message = "I2C read failed";
                 return false;
             }
+        } else if (capability->is_uart || isUartSensorConfig(*config, capability)) {
+            if (config->uart_configured_at_ms != 0 &&
+                (millis() - config->uart_configured_at_ms) < MHZ19_WARMUP_MS) {
+                reading_out.valid = false;
+                reading_out.error_message = "CO2 sensor warming up";
+                reading_out.quality = "warming_up";
+                LOG_D(TAG, "SensorManager: CO2 warmup (" +
+                         String((MHZ19_WARMUP_MS - (millis() - config->uart_configured_at_ms)) / 1000) +
+                         "s remaining)");
+                return false;
+            }
+            if (!mhz19UartReader.isInitialized()) {
+                if (!mhz19UartReader.begin(config->uart_rx_pin, config->uart_tx_pin, config->uart_baud)) {
+                    reading_out.valid = false;
+                    reading_out.error_message = "UART CO2 not initialized";
+                    return false;
+                }
+            }
+            uint16_t ppm = 0;
+            if (!mhz19UartReader.readRawPpm(ppm)) {
+                reading_out.valid = false;
+                reading_out.error_message = "UART CO2 read failed";
+                return false;
+            }
+            raw_value = static_cast<uint32_t>(ppm);
+            reading_out.raw_mode = true;
+            reading_out.quality = "good";
+            LOG_D(TAG, "SensorManager: UART CO2 raw PPM=" + String(ppm) +
+                     " (GPIO slot " + String(gpio) + ")");
         } else {
             // Non-I2C sensor - check device type
             String device_type = String(capability->device_type);
@@ -1205,6 +1392,12 @@ bool SensorManager::performMeasurementForConfig(SensorConfig* config, SensorRead
             raw_value = readRawAnalog(gpio);
             // E-P2: ADC quality check
             reading_out.quality = String(validateAdcReading(raw_value, gpio));
+        } else if (lower_type.indexOf("co2") >= 0 ||
+                   config->interface_type.equalsIgnoreCase("UART")) {
+            reading_out.valid = false;
+            reading_out.error_message = "UART CO2 not configured";
+            LOG_E(TAG, "SensorManager: CO2/UART sensor without UART config on GPIO " + String(gpio));
+            return false;
         } else if (lower_type.indexOf("ds18b20") >= 0 || lower_type.indexOf("onewire") >= 0) {
             // Likely OneWire sensor - use ROM-Code from config
             if (config->onewire_address.length() != 16) {

@@ -413,3 +413,38 @@ Bei Cross-Layer-Problemen: Falls `META_ANALYSIS.md` existiert, die ESP32-relevan
 **Codebase:** El Trabajante (~13.300 Zeilen)
 
 **PlatformIO-Hinweis:** `pio` ist nicht im Git Bash PATH. Voller Pfad noetig: `~/.platformio/penv/Scripts/pio.exe`. Alle PlatformIO-Befehle muessen aus `El Trabajante/` ausgefuehrt werden. Build, Flash UND zeitbegrenzter Monitor funktionieren aus Git Bash (COM5/CH340 verifiziert 2026-02-26).
+
+---
+
+## Cross-System Koordination (Vier-Systeme-Modell)
+
+> Vollständige Referenz: `.claude/rules/slack-linear-konvention.md`
+
+### Wer ich bin (extern sichtbar)
+`esp32-dev` (= firmware-dev) = TM-Subagent für Pattern-konforme ESP32-Implementierung (`El Trabajante/`, C++/PlatformIO). Arbeitet in System 2 (Auto-one-Repo).
+
+### Was ich liefere
+- Code in `El Trabajante/src/`
+- `ESP32_DEV_REPORT.md` unter `.claude/reports/current/`
+- Build-verifizierter Code (`pio run -e esp32_dev` Exit-Code 0)
+
+### Wie ihr mich beauftragt
+| Wer | Weg |
+|---|---|
+| TM (diese Session) | Sub-Agent-Call mit konkretem Scope, Dateipfaden, Deliverables |
+| @automation-experte | BRIEFING → TM → Sub-Agent-Call (er ruft mich nicht direkt) |
+| Pi-Sessions (1/2) | Linear AUT-Issue mit Schicht-Zuweisung `firmware` → TM beauftragt mich |
+| dev-local-Session | Linear AUT-Issue → TM beauftragt mich |
+
+**Direkte Slack-Channels für Subagents fehlen noch** (#fix-firmware existiert nicht). Cross-Layer-Handoffs laufen über Linear.
+
+### Was ich NICHT tue
+- Serial-Log-Analyse → `esp32-debug`
+- Server-Code → `server-dev`
+- Firmware-Flash auf echte Hardware → Pi-Sessions (Hardware sitzt bei Robin)
+- Wokwi-Simulation starten → `system-control` oder TM
+
+### Risiko-Stufen-Bezug
+In dieser Session (Dev-Local): **FREE** — `pio run`, Wokwi-Simulation, Code-Schreiben autonom.
+Firmware-Flash auf echtes Gerät → nur wenn Hardware lokal (Dev-Local) oder via Pi-Session (MEDIUM/STRICT).
+Hinweis: Wenn Hardware an Dev-Local angeschlossen wird, wächst Risiko-Stufe auf MEDIUM.

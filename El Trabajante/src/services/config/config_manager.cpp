@@ -126,6 +126,50 @@ bool ConfigManager::loadWiFiConfig(WiFiConfig& config) {
   #endif
 
   // ============================================
+  // FUNKTURM MQTT-ONLY (esp32_dev + FUNKTURM_MQTT_HOST_ONLY=1): SSID/Pass aus NVS, nur Broker-IP
+  // ============================================
+  #ifdef FUNKTURM_UPDATE_MQTT_ONLY
+    if (!storageManager.beginNamespace("wifi_config", true)) {
+      LOG_E(TAG, "ConfigManager: FUNKTURM_UPDATE_MQTT_ONLY — wifi_config namespace failed");
+      return false;
+    }
+
+    config.ssid = storageManager.getStringObj("ssid", "");
+    config.password = storageManager.getStringObj("password", "");
+    config.server_address = storageManager.getStringObj("server_address", "");
+    config.mqtt_port = storageManager.getUInt16("mqtt_port", 1883);
+    config.mqtt_username = storageManager.getStringObj("mqtt_username", "");
+    config.mqtt_password = storageManager.getStringObj("mqtt_password", "");
+    config.configured = storageManager.getBool("configured", false);
+    storageManager.endNamespace();
+
+    if (!config.configured || config.ssid.length() == 0) {
+      LOG_E(TAG, "ConfigManager: FUNKTURM_UPDATE_MQTT_ONLY — kein provisioniertes WiFi in NVS");
+      return false;
+    }
+
+    const String old_server = config.server_address;
+    const uint16_t old_port = config.mqtt_port;
+    config.server_address = FUNKTURM_MQTT_HOST;
+    config.mqtt_port = FUNKTURM_MQTT_PORT;
+
+    sanitizeMqttBrokerHostAndPort(config.server_address, &config.mqtt_port);
+
+    wifi_config_loaded_ = true;
+
+    if (!saveWiFiConfig(config)) {
+      LOG_W(TAG, "ConfigManager: FUNKTURM_UPDATE_MQTT_ONLY — NVS persist fehlgeschlagen");
+      return false;
+    }
+
+    LOG_I(TAG, "ConfigManager: FUNKTURM_UPDATE_MQTT_ONLY — SSID unveraendert: " + config.ssid);
+    LOG_I(TAG, "ConfigManager: FUNKTURM_UPDATE_MQTT_ONLY — Broker: " + old_server + ":" +
+             String(old_port) + " -> " + config.server_address + ":" + String(config.mqtt_port));
+
+    return true;
+  #endif
+
+  // ============================================
   // FUNKTURM ONE-SHOT FLASH (esp32_funkturm): Build-time WiFi + MQTT, then NVS persist
   // ============================================
   #ifdef FUNKTURM_COMPILE_WIFI
@@ -1588,6 +1632,10 @@ static void buildActuatorKey(char* buffer, size_t buffer_size, uint8_t index, co
 #define NVS_SEN_INTERVAL   "sen_%d_int"      // sen_0_int = 10 chars ✅ (CRITICAL: was broken!)
 #define NVS_SEN_OW         "sen_%d_ow"       // sen_0_ow = 9 chars ✅ (OneWire ROM-Code)
 #define NVS_SEN_I2C        "sen_%d_i2c"      // sen_0_i2c = 10 chars ✅ (I2C device address)
+#define NVS_SEN_IF         "sen_%d_if"       // interface_type (UART, I2C, ...)
+#define NVS_SEN_UART_RX    "sen_%d_urx"      // UART RX pin
+#define NVS_SEN_UART_TX    "sen_%d_utx"      // UART TX pin
+#define NVS_SEN_UART_BAUD  "sen_%d_ubd"      // UART baud rate
 
 // Legacy keys (deprecated, some >15 chars - kept for migration only)
 // NOTE: Old keys "sensor_%d_*" were OK for small indices but:
@@ -1923,6 +1971,19 @@ bool ConfigManager::saveSensorConfig(const SensorConfig& config) {
   snprintf(key, sizeof(key), NVS_SEN_I2C, index);
   success &= storageManager.putUInt8(key, config.i2c_address);
 
+  // UART / interface fields (always write to clear stale NVS on reconfig)
+  snprintf(key, sizeof(key), NVS_SEN_IF, index);
+  success &= storageManager.putString(key, config.interface_type);
+
+  snprintf(key, sizeof(key), NVS_SEN_UART_RX, index);
+  success &= storageManager.putUInt8(key, config.uart_rx_pin);
+
+  snprintf(key, sizeof(key), NVS_SEN_UART_TX, index);
+  success &= storageManager.putUInt8(key, config.uart_tx_pin);
+
+  snprintf(key, sizeof(key), NVS_SEN_UART_BAUD, index);
+  success &= storageManager.putULong(key, config.uart_baud);
+
   // Update count if new sensor (use new key only!)
   if (existing_index < 0) {
     success &= storageManager.putUInt8(NVS_SEN_COUNT, sensor_count + 1);
@@ -2100,9 +2161,22 @@ bool ConfigManager::loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors
     snprintf(new_key, sizeof(new_key), NVS_SEN_I2C, i);
     config.i2c_address = storageManager.getUInt8(new_key, 0);
 
+    snprintf(new_key, sizeof(new_key), NVS_SEN_IF, i);
+    config.interface_type = storageManager.getStringObj(new_key, "");
+
+    snprintf(new_key, sizeof(new_key), NVS_SEN_UART_RX, i);
+    config.uart_rx_pin = storageManager.getUInt8(new_key, 255);
+
+    snprintf(new_key, sizeof(new_key), NVS_SEN_UART_TX, i);
+    config.uart_tx_pin = storageManager.getUInt8(new_key, 255);
+
+    snprintf(new_key, sizeof(new_key), NVS_SEN_UART_BAUD, i);
+    config.uart_baud = storageManager.getULong(new_key, 9600);
+
     // Reset runtime fields
     config.last_raw_value = 0;
     config.last_reading = 0;
+    config.uart_configured_at_ms = 0;
 
     // Validate & Store
     if (config.gpio != 255 && config.sensor_type.length() > 0) {
@@ -2113,7 +2187,10 @@ bool ConfigManager::loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors
                ", Active: " + String(config.active ? "true" : "false") +
                ", Raw: " + String(config.raw_mode ? "true" : "false") +
                ", Interval: " + String(config.measurement_interval_ms) + "ms" +
-               ", I2C: " + (config.i2c_address ? ("0x" + String(config.i2c_address, HEX)) : "n/a"));
+               ", I2C: " + (config.i2c_address ? ("0x" + String(config.i2c_address, HEX)) : "n/a") +
+               ", IF: " + (config.interface_type.length() ? config.interface_type : "n/a") +
+               (config.uart_rx_pin != 255 ? (", UART rx=" + String(config.uart_rx_pin) +
+                " tx=" + String(config.uart_tx_pin) + " @" + String(config.uart_baud)) : ""));
       loaded_count++;
     } else {
       LOG_W(TAG, "ConfigManager: Skipped invalid sensor " + String(i));
@@ -2218,6 +2295,21 @@ bool ConfigManager::removeSensorConfig(uint8_t gpio, const String& onewire_addre
     snprintf(next_key, sizeof(next_key), NVS_SEN_OW, i + 1);
     String next_ow = storageManager.getStringObj(next_key, "");
 
+    snprintf(next_key, sizeof(next_key), NVS_SEN_I2C, i + 1);
+    uint8_t next_i2c = storageManager.getUInt8(next_key, 0);
+
+    snprintf(next_key, sizeof(next_key), NVS_SEN_IF, i + 1);
+    String next_if = storageManager.getStringObj(next_key, "");
+
+    snprintf(next_key, sizeof(next_key), NVS_SEN_UART_RX, i + 1);
+    uint8_t next_urx = storageManager.getUInt8(next_key, 255);
+
+    snprintf(next_key, sizeof(next_key), NVS_SEN_UART_TX, i + 1);
+    uint8_t next_utx = storageManager.getUInt8(next_key, 255);
+
+    snprintf(next_key, sizeof(next_key), NVS_SEN_UART_BAUD, i + 1);
+    uint32_t next_ubd = storageManager.getULong(next_key, 9600);
+
     // Write to current index (new keys only!)
     snprintf(key, sizeof(key), NVS_SEN_GPIO, i);
     storageManager.putUInt8(key, next_gpio);
@@ -2245,6 +2337,21 @@ bool ConfigManager::removeSensorConfig(uint8_t gpio, const String& onewire_addre
 
     snprintf(key, sizeof(key), NVS_SEN_OW, i);
     storageManager.putString(key, next_ow);
+
+    snprintf(key, sizeof(key), NVS_SEN_I2C, i);
+    storageManager.putUInt8(key, next_i2c);
+
+    snprintf(key, sizeof(key), NVS_SEN_IF, i);
+    storageManager.putString(key, next_if);
+
+    snprintf(key, sizeof(key), NVS_SEN_UART_RX, i);
+    storageManager.putUInt8(key, next_urx);
+
+    snprintf(key, sizeof(key), NVS_SEN_UART_TX, i);
+    storageManager.putUInt8(key, next_utx);
+
+    snprintf(key, sizeof(key), NVS_SEN_UART_BAUD, i);
+    storageManager.putULong(key, next_ubd);
   }
 
   // Clear last sensor (new keys only!)
@@ -2277,6 +2384,21 @@ bool ConfigManager::removeSensorConfig(uint8_t gpio, const String& onewire_addre
   snprintf(key, sizeof(key), NVS_SEN_OW, last_idx);
   storageManager.putString(key, "");
 
+  snprintf(key, sizeof(key), NVS_SEN_I2C, last_idx);
+  storageManager.putUInt8(key, 0);
+
+  snprintf(key, sizeof(key), NVS_SEN_IF, last_idx);
+  storageManager.putString(key, "");
+
+  snprintf(key, sizeof(key), NVS_SEN_UART_RX, last_idx);
+  storageManager.putUInt8(key, 255);
+
+  snprintf(key, sizeof(key), NVS_SEN_UART_TX, last_idx);
+  storageManager.putUInt8(key, 255);
+
+  snprintf(key, sizeof(key), NVS_SEN_UART_BAUD, last_idx);
+  storageManager.putULong(key, 9600);
+
   // Update count (new key only!)
   storageManager.putUInt8(NVS_SEN_COUNT, sensor_count - 1);
 
@@ -2296,11 +2418,38 @@ bool ConfigManager::validateSensorConfig(const SensorConfig& config) const {
   // Check if it's an I2C sensor using SensorCapability Registry
   const SensorCapability* capability = findSensorCapability(config.sensor_type);
   bool is_i2c_sensor = (capability != nullptr && capability->is_i2c);
+  bool is_uart_sensor = (capability != nullptr && capability->is_uart)
+                        || config.interface_type.equalsIgnoreCase("UART")
+                        || (config.uart_rx_pin != 255 && config.uart_tx_pin != 255
+                            && config.uart_rx_pin != 0 && config.uart_tx_pin != 0);
 
   // For I2C sensors: Skip GPIO validation (they use shared I2C bus GPIO 21/22)
   if (is_i2c_sensor) {
     LOG_I(TAG, "ConfigManager: I2C sensor '" + config.sensor_type +
              "' - GPIO validation skipped (uses I2C bus)");
+    return true;
+  }
+
+  // UART sensors: validate UART pins (gpio is logical slot only — no ADC)
+  if (is_uart_sensor) {
+    if (config.uart_rx_pin == 255 || config.uart_tx_pin == 255 ||
+        config.uart_rx_pin == 0 || config.uart_tx_pin == 0) {
+      LOG_W(TAG, "ConfigManager: UART sensor missing uart_rx_pin/uart_tx_pin");
+      return false;
+    }
+    if (config.uart_baud < 9600 || config.uart_baud > 115200) {
+      LOG_W(TAG, "ConfigManager: UART baud out of range: " + String(config.uart_baud));
+      return false;
+    }
+    GPIOManager& gpio_mgr = GPIOManager::getInstance();
+    if (gpio_mgr.isPinReserved(config.uart_rx_pin) || gpio_mgr.isPinReserved(config.uart_tx_pin)) {
+      LOG_W(TAG, "ConfigManager: UART pins reserved (rx=" + String(config.uart_rx_pin) +
+                   " tx=" + String(config.uart_tx_pin) + ")");
+      return false;
+    }
+    LOG_I(TAG, "ConfigManager: UART sensor '" + config.sensor_type +
+             "' rx=" + String(config.uart_rx_pin) + " tx=" + String(config.uart_tx_pin) +
+             " baud=" + String(config.uart_baud));
     return true;
   }
 

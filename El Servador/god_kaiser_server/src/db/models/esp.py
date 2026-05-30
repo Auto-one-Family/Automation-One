@@ -28,7 +28,7 @@ class ESPDevice(Base, TimestampMixin):
         zone_name: Human-readable zone name
         is_zone_master: Whether this device is a zone master
         kaiser_id: ID of the Kaiser managing this device (optional)
-        hardware_type: Hardware variant (ESP32_WROOM, XIAO_ESP32_C3)
+        hardware_type: Hardware variant (ESP32_WROOM, XIAO_ESP32_C3, ESP32_S3_DEVKITC1)
         ip_address: Current IP address
         mac_address: Hardware MAC address
         firmware_version: Current firmware version
@@ -105,7 +105,7 @@ class ESPDevice(Base, TimestampMixin):
     hardware_type: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
-        doc="Hardware variant (ESP32_WROOM, XIAO_ESP32_C3)",
+        doc="Hardware variant (ESP32_WROOM, XIAO_ESP32_C3, ESP32_S3_DEVKITC1)",
     )
 
     ip_address: Mapped[Optional[str]] = mapped_column(

@@ -81,6 +81,7 @@ Folgende Strings sind in der Firmware bei DEFAULT Log-Level (LOG_INFO) sichtbar:
 | `temperature_sht31` / `sht31_temp` | SHT31 I2C | Ja (0x44) |
 | `ph_sensor` / `ph` | Analog ADC | Nein |
 | `ec_sensor` / `ec` | Analog ADC | Nein |
+| `co2` / `mhz19_co2` | UART CO2 (MH-Z19/SEN0220) | Nein |
 
 **ACHTUNG:** `temp_ds18b20` ist KEIN gueltiger Sensor-Type. Verwende `ds18b20` oder `temperature_ds18b20`.
 

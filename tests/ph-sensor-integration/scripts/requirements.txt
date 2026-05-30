@@ -1,0 +1,5 @@
+requests>=2.31
+pyserial>=3.5
+paho-mqtt>=1.6,<3.0
+python-dotenv>=1.0
+websockets>=12.0

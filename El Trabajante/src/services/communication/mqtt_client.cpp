@@ -9,6 +9,15 @@
 #include "../../utils/time_manager.h"
 #include "../../config/feature_flags.h"
 #include "../../config/firmware_version.h"
+
+#ifdef XIAO_ESP32C3
+    #include "../../config/hardware/xiao_esp32c3.h"
+#elif defined(ESP32_S3_DEVKIT_MODE)
+    #include "../../config/hardware/esp32_s3_devkit.h"
+#else
+    #include "../../config/hardware/esp32_dev.h"
+#endif
+
 #include <WiFi.h>
 #include <sdkconfig.h>
 #include <esp_system.h>
@@ -317,6 +326,7 @@ MQTTClient::MQTTClient()
       last_disconnect_ms_(0),
       manual_reconnect_suspended_(false),
       pending_session_announce_msg_id_(-1),
+      last_runtime_critical_publish_ms_(0UL),
 #endif
       publish_seq_(0),
       safe_publish_retry_count_(0),
@@ -510,9 +520,11 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     // Portal recovery for MQTT failure now happens via the 5-minute persistent-failure timer
     // in loop() (CircuitBreaker OPEN → provisionManager.startAPModeForReconfig()).
     LOG_I(TAG, "[M2] ESP-IDF MQTT client started — connecting in background");
-    // [FIX2-VERIFY] Log MQTT buffer config at connect time.
+    // [FIX2-VERIFY] Log MQTT buffer config at connect time so serial monitor confirms
+    // CONFIG_MQTT_OUTBOX_SIZE_BYTES from sdkconfig is active.
+    // out_buffer_size is the transport send buffer (runtime); OUTBOX is compile-time sdkconfig.
     // compile-time CONFIG_MQTT_* may be absent with Arduino prebuilt SDK; runtime OUTBOX
-    // is logged in MQTT_EVENT_CONNECTED via esp_mqtt_client_get_outbox_size().
+    // is additionally logged in MQTT_EVENT_CONNECTED via esp_mqtt_client_get_outbox_size().
     {
         char cfg_log[192];
 #if defined(CONFIG_MQTT_OUTBOX_EXPIRED_TIMEOUT_MS)
@@ -699,6 +711,66 @@ const char* MQTTClient::getLastPublishFailureReasonClassName() const {
 // ============================================
 // PUBLISHING (WITH CIRCUIT BREAKER)
 // ============================================
+#ifndef MQTT_USE_PUBSUBCLIENT
+bool MQTTClient::shouldApplyRuntimeCriticalPublishPace_(const String& topic) const {
+    if (topic.indexOf("/system/intent_outcome/lifecycle") >= 0) {
+        return false;
+    }
+    return isRealtimeResponsePublishTopic(topic) || isIntentOutcomePublishTopic(topic);
+}
+
+bool MQTTClient::deferRuntimeCriticalPublishPace_(const String& topic,
+                                                const String& payload,
+                                                uint8_t qos,
+                                                bool critical,
+                                                PublishFailureReasonClass* set_reason) {
+    if (!shouldApplyRuntimeCriticalPublishPace_(topic)) {
+        return false;
+    }
+
+    const unsigned long now_ms = millis();
+    if (last_runtime_critical_publish_ms_ == 0UL) {
+        return false;
+    }
+
+    const unsigned long next_allowed_ms =
+        last_runtime_critical_publish_ms_ + RUNTIME_CRITICAL_PUBLISH_INTER_PACE_MS;
+    if (now_ms >= next_allowed_ms) {
+        return false;
+    }
+
+    const unsigned long defer_ms = next_allowed_ms - now_ms;
+    IntentMetadata metadata =
+        extractIntentMetadataFromPayload(payload.c_str(), critical ? "critical_pub_pace" : "pub_pace");
+    const PublishQueueEnqueueResult pq =
+        tryQueuePublish(topic.c_str(), payload.c_str(), qos, false, critical, &metadata, defer_ms);
+    if (pq == PublishQueueEnqueueResult::Enqueued) {
+        if (set_reason != nullptr) {
+            *set_reason = PublishFailureReasonClass::None;
+        }
+        static unsigned long s_last_runtime_pace_log_ms = 0UL;
+        if (s_last_runtime_pace_log_ms == 0UL ||
+            (now_ms - s_last_runtime_pace_log_ms) >= 2000UL) {
+            s_last_runtime_pace_log_ms = now_ms;
+            LOG_D(TAG, String("[AUT-484] Runtime publish paced defer_ms=") + String(defer_ms) +
+                           " topic=" + topic);
+        }
+        return true;
+    }
+
+    if (set_reason != nullptr) {
+        *set_reason = mapQueueEnqueueResultToFailureReason(pq);
+    }
+    return false;
+}
+
+void MQTTClient::markRuntimeCriticalPublishCompleted_(const String& topic) {
+    if (shouldApplyRuntimeCriticalPublishPace_(topic)) {
+        last_runtime_critical_publish_ms_ = millis();
+    }
+}
+#endif
+
 bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos) {
     auto set_reason = [this](PublishFailureReasonClass reason) {
         last_publish_failure_reason_ = reason;
@@ -760,6 +832,14 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
         set_reason(PublishFailureReasonClass::TransportError);
         return false;
     }
+
+#ifndef MQTT_USE_PUBSUBCLIENT
+    const bool critical_for_pace = isCriticalPublishTopic(topic);
+    if (deferRuntimeCriticalPublishPace_(topic, payload, qos, critical_for_pace, nullptr)) {
+        set_reason(PublishFailureReasonClass::None);
+        return true;
+    }
+#endif
 
 #ifndef MQTT_USE_PUBSUBCLIENT
     if (mqtt_client_ == nullptr) {
@@ -897,11 +977,12 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
         } else {
             LOG_D(TAG, "Published [msg_id=" + String(msg_id) + "]: " + topic);
         }
+        markRuntimeCriticalPublishCompleted_(topic);
         return true;
     } else if (msg_id == -2) {
         uint32_t full_count = g_publish_outbox_full_count.fetch_add(1) + 1;
         // [FIX5-VERIFY] Serial confirms outbox-full events with heap + counter so we
-        // can verify that OUTBOX=16384 (sdkconfig) reduces this count under burst load.
+        // can verify CONFIG_MQTT_OUTBOX_SIZE_BYTES reduces this count under burst load.
         {
             char outbox_log[112];
             snprintf(outbox_log, sizeof(outbox_log),
@@ -909,7 +990,11 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
                      (unsigned)full_count, topic.c_str(), (unsigned)ESP.getFreeHeap());
             LOG_W(TAG, outbox_log);
         }
-        circuit_breaker_.recordFailure();
+        // AUT-390: OUTBOX full = ESP-seitiger Backpressure (TCP-Buffer voll oder IDF-Queue erschoepft).
+        // Das ist KEIN Broker-Ausfall — der Broker ist erreichbar, aber der ESP kann momentan
+        // nicht mehr senden. recordFailure() hier wuerde den CB in ~250ms oeffnen (5 Failures
+        // bei 50ms-Takt) und den Heartbeat blockieren → Broker-Keepalive-Timeout (90s).
+        // Echter Broker-Ausfall landet als MQTT_EVENT_DISCONNECTED → recordFailure() dort.
         // Avoid recursive publishIntentOutcome when the failing publish IS intent_outcome
         // (publishIntentOutcome already persists to NVS on publish failure).
         if (isCriticalPublishTopic(topic) && topic.indexOf("/system/intent_outcome") < 0) {
@@ -1340,7 +1425,22 @@ void MQTTClient::processManagedReconnect_() {
                    " last_errno=" + String(last_transport_errno_));
     // #endregion
 
-    esp_err_t err = esp_mqtt_client_reconnect(mqtt_client_);
+    esp_err_t err;
+    if (managed_reconnect_attempts_ > 5) {
+        /* AUT-539 Fix 2: Hard-Reset after 5 failed soft-reconnects.
+         * esp_mqtt_client_reconnect() hangs on CLOSE_WAIT zombie socket in
+         * esp_transport_close() — recovery loop breaks. stop+start mirrors the
+         * initial connect path (Z.467-472) and forces full transport teardown
+         * including socket close. */
+        ESP_LOGW(TAG, "[AUT-539] Hard-Reset MQTT-Client nach %u Soft-Reconnect-Versuchen",
+                 (unsigned)managed_reconnect_attempts_);
+        esp_mqtt_client_stop(mqtt_client_);
+        vTaskDelay(pdMS_TO_TICKS(200));
+        err = esp_mqtt_client_start(mqtt_client_);
+        managed_reconnect_attempts_ = 0;
+    } else {
+        err = esp_mqtt_client_reconnect(mqtt_client_);
+    }
     if (err != ESP_OK) {
         LOG_W(TAG, String("[INC-EA5484] managed reconnect request failed: ") + esp_err_to_name(err));
         // Keep managed reconnect active even after transient ESP_FAIL/INVALID_STATE.
@@ -1389,6 +1489,10 @@ void MQTTClient::processSubscriptionQueue() {
         if (is_config_topic && bootstrap_heartbeat_pending_) {
             pending_bootstrap_config_subscribe_msg_id_ = msg_id;
             LOG_I(TAG, "[SYNC] Bootstrap heartbeat waiting for config SUBSCRIBED (msg_id=" + String(msg_id) + ")");
+        }
+        // AUT-484 F1: Pace remaining bootstrap subscriptions to protect keepalive/TCP.
+        if (pending_subscription_count_ > 0) {
+            pending_subscriptions_[0].next_attempt_ms = millis() + SUBSCRIPTION_INTER_PACE_MS;
         }
         return;
     }
@@ -1593,6 +1697,20 @@ void MQTTClient::processPublishQueue() {
                            " defer_count=" + String(req.pressure_defer_count));
         }
 
+        const String req_topic = String(req.topic);
+        if (shouldApplyRuntimeCriticalPublishPace_(req_topic)) {
+            const unsigned long next_allowed_ms =
+                last_runtime_critical_publish_ms_ + RUNTIME_CRITICAL_PUBLISH_INTER_PACE_MS;
+            if (last_runtime_critical_publish_ms_ > 0UL && now_ms < next_allowed_ms) {
+                req.next_retry_ms = next_allowed_ms;
+                if (xQueueSend(g_publish_queue, &req, 0) != pdTRUE) {
+                    LOG_W(TAG, "Runtime publish pace requeue failed, dropping: " + req_topic);
+                    g_publish_outbox_noncritical_drops.fetch_add(1);
+                }
+                break;
+            }
+        }
+
         const bool mqtt_connected_before_call = g_mqtt_connected.load();
         const bool wifi_connected_before_call = WiFi.isConnected();
         if (!mqtt_connected_before_call || !wifi_connected_before_call) {
@@ -1654,6 +1772,7 @@ void MQTTClient::processPublishQueue() {
             // Drain-Erfolge wurden vom CB nicht registriert.
             circuit_breaker_.recordSuccess();
             req.pressure_defer_count = 0;
+            markRuntimeCriticalPublishCompleted_(req_topic);
             continue;
         }
 
@@ -1666,10 +1785,11 @@ void MQTTClient::processPublishQueue() {
                      "[OUTBOX-TRACE][QUEUE] OUTBOX full #%u topic=%.60s heap=%u",
                      (unsigned)cnt, req.topic, (unsigned)ESP.getFreeHeap());
             LOG_W(TAG, q_log);
-            // AUT-359: Drain-Feedback-Symmetrie zu publish() Z. 733 —
-            // OUTBOX-full ist Backpressure-Signal Richtung Broker/IDF und
-            // wird auch im Direktpfad als CB-Failure gezaehlt.
-            circuit_breaker_.recordFailure();
+            // AUT-390: OUTBOX full im Drain-Pfad = gleicher Backpressure-Grund wie im
+            // Direktpfad (publish() AUT-390-Fix) — recordFailure() entfernt.
+            // Die Retry-Logik weiter unten (should_retry) behandelt OUTBOX-full korrekt:
+            // kritische Messages werden bis 3× wiederholt, Sensor-Data ggf. gesheddet.
+            // CB-Failure nur bei echtem Broker-Ausfall (MQTT_EVENT_DISCONNECTED).
         } else if (msg_id == -1) {
             // AUT-359: Drain-Feedback-Symmetrie zu publish() Z. 765-776 —
             // -1 ist „connected but error“; nur dann CB-Failure zaehlen,
@@ -1917,6 +2037,7 @@ void MQTTClient::publishHeartbeat(bool force) {
     // [FIX5-VERIFY] firmware_version in core heartbeat — server can confirm which
     // firmware build is running without a separate API call or provisioning page.
     payload += "\"firmware_version\":\"" + String(KAISER_FIRMWARE_VERSION_STRING) + "\",";
+    payload += "\"hardware_type\":\"" + String(HardwareConfig::HEARTBEAT_HARDWARE_TYPE) + "\",";
     payload += "\"sensor_count\":" + String(sensorManager.getActiveSensorCount()) + ",";
     payload += "\"actuator_count\":" + String(actuatorManager.getActiveActuatorCount()) + ",";
     // Expose active offline-rule count so server-side drift detection can
@@ -2221,6 +2342,7 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             self->next_managed_reconnect_ms_ = 0;
             self->managed_reconnect_attempts_ = 0;
             self->manual_reconnect_suspended_ = false;
+            self->last_runtime_critical_publish_ms_ = 0UL;
 
             // PKG-18: Capture write-timeout history before counter reset.
             // Used below to decide post-reconnect queue stabilization duration.

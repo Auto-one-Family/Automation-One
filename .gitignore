@@ -192,3 +192,16 @@ mosquitto-installer.exe
 *.exe
 ARCHIV/
 growy-frontend-archive-20260224.zip
+
+# ========== DATA EXPORTS (lokal, nicht versioniert) ==========
+data/
+*.csv
+
+# ========== TESTS: generated outputs ==========
+tests/ph-sensor-integration/outputs/
+tests/ph-sensor-integration/reports/
+tests/**/scripts/**/__pycache__/
+tests/**/__pycache__/
+
+# ========== CURSOR PLANS (lokal) ==========
+.cursor/

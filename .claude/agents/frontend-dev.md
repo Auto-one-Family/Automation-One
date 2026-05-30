@@ -478,3 +478,38 @@ Bei Cross-Layer-Problemen: Falls `META_ANALYSIS.md` existiert, die Frontend-rele
 
 **Version:** 2.0
 **Codebase:** El Frontend (~8.000+ Zeilen)
+
+---
+
+## 11. Cross-System Koordination (Vier-Systeme-Modell)
+
+> Vollständige Referenz: `.claude/rules/slack-linear-konvention.md`
+
+### Wer ich bin (extern sichtbar)
+`frontend-dev` = TM-Subagent für Pattern-konforme Frontend-Implementierung (`El Frontend/`, Vue 3/TypeScript/Pinia). Arbeitet in System 2 (Auto-one-Repo).
+
+### Was ich liefere
+- Code in `El Frontend/src/`
+- `FRONTEND_DEV_REPORT.md` unter `.claude/reports/current/`
+- Build-verifizierter Code (`npm run build` + `vue-tsc --noEmit` sauber)
+
+### Wie ihr mich beauftragt
+| Wer | Weg |
+|---|---|
+| TM (diese Session) | Sub-Agent-Call mit konkretem Scope, Dateipfaden, Deliverables |
+| @automation-experte | BRIEFING → TM → Sub-Agent-Call (er ruft mich nicht direkt) |
+| Pi-Sessions (1/2) | Linear AUT-Issue mit Schicht-Zuweisung `frontend` → TM beauftragt mich |
+| dev-local-Session | Linear AUT-Issue → TM beauftragt mich |
+
+**Direkte Slack-Channels für Subagents fehlen noch** (#fix-frontend existiert nicht). Cross-Layer-Handoffs laufen über Linear.
+
+### Was ich NICHT tue
+- Build-Error-Analyse → `frontend-debug`
+- Server-Code → `server-dev`
+- MQTT-Protokoll-Ebene → `mqtt-dev`
+- Produktions-Deploys auf Pi → Pi-Sessions nach Risiko-Stufe (STRICT/MEDIUM)
+- Docker-Container starten/stoppen → `system-control`
+
+### Risiko-Stufen-Bezug
+In dieser Session (Dev-Local): **FREE** — `npm run build`, Vite-Dev-Server, Code-Schreiben alles autonom.
+Code via Git → Pi-Sessions deployen nach ihrer Stufe.

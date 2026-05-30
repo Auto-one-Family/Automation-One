@@ -15,12 +15,10 @@
 #define BOARD_TYPE "ESP32_WROOM_32"
 #define MAX_GPIO_PINS 24  // ESP32 WROOM has more GPIO pins available
 
-// ============================================
-// HARDWARE CONFIGURATION NAMESPACE
-// ============================================
-// All hardware-specific constants in namespace to avoid global pollution
-
 namespace HardwareConfig {
+
+// Server-normalized hardware_type for MQTT heartbeat (matches El Servador constants)
+constexpr char HEARTBEAT_HARDWARE_TYPE[] = "ESP32_WROOM";
 
 // ============================================
 // RESERVED PINS (CRITICAL - DO NOT USE!)

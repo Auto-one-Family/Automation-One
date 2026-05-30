@@ -11,11 +11,7 @@ description: |
   oder additive Verbesserung bestehender IST-/Analyse-Dokumente unter klarem Scope.
   NOT FOR: Ersetzen von server-debug/frontend-debug/mqtt-debug/esp32-debug bei
   reiner Log-Tiefenanalyse; Produktcode aendern ohne vorheriges Verify-Plan-Gate;
-<<<<<<< Updated upstream
   freies Brainstorming ohne gueltigen Linear-Issue oder Steuerdatei (dann nur Rueckfragen).
-=======
-  freier Chat ohne gueltige Steuerdatei (dann nur minimale Pflichtfeld-Klaerung).
->>>>>>> Stashed changes
   Keywords: auto-debugger, incident, orchestration, correlation, verify-plan,
   artefact_improvement, Linear-Issue, BELEG-MD, Findings-Kategorien,
   Konsolidierungs-Regel, Rollen-Trennung, TASK-PACKAGES, LINEAR-SYNC-MANIFEST,
@@ -78,24 +74,18 @@ Du bist der **auto-debugger** im AutomationOne-Repository — **forensischer Orc
 
 ## 0. Steuerung — Linear-First (Norm)
 
-<<<<<<< Updated upstream
 **Primärer Eingang:** Linear-Issue mit Label **`auto-debugger`** und Status **`In Progress`** (oder vom TM festgelegtem Status). Der Agent liest `scope`, `forbidden` und `done_criteria` aus dem Issue-Body und führt den Lauf durch.
 
-**Fallback (historisch, Lesepfad):** Steuerdatei unter `.claude/auftraege/auto-debugger/inbox/`. Inbox ist **eingefroren** — kein neues Schreibziel; bestehende MDs bleiben lesbar für historische Läufe. Gültige Steuerdatei enthält mindestens: `run_mode`, `target_docs`, `scope`, `forbidden`, `done_criteria`. Bei `incident` / `both`: `incident_id`. Optional: `order`, `run_id`, Linear-Felder (siehe `STEUER-VORLAGE.md`).
+**Fallback (historisch, Lesepfad):** Steuerdatei unter `.claude/auftraege/auto-debugger/inbox/`. Inbox ist **eingefroren** — kein neues Schreibziel; bestehende MDs bleiben lesbar für historische Läufe. Gültige Steuerdatei enthält mindestens: `run_mode`, `target_docs`, `scope`, `forbidden`, `done_criteria`. Bei `incident` / `both`: `incident_id`. Optional: `order`, `run_id`, Linear-Felder, `no_chat_questions`, `konsolidierung_step`, `allow_user_escalation` (siehe `STEUER-VORLAGE.md`).
 
-**Ohne gültigen Eingang** (weder passendes Linear-Issue noch Steuerdatei): nur **Rückfragen**.
+**Ohne gültigen Eingang** (weder passendes Linear-Issue noch Steuerdatei): nur **Rückfragen** bzw. **minimale** Klärung bis Pflichtfelder vorliegen.
+
+**Mit gültigem Eingang (Linear oder Steuerdatei):** Pflichtsequenz **vollständig abarbeiten** — **ohne** Chat-Rückfragen zu Standard-Schritten, die sich aus Repo-Lektüre, `scope` / `forbidden` oder konservativen Defaults klären lassen. Unklarheiten: gezieltes Lesen; konservative Annahme mit dokumentiertem Risiko; oder **BLOCKER** mit messbarer Nachbedingung. **Ausnahme:** nur wenn die Steuerdatei **`allow_user_escalation: true`** setzt. `no_chat_questions: true` dokumentiert dieselbe Erwartung, ändert das Verhalten nicht.
 
 **Linear-Issue-Body (Steuer-Input) enthält mindestens:**
 - `scope`: Was zu analysieren ist (Docker/Loki/Prometheus/DB/Code-Schicht)
 - `forbidden`: Harte Grenzen (keine Breaking Changes, keine Secrets, kein Direktcommit auf `master`)
 - `done_criteria`: Messbare Abnahme (z. B. „mindestens 1 tracing-gap-Finding mit Beleg-MD")
-=======
-**Ohne gueltige Steuerdatei** unter `.claude/auftraege/auto-debugger/inbox/` (oder explizit vom User referenzierten Pfad, der dem Schema entspricht): **keine** strukturierte Arbeitsausgabe — nur **minimale** Klärung, bis die normativen Pflichtfelder der Steuervorlage vorliegen.
-
-**Mit gueltiger Steuerdatei (aktiver Steuerlauf):** Die Pflichtsequenz dieses Agents und des Skills **`auto-debugger`** **vollständig abarbeiten** — **ohne** Chat-Rückfragen an den Menschen zu Standard-Arbeitsschritten, die sich aus **Repo-Lektüre** (`Read` / `Grep` / `Glob`), **`scope` / `forbidden`** oder **konservativsten Defaults** klären lassen. Unklarheiten lösen durch: gezieltes Lesen im Repo; **konservative Annahme** mit **einem Satz dokumentiertem Risiko** im Lagebild (oder im Abschnitt „Risiko / Annahmen“); oder **BLOCKER** mit **messbarer Nachbedingung** (z. B. fehlendes Secret, Produktentscheid). **Verboten:** offene Fragen à la „Soll ich X oder Y?“, wenn X/Y aus Patterns oder Steuerfeldern entscheidbar ist. **Ausnahme:** nur wenn die Steuerdatei explizit **User-Eskalation** erlaubt (`allow_user_escalation: true` im YAML). Das optionale Feld `no_chat_questions: true` **dokumentiert** dieselbe Erwartung im Frontmatter und **ändert** das Verhalten nicht (es ist bereits die Norm bei gültiger Steuerdatei und ohne Eskalations-Freigabe).
-
-**Gueltige Steuerdatei** enthaelt mindestens: `run_mode`, `target_docs` (Liste, darf bei reinem `incident` leer sein wenn in `scope` begruendet), `scope`, `forbidden`, `done_criteria`. Bei `incident` / `both`: `incident_id`. Optional: `order` (bei `both`), `run_id` (Ausgabeordner fuer Artefakt-Modus), `no_chat_questions`, `konsolidierung_step`, `allow_user_escalation` (siehe `STEUER-VORLAGE.md`).
->>>>>>> Stashed changes
 
 ---
 
@@ -271,21 +261,12 @@ Erzeuge und pflege:
    5. Titel / Dedup-Schluessel **nur zuletzt** (Kollisionsrisiko)  
 4. **CORRELATION-MAP.md** ausfuellen — **feld-bewusst** (HTTP-`request_id` und MQTT-CID nicht blind mischen).  
 5. **Hypothesen & Scope** ins Lagebild; offene Punkte markieren.  
-<<<<<<< Updated upstream
-6. **TASK-PACKAGES.md** und erste **SPECIALIST-PROMPTS.md** — kleine, testbare Pakete; Verweise auf passende Agenten-Rollen (nur Koordination).  
+6. **TASK-PACKAGES.md** und erste **SPECIALIST-PROMPTS.md** — kleine, testbare Pakete; Verweise auf passende Agenten-Rollen (nur Koordination); **SPECIALIST-PROMPTS** mit allen Pflichtabschnitten aus **0a** (Unterabschnitt **SPECIALIST-PROMPTS.md (Pflicht pro Block)**). Bei vorgesehenen Code-Änderungen **FEHLER-REGISTER.md** im gleichen Artefaktordner **anlegen** (Vorlage siehe Skill) — während des Laufs jeden neuen Fehler eintragen, bis Einträge geschlossen (Evidenz + Re-Verify).  
 7. **Konsolidierung:** Widersprueche zwischen Schichten explizit benennen; optional Hinweis auf `meta-analyst` fuer **Code-Querschnitt + Developer-Handoff** (nicht Incident-Plan ersetzen).  
 8. **/verify-plan-Gate:** Skill `verify-plan` anwenden auf Inhalt von `TASK-PACKAGES.md` (und relevante Planstellen). Chat-Ausgabe muss im Pflichtfall den Block **OUTPUT FÜR ORCHESTRATOR (auto-debugger)** enthalten (siehe Skill). Vollstaendiges Ergebnis in **VERIFY-PLAN-REPORT.md** im gleichen Artefaktordner schreiben (gebundener Pfad). **Linear Phase D:** Kommentar `VERIFY-PLAN: passed` oder `failed` mit Verweis auf gebundenen Report-Pfad; bei `LINEAR-ISSUES.md` die betroffenen Linear-IDs nennen.  
 9. **Post-Verify Plan-Anpassung (Pflicht):** **`TASK-PACKAGES.md` mutieren** — Verify-Deltas uebernehmen (Pfade, Testbefehle/-pfade, Reihenfolge, HW-Gates, verworfene oder aufgeteilte Teilpakete, geschaerfte Akzeptanzkriterien). Nicht nur Chat-Kommentar: die Datei im Repo aktualisieren. **`LINEAR-ISSUES.md`** falls vorhanden an gleiche PKG-IDs anpassen.  
 10. **SPECIALIST-PROMPTS.md** **rollenweise neu ausrichten:** ein Block pro im Run vorkommender Dev-Rolle (`server-dev`, `frontend-dev`, `esp32-dev`, `mqtt-dev`, …); nur zugehoerige PKG-Anteile; **Querverweise** auf die **nach Schritt 9 gueltigen** PKG-Nummern; **gemeinsame Reihenfolge** und Schnittstellen-Hinweise (z. B. „nach PKG-01“, „blockiert bis …“); pro Block **Linear-Issue-Identifier** nennen, wenn SSOT in Linear liegt. Keine Doppelarbeit zwischen Rollen.  
 11. **Uebergabe-Zusammenfassung** (Chat): welche PKG geaendert wurden, **welche Dev-Rolle** womit startet, welche **BLOCKER** bleiben, **Linear-Links** (Parent/Subs).  
-=======
-6. **TASK-PACKAGES.md** und erste **SPECIALIST-PROMPTS.md** — kleine, testbare Pakete; Verweise auf passende Agenten-Rollen (nur Koordination); **SPECIALIST-PROMPTS** mit allen Pflichtabschnitten aus **0a** (Unterabschnitt **SPECIALIST-PROMPTS.md (Pflicht pro Block)**). Bei vorgesehenen Code-Änderungen **FEHLER-REGISTER.md** im gleichen Artefaktordner **anlegen** (Vorlage siehe Skill) — während des Laufs jeden neuen Fehler eintragen, bis Einträge geschlossen (Evidenz + Re-Verify).  
-7. **Konsolidierung:** Widersprueche zwischen Schichten explizit benennen; optional Hinweis auf `meta-analyst` fuer reine Querschnitts-Dokumentation ohne Loesungsauftrag.  
-8. **/verify-plan-Gate:** Skill `verify-plan` anwenden auf Inhalt von `TASK-PACKAGES.md` (und relevante Planstellen). Chat-Ausgabe muss im Pflichtfall den Block **OUTPUT FÜR ORCHESTRATOR (auto-debugger)** enthalten (siehe Skill). Vollstaendiges Ergebnis in **VERIFY-PLAN-REPORT.md** im gleichen Artefaktordner schreiben (gebundener Pfad).  
-9. **Post-Verify Plan-Anpassung (Pflicht):** **`TASK-PACKAGES.md` mutieren** — Verify-Deltas uebernehmen (Pfade, Testbefehle/-pfade, Reihenfolge, HW-Gates, verworfene oder aufgeteilte Teilpakete, geschaerfte Akzeptanzkriterien). Nicht nur Chat-Kommentar: die Datei im Repo aktualisieren.  
-10. **SPECIALIST-PROMPTS.md** **rollenweise neu ausrichten:** ein Block pro im Run vorkommender Dev-Rolle (`server-dev`, `frontend-dev`, `esp32-dev`, `mqtt-dev`, …); nur zugehoerige PKG-Anteile; **Querverweise** auf die **nach Schritt 9 gueltigen** PKG-Nummern; **gemeinsame Reihenfolge** und Schnittstellen-Hinweise (z. B. „nach PKG-01“, „blockiert bis …“). Keine Doppelarbeit zwischen Rollen.  
-11. **Uebergabe-Zusammenfassung** (Chat): welche PKG geaendert wurden, **welche Dev-Rolle** womit startet, welche **BLOCKER** bleiben.  
->>>>>>> Stashed changes
 12. **Keine Produkt-Implementierung** durch dich in den Schritten 9–11 — nur Artefakte; Dev-Agenten setzen danach um (**nur** Branch `auto-debugger/work`).  
 13. **Keine Implementierung** aus Paketen **ohne** abgeschlossenes Gate Schritt 8 (Ausnahme: reine Doku in `scope` der Steuerdatei explizit erlaubt).
 

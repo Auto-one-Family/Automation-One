@@ -204,7 +204,8 @@ PublishQueueEnqueueResult tryQueuePublish(const char* topic,
                                           uint8_t qos,
                                           bool retain,
                                           bool critical,
-                                          const IntentMetadata* metadata) {
+                                          const IntentMetadata* metadata,
+                                          unsigned long defer_ms) {
     if (g_publish_queue == NULL) {
         LOG_W(PQ_TAG, "Publish queue not initialised, dropping: " + String(topic != nullptr ? topic : "<null-topic>"));
         return PublishQueueEnqueueResult::Failed;
@@ -287,7 +288,7 @@ PublishQueueEnqueueResult tryQueuePublish(const char* topic,
     req.critical = critical;
     req.attempt = 0;
     req.pressure_defer_count = 0;
-    req.next_retry_ms = 0;
+    req.next_retry_ms = (defer_ms > 0) ? (millis() + defer_ms) : 0UL;
     if (metadata != nullptr) {
         req.metadata = *metadata;
     } else {

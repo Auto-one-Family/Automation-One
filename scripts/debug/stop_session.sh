@@ -41,33 +41,13 @@ fi
 # Hilfsfunktionen
 # ----------------------------------------------------------------------------
 
-# Server-PID über Port 8000 finden
-get_server_pid_by_port() {
-    if $IS_WINDOWS; then
-        # LISTENING (EN) oder ABHÖREN (DE), grep -a für binary-safe (Umlaut-Probleme)
-        /c/Windows/System32/netstat.exe -ano 2>/dev/null | grep -a ":8000" | grep -a "LISTENING\|ABH" | awk '{print $5}' | head -1
-    else
-        lsof -ti:8000 2>/dev/null || netstat -tlnp 2>/dev/null | grep ":8000" | awk '{print $7}' | cut -d'/' -f1
-    fi
-}
-
-# Prüfen ob Port 8000 belegt ist
-is_server_running() {
-    if $IS_WINDOWS; then
-        # LISTENING (EN) oder ABHÖREN (DE), grep -a für binary-safe
-        /c/Windows/System32/netstat.exe -ano 2>/dev/null | grep -a ":8000" | grep -a -q "LISTENING\|ABH"
-    else
-        netstat -tuln 2>/dev/null | grep -q ":8000 "
-    fi
-}
-
-# Prozess beenden (cross-platform)
+# Prozess beenden (für MQTT-Capture PID, cross-platform)
 kill_process() {
     local PID=$1
     if [ -z "$PID" ]; then
         return 1
     fi
-    
+
     if $IS_WINDOWS; then
         taskkill //PID "$PID" //F //T >/dev/null 2>&1 || true
     else
@@ -152,53 +132,27 @@ if ! $MQTT_STOPPED && $IS_WINDOWS; then
 fi
 
 # ----------------------------------------------------------------------------
-# Schritt 3: Server stoppen (wenn mit --with-server gestartet)
+# Schritt 3: Server prüfen (läuft via Docker — kein manueller Stop nötig)
 # ----------------------------------------------------------------------------
 echo ""
 echo "[3/6] Server prüfen..."
 
-if [ "$WITH_SERVER" = "true" ]; then
-    if is_server_running; then
-        echo "      ⏳ Server wird gestoppt..."
-        
-        # PID über Port holen (robuster als gespeicherte PID)
-        CURRENT_SERVER_PID=$(get_server_pid_by_port)
-        
-        if [ -n "$CURRENT_SERVER_PID" ]; then
-            kill_process "$CURRENT_SERVER_PID"
-            sleep 2
-            
-            # Verifizieren
-            if is_server_running; then
-                echo "      ⚠️  Server reagiert nicht - zweiter Versuch..."
-                # Auf Windows: Alle Python-Prozesse auf Port 8000 killen
-                if $IS_WINDOWS; then
-                    CURRENT_SERVER_PID=$(get_server_pid_by_port)
-                    if [ -n "$CURRENT_SERVER_PID" ]; then
-                        taskkill //PID "$CURRENT_SERVER_PID" //F //T >/dev/null 2>&1 || true
-                        sleep 2
-                    fi
-                fi
-            fi
-            
-            if ! is_server_running; then
-                echo "      ✅ Server gestoppt (Port 8000 frei)"
-            else
-                echo "      ⚠️  Server-Port 8000 noch belegt!"
-                echo "         Manuell beenden: taskkill //PID $(get_server_pid_by_port) //F"
-            fi
-        else
-            echo "      ⚠️  Konnte Server-PID nicht ermitteln"
-        fi
-    else
-        echo "      ℹ️  Server war bereits beendet"
-    fi
+# Server läuft in Docker — stop_session stoppt ihn nicht automatisch.
+# Mit --with-server gestartete Sessions haben den Server via Docker gestartet;
+# Docker-Container laufen weiter bis explizit gestoppt (docker compose stop el-servador).
+DOCKER_SERVER_STATE=$(docker compose ps el-servador --format json 2>/dev/null | python3 -c "
+import sys, json
+for line in sys.stdin:
+    if line.strip():
+        s = json.loads(line.strip())
+        print(s.get('State', 'unknown'))
+" 2>/dev/null)
+
+if [ "$DOCKER_SERVER_STATE" = "running" ]; then
+    echo "      ℹ️  El Servador läuft in Docker (wird nicht gestoppt)"
+    echo "         Zum Stoppen: docker compose stop el-servador"
 else
-    if is_server_running; then
-        echo "      ℹ️  Server läuft (wurde nicht mit dieser Session gestartet)"
-    else
-        echo "      ℹ️  Server wurde nicht mit dieser Session gestartet"
-    fi
+    echo "      ℹ️  El Servador: $DOCKER_SERVER_STATE"
 fi
 
 # ----------------------------------------------------------------------------

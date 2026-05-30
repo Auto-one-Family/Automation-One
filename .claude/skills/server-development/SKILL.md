@@ -4,6 +4,7 @@ description: |
   God-Kaiser Server Entwicklung für AutomationOne IoT-Framework.
   Verwenden bei: Python, FastAPI, PostgreSQL, SQLAlchemy, Alembic, MQTT-Handler,
   REST-API, Pydantic, Sensor-Processing, Actuator-Service, Logic-Engine,
+  ESP32-S3 DevKitC-1, hardware_type, gpio_validation_service, Config-Builder,
   Cross-ESP-Automation, Database-Models, Repositories, WebSocket, JWT-Auth,
   Audit-Log, Maintenance-Jobs, SimulationScheduler, Mock-ESP, Zone-Service,
   Subzone-Service, Safety-Service, Config-Builder, MQTT-Publisher, MQTT-Subscriber,
@@ -80,6 +81,7 @@ Tests überschreiben **`get_db`** via `app.dependency_overrides[get_db]` (siehe 
 | **Sensor Library hinzufügen** | MODULE_REGISTRY.md | `src/sensors/sensor_libraries/active/` |
 | **Error-Codes verstehen** | `.claude/reference/errors/ERROR_CODES.md` | `src/core/error_codes.py` |
 | **MQTT Topics verstehen** | `.claude/reference/api/MQTT_TOPICS.md` | `src/mqtt/topics.py` |
+| **ESP32-S3 / board-aware GPIO** | [Section 1.1: ESP32-S3](#11-esp32-s3-devkitc-1-in-el-servador-zusaetzlich) | `gpio_validation_service.py`, `constants.py`, `heartbeat_handler.py` |
 | **Startup verstehen** | [Section 2: Startup](#2-startup-sequenz) | `src/main.py` |
 | **Tests schreiben** | `.claude/reference/testing/TEST_WORKFLOW.md` | `tests/` |
 
@@ -126,6 +128,72 @@ Server sendet:  Actuator-Commands, Config-Updates
 │  Repositories, MQTT Handlers, Persistence           │
 └─────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 1.1 ESP32-S3 DevKitC-1 in El Servador (zusätzlich)
+
+> **Scope:** Zusätzlicher Differenzierer neben ESP32-WROOM/XIAO — **kein** neues MQTT-Topic, **kein** neuer Stream, **kein** board-spezifischer Config-Push-Body. ESP32-dev/WROOM-Pfade in diesem Skill bleiben unangetastet.
+> **Search-vor-Create (2026-05-29):** Kanonisches DB-/API-Feld ist **`hardware_type`** auf `esp_devices` (`src/db/models/esp.py`) — **nicht** `board_type`, **nicht** `hardware_target`. Firmware sendet `hardware_type` im Heartbeat (z. B. `"ESP32_S3_DEVKITC1"` nach AUT-524). Konzeptuelle Targets `ESP32_DEV` / `ESP32_S3` mappen auf diese Strings, nicht auf separate Spalten.
+
+### Kanonische Werte (`constants.py`)
+
+| Konzept (Firmware/TM) | Server-String (`hardware_type`) | Konstante |
+|----------------------|-----------------------------------|-----------|
+| ESP32-dev / WROOM | `ESP32_WROOM` | `HARDWARE_TYPE_ESP32_WROOM` |
+| ESP32-S3 DevKitC-1 N8R8 | `ESP32_S3_DEVKITC1` | `HARDWARE_TYPE_ESP32_S3_DEVKITC1` |
+| Seeed XIAO C3 | `XIAO_ESP32_C3` | `HARDWARE_TYPE_XIAO_ESP32C3` |
+| Mock | `MOCK_ESP32` | (Prefix `MOCK_` / `ESP_MOCK_` in Heartbeat-Discovery) |
+
+`HARDWARE_TYPES` in `src/core/constants.py` — unbekannter Heartbeat-Wert: **speichern wie empfangen**, Log-Warning (kein Reject).
+
+### Discovery via Heartbeat (kein separates Discovery-Topic)
+
+| Pfad | Verhalten |
+|------|-----------|
+| `src/mqtt/handlers/heartbeat_handler.py` | Primärer Discovery-Pfad: neues Gerät → `_auto_register_esp()` liest `payload.get("hardware_type", "ESP32_WROOM")` und persistiert auf `ESPDevice.hardware_type` |
+| idem (bestehendes Gerät) | `_update_existing_device_metadata()` aktualisiert `hardware_type` bei Abweichung (außer `MOCK_ESP32`) |
+| `src/mqtt/handlers/discovery_handler.py` | **Entfernt** (AUT-225) — Legacy-Topic nicht mehr subscriben |
+
+**MQTT:** Gleicher Baum `kaiser/{kaiser_id}/esp/{esp_id}/...` für WROOM und S3. Heartbeat-Topic unverändert (`system/heartbeat`).
+
+**Heartbeat / ACK / Offline:** Cadence, ACK-Contract, `HEARTBEAT_TIMEOUT_SECONDS`, Reconnect Full-State-Push und Offline-Grace — **identisch** für alle `hardware_type`-Werte; keine S3-Verzweigung im Handler.
+
+### GPIO-Validierung pro Target (`gpio_validation_service.py`)
+
+**Immer** `esp_devices.hardware_type` laden → `_get_board_constraints()` / `_get_system_reserved_pins()` — **kein** board-naiver GPIO-Hardcode in `config_builder.py` oder `sensor_type_registry.py`.
+
+| Constraint | ESP32_WROOM | ESP32_S3_DEVKITC1 |
+|------------|-------------|-------------------|
+| RESERVED (Flash/PSRAM/USB/RGB/Strap) | Flash 6–11, Boot/UART 0–3, 12 | GPIO **26–37** (Octal Flash+PSRAM), 38/48 (RGB), 19–20 (USB-CDC), Strap **0, 3, 46**, UART 43–44 — siehe `GPIO_RESERVED_ESP32_S3_DEVKITC1` |
+| I2C-Bus-Pins | 21 (SDA), 22 (SCL) | **8 (SDA), 9 (SCL)** |
+| ADC1 (analog, WiFi-sicher) | 32–39 (input-only: 34–39) | **GPIO 1–10** |
+| ADC2 + WiFi | Warnung bei ANALOG auf ADC2-Pins | Gleiches Prinzip, andere GPIO-Nummern; Soft-Warning-Text in Service kann noch WROOM-Beispiele nennen — **Pin-Wahl** über Board-Constraints + API-Validierung, nicht über feste Listen im Config-Builder |
+
+Zusätzlich: `src/core/validators.py` → `validate_gpio(gpio, board_type)` und `src/mqtt/topics.py` → `TopicBuilder.validate_gpio()` spiegeln dieselben RESERVED-Sets.
+
+**API-Flow:** Sensor/Aktor-CRUD ruft `GpioValidationService.validate_gpio_available(..., interface_type=...)` — `hardware_type` kommt aus dem ESP-Record, nicht aus dem Request-Body.
+
+### Config-Push (`config_builder.py`) — unverändert pro Target
+
+- `build_combined_config()` / `build_esp_config()`: Payload-Form **identisch** für WROOM und S3.
+- **VIRTUAL-Filter** bleibt: `interface_type == "VIRTUAL"` wird vor ESP-Push ausgeschlossen (serverseitig berechnet, z. B. VPD).
+- **Multi-Value-Expand** (SHT31 → `sht31_temp` + `sht31_humidity`): über `sensor_type_registry.normalize_sensor_type()` / `SENSOR_TYPE_MAPPING` — **keine** S3-spezifischen Sub-Types (Default: nein).
+- GPIO-Konflikt-Check im Builder nutzt DB-Zuordnung; harte Pin-Grenzen gehören in **`gpio_validation_service`** (vor Persistenz in API), nicht in den Push-Builder.
+
+### Sensor-Type-Registry
+
+`src/sensors/sensor_type_registry.py`: `normalize_sensor_type`, `SENSOR_TYPE_MAPPING`, `get_multi_value_sensor_def` — board-unabhängig. Neue S3-Sub-Types nur bei echtem neuem Messwert-Typ, nicht wegen anderer GPIO-Nummern.
+
+### Verify (Skill-Wartung)
+
+```bash
+grep -n "hardware_type\|ESP32_S3" .claude/skills/server-development/SKILL.md
+grep -n "ESP32_S3_DEVKITC1\|HARDWARE_TYPE_ESP32_S3" "El Servador/god_kaiser_server/src/core/constants.py"
+grep -n "hardware_type" "El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py"
+```
+
+**Querverweise:** Pin-Layouts Frontend → `frontend-development` § ESP32-S3 (`useBoardLayout`); Firmware-Pins → `esp32-development` § ESP32-S3; DB-Feld → `db-inspector` § ESP32-S3. MQTT-Contract → `.claude/reference/api/MQTT_TOPICS.md`, Korrelation → `.claude/reference/db-inspector/MQTT_DB_KORRELATION.md` Zeile 12.
 
 ---
 

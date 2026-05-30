@@ -1,0 +1,428 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - complementary [ref=e4]:
+      - heading "AutomationOne" [level=1] [ref=e9]
+      - navigation [ref=e10]:
+        - generic [ref=e11]: Navigation
+        - link "Dashboard" [ref=e12] [cursor=pointer]:
+          - /url: /hardware
+          - img [ref=e14]
+          - generic [ref=e19]: Dashboard
+        - link "Regeln" [ref=e20] [cursor=pointer]:
+          - /url: /logic
+          - img [ref=e21]
+          - generic [ref=e25]: Regeln
+        - link "Komponenten" [ref=e26] [cursor=pointer]:
+          - /url: /sensors
+          - img [ref=e27]
+          - generic [ref=e29]: Komponenten
+        - generic [ref=e31]: Administration
+        - link "System" [ref=e32] [cursor=pointer]:
+          - /url: /system-monitor
+          - img [ref=e33]
+          - generic [ref=e35]: System
+        - link "Benutzer" [ref=e36] [cursor=pointer]:
+          - /url: /users
+          - img [ref=e37]
+          - generic [ref=e42]: Benutzer
+        - link "Kalibrierung" [ref=e43] [cursor=pointer]:
+          - /url: /calibration
+          - img [ref=e44]
+          - generic [ref=e45]: Kalibrierung
+        - link "Plugins" [ref=e46] [cursor=pointer]:
+          - /url: /plugins
+          - img [ref=e47]
+          - generic [ref=e49]: Plugins
+        - link "Postfach" [ref=e50] [cursor=pointer]:
+          - /url: /email
+          - img [ref=e51]
+          - generic [ref=e54]: Postfach
+      - generic [ref=e55]:
+        - link "Einstellungen" [ref=e56] [cursor=pointer]:
+          - /url: /settings
+          - img [ref=e57]
+          - generic [ref=e69]: Einstellungen
+        - generic [ref=e70]:
+          - generic [ref=e71]: A
+          - generic [ref=e72]:
+            - paragraph [ref=e73]: admin
+            - paragraph [ref=e74]: admin
+    - generic [ref=e75]:
+      - banner [ref=e76]:
+        - generic [ref=e78]: Monitor
+        - generic "Gerätestatus" [ref=e80]:
+          - button "1 Online" [ref=e81] [cursor=pointer]:
+            - generic [ref=e83]: 1 Online
+          - button "3 Offline" [ref=e84] [cursor=pointer]:
+            - generic [ref=e86]: 3 Offline
+          - generic "18 aktive Alarme" [ref=e87]:
+            - generic [ref=e88]: ⚠
+            - generic [ref=e89]: "18"
+          - generic "Gerätetyp-Filter" [ref=e91]:
+            - button "Alle 4" [ref=e92] [cursor=pointer]:
+              - text: Alle
+              - generic [ref=e93]: "4"
+            - button "Mock 0" [ref=e94] [cursor=pointer]:
+              - text: Mock
+              - generic [ref=e95]: "0"
+            - button "Real 4" [ref=e96] [cursor=pointer]:
+              - text: Real
+              - generic [ref=e97]: "4"
+        - generic [ref=e98]:
+          - button "18 aktive Alerts, Kritisch, durchschnittliche Lösungszeit 70.4h, 74 neue Benachrichtigungen, KPI-Zähler alle 30s; Liste per WebSocket oft schneller. Klicken für Details. Server-Inbox — Echtzeit-Fehler (error_event) nur als Toast." [ref=e101] [cursor=pointer]:
+            - generic [ref=e102]:
+              - img [ref=e103]
+              - generic [ref=e107]: Kritisch
+            - generic [ref=e108]: 18 aktive Alerts
+          - 'button "Not-Aus: Alle Aktoren sofort abschalten" [ref=e110] [cursor=pointer]':
+            - img [ref=e111]
+            - generic [ref=e115]: NOT-AUS
+          - generic "Server verbunden" [ref=e116]
+          - button "A" [ref=e119] [cursor=pointer]:
+            - generic [ref=e120]: A
+            - img [ref=e121]
+      - main [ref=e123]:
+        - generic [ref=e124]:
+          - generic [ref=e125]:
+            - navigation "Hauptansichten" [ref=e126]:
+              - link "Geräte" [ref=e127] [cursor=pointer]:
+                - /url: /hardware
+                - img [ref=e128]
+                - generic [ref=e133]: Geräte
+              - link "Monitor" [ref=e134] [cursor=pointer]:
+                - /url: /monitor
+                - img [ref=e135]
+                - generic [ref=e137]: Monitor
+              - link "Editor" [ref=e138] [cursor=pointer]:
+                - /url: /editor
+                - img [ref=e139]
+                - generic [ref=e144]: Editor
+            - 'status "Echtzeitverbindung: Live" [ref=e145]':
+              - generic [ref=e147]: Live
+          - generic [ref=e148]:
+            - main [ref=e150]:
+              - generic [ref=e152]:
+                - img
+                - combobox [ref=e153] [cursor=pointer]:
+                  - option "Alle Zonen" [selected]
+                  - option "e2e_aut124_moaai1ds"
+                  - option "e2e_aut124_moaai6zo"
+                  - option "e2e_aut124_moaaon9b"
+                  - option "e2e_aut124_moaaosqy"
+                  - option "e2e_aut124_moaaqsm8"
+                  - option "e2e_aut124_moaaqy4c"
+                  - option "e2e_aut124_moaas7ey"
+                  - option "e2e_aut124_moaascjp"
+                  - option "e2e_aut124_moaaub6m"
+                  - option "e2e_aut124_moab0pon"
+                  - option "e2e_aut124_moab0v4k"
+                  - option "e2e_aut124_moab0zyg"
+                  - option "e2e_aut124_moab1547"
+                  - option "e2e_aut124_moab1bdn"
+                  - option "e2e_aut124_moab6s4p"
+                  - option "e2e_aut124_moab8tna"
+                  - option "e2e_aut124_moab918m"
+                  - option "e2e_aut124_moabaa5a"
+                  - option "e2e_aut124_moabafmj"
+                  - option "e2e_aut124_moabakfw"
+                  - option "e2e_aut124_moabapn6"
+                  - option "e2e_aut124_moabavze"
+                  - option "e2e_aut124_moabbuy4"
+                  - option "e2e_aut124_moabc0nb"
+                  - option "e2e_aut124_moabc5nj"
+                  - option "e2e_aut124_moabcb29"
+                  - option "e2e_aut124_moabciut"
+                  - option "e2e_aut124_moabcqfo"
+                  - option "e2e_aut124_moabcxui"
+                  - option "e2e_aut124_moabd31z"
+                  - option "e2e_aut124_moabe7sc"
+                  - option "e2e_aut124_moabed9k"
+                  - option "e2e_aut124_moabei2v"
+                  - option "e2e_aut124_moabenbu"
+                  - option "e2e_aut124_moabeu3b"
+                  - option "e2e_aut124_moabf1dq"
+                  - option "e2e_aut124_moabf8sg"
+                  - option "e2e_aut124_moabfe16"
+                  - option "e2e_aut124_moabhvhd"
+                  - option "e2e_aut124_moabi0x8"
+                  - option "e2e_aut124_moabi5py"
+                  - option "e2e_aut124_moabiawe"
+                  - option "e2e_aut124_moabii0u"
+                  - option "e2e_aut124_moabip97"
+                  - option "e2e_aut124_moabiwi3"
+                  - option "e2e_aut124_moabj1ot"
+                  - option "gewaechshaus"
+                  - option "e2e_gewaechshaus"
+                  - option "wokwi_zone"
+                  - option "zelt_wohnzimmer"
+              - generic [ref=e154]:
+                - 'button "Gewaechshaus Zone-Kachel-Dashboard im Editor anpassen Alarm Alle 2 Geräte offline Zonenmittel, Durchschnitt pro Kategorie. Zoneinsight: Vapor Pressure Deficit und Temperaturspanne 24 Stunden. Zoneinsight Vergleich moisture moisture 📈 Noch keine Daten verfügbar Warte auf Live-Daten vom Sensor... Live-Updates aktiv Geraete: 0/2 online Sensoren: 6/6 aktiv Aktoren: 0/2 aktiv" [ref=e155] [cursor=pointer]':
+                  - generic [ref=e156]:
+                    - heading "Gewaechshaus" [level=3] [ref=e157]
+                    - generic [ref=e158]:
+                      - link "Zone-Kachel-Dashboard im Editor anpassen" [ref=e159]:
+                        - /url: /editor/7a46f6cb-673a-4870-b031-f3bd5d7bb59b
+                        - img [ref=e160]
+                      - generic [ref=e163]:
+                        - img [ref=e164]
+                        - generic [ref=e168]: Alarm
+                  - generic [ref=e169]: Alle 2 Geräte offline
+                  - 'group "Zonenmittel, Durchschnitt pro Kategorie. Zoneinsight: Vapor Pressure Deficit und Temperaturspanne 24 Stunden." [ref=e170]':
+                    - generic [ref=e171]:
+                      - generic [ref=e172]: Temperatur
+                      - generic [ref=e173]:
+                        - generic [ref=e174]: Ø
+                        - generic [ref=e175]: 20,8
+                        - generic [ref=e176]: °C
+                    - generic [ref=e177]:
+                      - generic [ref=e178]: Luftfeuchte
+                      - generic [ref=e179]:
+                        - generic [ref=e180]: Ø
+                        - generic [ref=e181]: 48,9
+                        - generic [ref=e182]: "%RH"
+                    - generic [ref=e183]:
+                      - generic [ref=e184]: Bodenfeuchte
+                      - generic [ref=e185]:
+                        - generic [ref=e186]: Ø
+                        - generic [ref=e187]: "15"
+                        - generic [ref=e188]: "%"
+                  - generic [ref=e189]:
+                    - region "Zoneinsight" [ref=e190]:
+                      - generic [ref=e191]: Zoneinsight
+                      - generic [ref=e192]:
+                        - generic [ref=e193]:
+                          - generic [ref=e194]: VPD (Zonen-Ø T/RH)
+                          - generic [ref=e195]: 1,25 kPa
+                        - generic [ref=e196]:
+                          - generic [ref=e197]: Temperatur 24h
+                          - generic [ref=e199]: —
+                    - generic [ref=e206]:
+                      - button "Vergleich" [ref=e208]:
+                        - img [ref=e209]
+                        - generic [ref=e216]: Vergleich
+                      - generic [ref=e217]:
+                        - generic [ref=e218]:
+                          - text: moisture
+                          - button [ref=e220]:
+                            - img [ref=e221]
+                        - generic [ref=e224]:
+                          - text: moisture
+                          - button [ref=e226]:
+                            - img [ref=e227]
+                        - button [ref=e230]:
+                          - img [ref=e231]
+                        - button "Alle Sensoren als CSV exportieren" [ref=e232]:
+                          - img [ref=e233]
+                      - button "Aktor hinzufügen" [ref=e238]:
+                        - img [ref=e239]
+                      - generic [ref=e243]:
+                        - generic [ref=e244]: 📈
+                        - generic [ref=e245]: Noch keine Daten verfügbar
+                        - generic [ref=e246]: Warte auf Live-Daten vom Sensor...
+                        - generic [ref=e247]: Live-Updates aktiv
+                  - generic [ref=e250]:
+                    - generic [ref=e251]: "Geraete: 0/2 online"
+                    - generic [ref=e252]: "Sensoren: 6/6 aktiv"
+                    - generic [ref=e253]: "Aktoren: 0/2 aktiv"
+                - 'button "Zelt Wohnzimmer Zone-Kachel-Dashboard im Editor anpassen Warnung 1 Gerät offline Zonenmittel, Durchschnitt pro Kategorie. Zoneinsight: Vapor Pressure Deficit und Temperaturspanne 24 Stunden. Zoneinsight Sensor wählen für Linien-Chart Regeln 6 Automationen in dieser Zone • Beleuchtung Zelt • Bewaesserung 2 + 4 weitere Regeln Geraete: 1/2 online Sensoren: 8/8 aktiv Aktoren: 0/2 aktiv" [ref=e254] [cursor=pointer]':
+                  - generic [ref=e255]:
+                    - heading "Zelt Wohnzimmer" [level=3] [ref=e256]
+                    - generic [ref=e257]:
+                      - link "Zone-Kachel-Dashboard im Editor anpassen" [ref=e258]:
+                        - /url: /editor/90aca588-de1e-4d90-8e5b-5a0041f6beb8
+                        - img [ref=e259]
+                      - generic [ref=e262]:
+                        - img [ref=e263]
+                        - generic [ref=e265]: Warnung
+                  - generic [ref=e266]: 1 Gerät offline
+                  - 'group "Zonenmittel, Durchschnitt pro Kategorie. Zoneinsight: Vapor Pressure Deficit und Temperaturspanne 24 Stunden." [ref=e267]':
+                    - generic [ref=e268]:
+                      - generic [ref=e269]: Temperatur
+                      - generic [ref=e270]:
+                        - generic [ref=e271]: Ø
+                        - generic [ref=e272]: 19,8
+                        - generic [ref=e273]: °C
+                    - generic [ref=e274]:
+                      - generic [ref=e275]: Luftfeuchte
+                      - generic [ref=e276]:
+                        - generic [ref=e277]: Ø
+                        - generic [ref=e278]: 52,2
+                        - generic [ref=e279]: "%RH"
+                    - generic [ref=e280]:
+                      - generic [ref=e281]: Bodenfeuchte
+                      - generic [ref=e282]:
+                        - generic [ref=e283]: Ø
+                        - generic [ref=e284]: "62"
+                        - generic [ref=e285]: "%"
+                  - generic [ref=e286]:
+                    - region "Zoneinsight" [ref=e287]:
+                      - generic [ref=e288]: Zoneinsight
+                      - generic [ref=e289]:
+                        - generic [ref=e290]:
+                          - generic [ref=e291]: VPD (Zonen-Ø T/RH)
+                          - generic [ref=e292]: 1,10 kPa
+                        - generic [ref=e293]:
+                          - generic [ref=e294]: Temperatur 24h (Min–Max)
+                          - generic [ref=e296]: 17,4 – 22,5 °C
+                    - generic [ref=e304]:
+                      - img [ref=e305]
+                      - combobox [ref=e307]:
+                        - option "Sensor wählen für Linien-Chart" [disabled] [selected]
+                        - option "moisture"
+                        - option "Temp B083"
+                        - option "ec"
+                        - option "moisture"
+                        - option "ph"
+                        - option "sht31_humidity"
+                        - option "sht31_temp"
+                        - option "VPD (berechnet)"
+                  - generic [ref=e308]:
+                    - generic [ref=e309]:
+                      - generic [ref=e310]:
+                        - img [ref=e311]
+                        - generic [ref=e313]: Regeln
+                      - generic [ref=e314]: "6"
+                    - generic [ref=e315]: Automationen in dieser Zone
+                    - generic [ref=e316]:
+                      - text: •
+                      - generic "Beleuchtung Zelt" [ref=e317]
+                    - generic [ref=e318]:
+                      - text: •
+                      - generic "Bewaesserung 2" [ref=e319]
+                    - generic [ref=e320]: + 4 weitere Regeln
+                  - generic [ref=e322]:
+                    - generic [ref=e323]: "Geraete: 1/2 online"
+                    - generic [ref=e324]: "Sensoren: 8/8 aktiv"
+                    - generic [ref=e325]: "Aktoren: 0/2 aktiv"
+            - complementary [ref=e326]:
+              - generic [ref=e327]:
+                - generic [ref=e328]:
+                  - generic [ref=e329]: Cross-Zone Temperatur-Vergleich
+                  - link "Im Editor bearbeiten" [ref=e330] [cursor=pointer]:
+                    - /url: /editor/a88ea2f1-4954-4e35-a769-46bb57a8a84e
+                    - img [ref=e331]
+                - generic [ref=e334]:
+                  - generic [ref=e340]:
+                    - img [ref=e341]
+                    - combobox [ref=e343]:
+                      - option "Sensor wählen für Sensor-Karte" [disabled]
+                      - option "Temp BAE1"
+                      - option "moisture"
+                      - option "moisture"
+                      - option "sht31_humidity"
+                      - option "sht31_temp"
+                      - option "VPD (berechnet)"
+                      - option "moisture"
+                      - option "Temp B083"
+                      - option "ec"
+                      - option "moisture"
+                      - option "ph"
+                      - option "sht31_humidity"
+                      - option "sht31_temp"
+                      - option "VPD (berechnet)"
+                  - generic [ref=e350]:
+                    - img [ref=e351]
+                    - combobox [ref=e353]:
+                      - option "Sensor wählen für Historische Zeitreihe" [disabled]
+                      - option "Temp BAE1"
+                      - option "moisture"
+                      - option "moisture"
+                      - option "sht31_humidity"
+                      - option "sht31_temp"
+                      - option "VPD (berechnet)"
+                      - option "moisture"
+                      - option "Temp B083"
+                      - option "ec"
+                      - option "moisture"
+                      - option "ph"
+                      - option "sht31_humidity"
+                      - option "sht31_temp"
+                      - option "VPD (berechnet)"
+              - generic [ref=e354]:
+                - generic [ref=e355]:
+                  - generic [ref=e356]: Leer starten
+                  - link "Im Editor bearbeiten" [ref=e357] [cursor=pointer]:
+                    - /url: /editor/e5c4e7fa-9277-4732-9bbc-2d3653c7a08a
+                    - img [ref=e358]
+                - generic "Claude Assistant" [ref=e366]:
+                  - generic [ref=e367]:
+                    - generic [ref=e368]:
+                      - img [ref=e369]
+                      - text: Claude Assistant
+                    - button "Verlauf löschen" [disabled] [ref=e371]:
+                      - img [ref=e372]
+                  - generic [ref=e376]:
+                    - img [ref=e377]
+                    - paragraph [ref=e379]: Stelle eine Frage zum System, zu Sensoren oder zu Anomalien.
+                  - generic [ref=e380]:
+                    - textbox "Nachricht eingeben… (Enter = Senden, Shift+Enter = Zeilenumbruch)" [ref=e381]
+                    - button "Senden" [disabled] [ref=e382]:
+                      - img [ref=e383]
+              - generic [ref=e386]:
+                - generic [ref=e387]:
+                  - generic [ref=e388]: Leer starten
+                  - link "Im Editor bearbeiten" [ref=e389] [cursor=pointer]:
+                    - /url: /editor/fef578f7-efdf-4c8a-a14f-ecc1ca2fc71f
+                    - img [ref=e390]
+                - generic "Claude Assistant" [ref=e398]:
+                  - generic [ref=e399]:
+                    - generic [ref=e400]:
+                      - img [ref=e401]
+                      - text: Claude Assistant
+                    - button "Verlauf löschen" [disabled] [ref=e403]:
+                      - img [ref=e404]
+                  - generic [ref=e408]:
+                    - img [ref=e409]
+                    - paragraph [ref=e411]: Stelle eine Frage zum System, zu Sensoren oder zu Anomalien.
+                  - generic [ref=e412]:
+                    - textbox "Nachricht eingeben… (Enter = Senden, Shift+Enter = Zeilenumbruch)" [ref=e413]
+                    - button "Senden" [disabled] [ref=e414]:
+                      - img [ref=e415]
+              - generic [ref=e418]:
+                - generic [ref=e419]:
+                  - generic [ref=e420]: Cross-Zone Temperatur-Vergleich
+                  - link "Im Editor bearbeiten" [ref=e421] [cursor=pointer]:
+                    - /url: /editor/da87db19-a744-458a-920b-8e089c7f458c
+                    - img [ref=e422]
+                - generic [ref=e425]:
+                  - generic [ref=e431]:
+                    - img [ref=e432]
+                    - combobox [ref=e434]:
+                      - option "Sensor wählen für Sensor-Karte" [disabled]
+                      - option "Temp BAE1"
+                      - option "moisture"
+                      - option "moisture"
+                      - option "sht31_humidity"
+                      - option "sht31_temp"
+                      - option "VPD (berechnet)"
+                      - option "moisture"
+                      - option "Temp B083"
+                      - option "ec"
+                      - option "moisture"
+                      - option "ph"
+                      - option "sht31_humidity"
+                      - option "sht31_temp"
+                      - option "VPD (berechnet)"
+                  - generic [ref=e441]:
+                    - img [ref=e442]
+                    - combobox [ref=e444]:
+                      - option "Sensor wählen für Historische Zeitreihe" [disabled]
+                      - option "Temp BAE1"
+                      - option "moisture"
+                      - option "moisture"
+                      - option "sht31_humidity"
+                      - option "sht31_temp"
+                      - option "VPD (berechnet)"
+                      - option "moisture"
+                      - option "Temp B083"
+                      - option "ec"
+                      - option "moisture"
+                      - option "ph"
+                      - option "sht31_humidity"
+                      - option "sht31_temp"
+                      - option "VPD (berechnet)"
+          - button "Quick Actions öffnen" [ref=e446] [cursor=pointer]:
+            - img
+    - button "Quick Actions öffnen" [ref=e448] [cursor=pointer]:
+      - img
+  - generic "Benachrichtigungen"

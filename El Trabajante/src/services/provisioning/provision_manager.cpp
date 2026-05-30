@@ -1,4 +1,11 @@
 #include "provision_manager.h"
+#ifdef XIAO_ESP32C3
+    #include "../../config/hardware/xiao_esp32c3.h"
+#elif defined(ESP32_S3_DEVKIT_MODE)
+    #include "../../config/hardware/esp32_s3_devkit.h"
+#else
+    #include "../../config/hardware/esp32_dev.h"
+#endif
 #include "../../config/firmware_version.h"
 #include "../../services/config/config_manager.h"
 #include "../../services/config/storage_manager.h"
@@ -485,8 +492,20 @@ bool ProvisionManager::waitForConfig(uint32_t timeout_ms) {
   const unsigned long LOG_THROTTLE_MS = 300000;  // Log every 5 minutes (not every feed)
   uint32_t feed_count = 0;
   uint32_t feed_failures = 0;
+#ifdef ESP32_S3_DEVKIT_MODE
+  unsigned long last_serial_heartbeat = millis();
+  const unsigned long SERIAL_HEARTBEAT_MS = 15000;
+#endif
 
   while (millis() - start_time < timeout_ms) {
+#ifdef ESP32_S3_DEVKIT_MODE
+    if (millis() - last_serial_heartbeat >= SERIAL_HEARTBEAT_MS) {
+      Serial.println("[PROVISION] AP aktiv — WLAN: AutoOne-" + esp_id_ +
+                     " Passwort: provision — http://192.168.4.1");
+      Serial.flush();
+      last_serial_heartbeat = millis();
+    }
+#endif
     // ─────────────────────────────────────────────────────
     // WATCHDOG FEED (every 60s in Provisioning Mode)
     // ─────────────────────────────────────────────────────
@@ -690,15 +709,15 @@ void ProvisionManager::enterSafeMode() {
   LOG_I(TAG, "");
 
   // Visual feedback (LED-Blink-Pattern)
-  const uint8_t LED_PIN = 2;  // ESP32 onboard LED
-  pinMode(LED_PIN, OUTPUT);
+  const uint8_t led_pin = HardwareConfig::LED_PIN;
+  pinMode(led_pin, OUTPUT);
 
   // Pattern: 10× kurzes Blinken (200ms on/off)
-  LOG_I(TAG, "LED Pattern: 10× blink (GPIO 2)");
+  LOG_I(TAG, "LED Pattern: 10× blink (GPIO " + String(led_pin) + ")");
   for (int i = 0; i < 10; i++) {
-    digitalWrite(LED_PIN, HIGH);
+    digitalWrite(led_pin, HIGH);
     delay(200);
-    digitalWrite(LED_PIN, LOW);
+    digitalWrite(led_pin, LOW);
     delay(200);
   }
 

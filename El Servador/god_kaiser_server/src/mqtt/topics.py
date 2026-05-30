@@ -1343,6 +1343,11 @@ class TopicBuilder:
                 gpio in constants.GPIO_RANGE_XIAO_ESP32C3
                 and gpio not in constants.GPIO_RESERVED_XIAO_ESP32C3
             )
+        elif hardware_type == constants.HARDWARE_TYPE_ESP32_S3_DEVKITC1:
+            return (
+                gpio in constants.GPIO_RANGE_ESP32_S3_DEVKITC1
+                and gpio not in constants.GPIO_RESERVED_ESP32_S3_DEVKITC1
+            )
         else:
             logger.error(f"Unknown hardware type: {hardware_type}")
             return False

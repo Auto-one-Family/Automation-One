@@ -359,7 +359,7 @@ void TimeManager::refreshPrimaryNtpFromGateway() {
         return;
     }
     const IPAddress gw = WiFi.gatewayIP();
-    if (gw == IPAddress(0u)) {
+    if (gw == IPAddress(static_cast<uint32_t>(0))) {
         ntp_server_primary_ = NTP_SERVER_PRIMARY;
         return;
     }

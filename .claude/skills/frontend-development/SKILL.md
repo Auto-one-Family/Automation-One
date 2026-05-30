@@ -6,7 +6,8 @@ description: |
   WebSocket, Dashboard, ESP-Card, Sensor-Satellite, Actuator-Satellite,
   Zone-Management, Drag-Drop, System-Monitor, Database-Explorer, Log-Viewer,
   Audit-Log, MQTT-Traffic, Composables, useWebSocket, useToast, useModal,
-  useQueryFilters, useGpioStatus, useZoneDragDrop, useSensorId, Pinia-Stores, auth-store,
+  useQueryFilters, useGpioStatus, useBoardLayout, useZoneDragDrop, useSensorId, Pinia-Stores, auth-store,
+  hardware_type, ESP32-S3, board-aware Pin-Plan, GpioPicker, SensorConfigPanel,
   esp-store, logic-store, plugins-store, formatters, sensorDefaults, actuatorDefaults,
   Mock-ESP, PendingDevices, GPIO-Status, MainLayout, AppSidebar, Router,
   Navigation-Guards, Token-Refresh, JWT-Auth, REST-API-Client.
@@ -15,7 +16,7 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 10.15 | **Letzte Aktualisierung:** 2026-05-07
+**Version:** 10.16 | **Letzte Aktualisierung:** 2026-05-29
 
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, ~145+ `.vue` Komponenten unter `src/components/`)
@@ -36,6 +37,8 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 | **WebSocket verstehen** | `.claude/reference/api/WEBSOCKET_EVENTS.md` | Events mit Payloads; ESP-Store: `esp-websocket-subscription.ts` + §0.1 in WEBSOCKET_EVENTS |
 | **Zone zuweisen** | [Section 12: Drag & Drop](#12-drag--drop-system) | `src/components/zones/` |
 | **ESP-Geraet verwalten** | [Section 5: State Management](#5-state-management-pinia) | `src/stores/esp.ts` |
+| **Board-Pin-Plan (S3 vs WROOM)** | [Section 20: ESP32-S3 Operator-UI](#20-esp32-s3-board-awareness-operator-ui) | `composables/useBoardLayout.ts`, `SensorConfigPanel.vue`, `utils/gpioConfig.ts` |
+| **Hardware-Typ Badge / Filter** | [Section 20: ESP32-S3 Operator-UI](#20-esp32-s3-board-awareness-operator-ui) | `ESPDevice.hardware_type` in `esp.ts`; `esp.fetchAll({ hardware_type })` |
 | **System Monitor** | [Section 10: Router](#10-router--navigation) | `SystemMonitorView.vue` |
 | **Komponente finden** | [Section 2: Ordnerstruktur](#2-ordnerstruktur) | `src/components/` |
 | **Error-Codes verstehen** | `.claude/reference/errors/ERROR_CODES.md` | ESP32 + Server Codes |
@@ -196,6 +199,7 @@ El Frontend/src/
 │   ├── useModal.ts
 │   ├── useQueryFilters.ts
 │   ├── useGpioStatus.ts
+│   ├── useBoardLayout.ts       # Board-spezifischer Pin-Plan (ESP32_WROOM / ESP32_S3_DEVKITC1 / XIAO / MOCK); Input: hardware_type Ref
 │   ├── useSensorId.ts          # sensorId parser (espId:gpio:sensorType, legacy 2-part support)
 │   ├── useSensorOptions.ts     # Zone-grouped sensor options for dashboard widgets (PA-02b, dedup + optgroup)
 │   ├── useSubzoneCRUD.ts
@@ -1410,6 +1414,83 @@ Ziel: **repo-spezifische** Leitplanken fuer KI- und Menschen-Reviews; keine para
 
 ---
 
+## 20. ESP32-S3 Board-Awareness (Operator-UI)
+
+> **Scope:** Sichtbarkeit und Pin-Validierung im Operator-UI nach AUT-523 S4 (`useBoardLayout`) + AUT-528 S5c. **ESP32-dev/WROOM-Verhalten bleibt unangetastet** — S3 ist additive Board-Schicht, kein Ersatz.
+> **Server-Abgleich:** Kanonisches DB/API-Feld ist **`hardware_type`** (String auf `esp_devices`), **nicht** `hardware_target` oder `board_type`. Werte wie in `El Servador/.../constants.py` → `HARDWARE_TYPES`.
+
+### 20.1 Search-vor-Create — wo liegt `hardware_type`?
+
+| Ort | Feld | Semantik | Aktion |
+|-----|------|----------|--------|
+| **`stores/esp.ts`** → `devices[]` → `ESPDevice` | `hardware_type?: string` | **Board-Typ** des Geraets (`ESP32_WROOM`, `ESP32_S3_DEVKITC1`, …) | **SSOT fuer UI** — aus `GET /api/v1/esp/devices` + WS `device_discovered` / Heartbeat-Spiegel |
+| `esp.fetchAll({ hardware_type })` | Query-Param | Server-Filter nach Board | Optional in Monitor-/Editor-Views; kein paralleles Store-Feld noetig |
+| `shared/stores/actuator.store.ts` | `hardware_type` | **Aktor-Logiktyp** (pump/valve/relay) fuer Icon-Lookup | **Nicht** mit Board-Typ verwechseln — siehe `getActuatorTypeInfo()` |
+| `shared/stores/dashboard.store.ts` | `target.view === 'hardware'` | Route-/Layout-Kontext HardwareView | **Kein** Board-Typ |
+| sensor.store / deviceContext.store | — | — | **Kein** dupliziertes Board-Feld anlegen — immer `espStore.devices.find(...).hardware_type` |
+
+**Fallback Bestand:** Server liefert `ESP32_WROOM` fuer aeltere Devices (NOT NULL). UI darf bei `null`/unbekanntem String **keinen silent WROOM-Pin-Plan** erzwingen — stattdessen Warnhinweis (siehe SensorConfigPanel).
+
+### 20.2 `useBoardLayout` — board-spezifischer Pin-Plan
+
+**Datei:** `El Frontend/src/composables/useBoardLayout.ts`
+
+```typescript
+useBoardLayout(hardwareType: Ref<string | null | undefined>)
+// → { layout, normalizedType, isKnownBoard, i2cDefaultLabel, isReserved, isSafe, adc1Pins }
+```
+
+| `hardware_type` (Server) | Label | ADC1 | I2C Default | RESERVED (disabled) | Strapping (Vorsicht) |
+|--------------------------|-------|------|-------------|---------------------|----------------------|
+| `ESP32_WROOM` / `MOCK_ESP32` | ESP32-WROOM-32 | 32,33,34,35,36,39 | SDA=21, SCL=22 | 0,1,2,3,6,7,8,9,10,11,12 | 0,2,12,15 |
+| `ESP32_S3_DEVKITC1` | ESP32-S3-DevKitC-1 N8R8 | **1–10** | **SDA=8, SCL=9** | 26–37 (Flash/PSRAM), 38,43,44,45,46,48, … | **0,3,46** |
+| `XIAO_ESP32_C3` | Seeed XIAO ESP32-C3 | 0–4 | SDA=4, SCL=5 | 0,1,3,18,19 | — |
+
+**Regeln fuer Agenten:**
+
+- Pin-Listen **nur** aus `useBoardLayout` / `gpioConfig.getGpioConfig(hardwareType)` — **keine** hardcodierten WROOM-ADC-Arrays in Vue-Komponenten.
+- `isKnownBoard === false` → Info/Warn-Box „Board-Typ unbekannt — manuelle Pin-Pruefung noetig“ (Pattern: `SensorConfigPanel.vue` Zone 3).
+- Analoge Sensoren: Dropdown nur `adc1Pins`; Helper-Text „Analoge Sensoren koennen nur ADC1-Pins verwenden“ — auf S3 sind das GPIO 1–10, nicht 32–39.
+
+### 20.3 Komponenten-Matrix (S3-relevant)
+
+| Komponente | Board-Awareness | Hinweis |
+|------------|-----------------|---------|
+| `SensorConfigPanel.vue` | **Ja** — `deviceHardwareType` aus `espStore`, `useBoardLayout`, ADC1-Dropdown, I2C-Default-Label, Reserved-Badge | Zone 3 „Hardware & Interface“ |
+| `GpioPicker.vue` | **Teilweise** — Live-Status via `useGpioStatus`; statischer Mock-Fallback noch `getGpioConfig('ESP32_WROOM')` | Erweiterung: `hardware_type` aus ESP-Device an `getGpioConfig` durchreichen |
+| `gpioConfig.ts` | **Teilweise** — `getGpioConfig(hardwareType)` existiert; `ESP32_S3_DEVKITC1` in `GPIO_CONFIGS` ergaenzen fuer Strapping/RESERVED-Kategorien | Strapping-Pins als `category: 'caution'`, Flash/PSRAM als `avoid` |
+| `ActuatorConfigPanel.vue` | Fallback `ESP32_WROOM` bei statischer Liste | Board-Typ aus Device-Kontext uebernehmen |
+| `ESPCardBase.vue` / `ESPCard.vue` | **Ziel:** Hardware-Badge (z. B. „S3“, „WROOM“) neben MOCK/REAL | Quelle: `esp.hardware_type`; Kurzlabel via `labels.ts` / neues `getBoardTypeLabel()` |
+| `ActuatorCard.vue` | **Unveraendert** (board-unabhaengig) | Icon via `getActuatorTypeInfo(actuator_type, hardware_type)` — `digital` → ToggleRight; unbekannt → **Power-Fallback** |
+| `ZoneAssignmentPanel.vue` | **Unveraendert** | Freitext-Input fuer Zonen bleibt |
+| `MonitorView.vue` / Editor | Filter optional | `esp.fetchAll({ hardware_type: 'ESP32_S3_DEVKITC1' })` API-seitig moeglich; UI-Chip-Filter noch nicht Pflicht |
+
+### 20.4 sensorId-Format (unveraendert)
+
+Dashboard-Widgets, Logic-Conditions und Cross-References nutzen weiterhin **3-teiliges** Format:
+
+```
+{espId}:{gpio}:{sensorType}
+```
+
+Beispiel S3: `ESP_ABC123:7:ec` — GPIO-Nummer ist board-spezifisch, das Format nicht. Parser: `composables/useSensorId.ts`.
+
+### 20.5 Pin-Picker-Validierung (S3)
+
+1. **RESERVED blockieren:** GPIO 26–37 auf S3 nicht waehlbar (Flash/PSRAM) — serverseitig via `gpio_validation_service`, UI via `useBoardLayout.isReserved()` + `gpioConfig` `avoid`.
+2. **Strapping-Warnung:** S3 GPIO 0, 3, 46 (WROOM: 0, 2, 12, 15) im Picker als „Strapping — nur mit Vorsicht“ (`category: 'caution'`), nicht als empfohlene Pins.
+3. **ADC1-Hinweis:** Bei analoger Sensorauswahl auf S3 Helper + Dropdown auf GPIO 1–10 beschraenken; ADC2 (11–20) bei WiFi nicht nutzen — Hinweis in UI, Validierung primaer Server.
+
+### 20.6 Agent-Checkliste (S3-Aufgabe)
+
+1. `hardware_type` aus `espStore.devices` lesen — **kein** neues Pinia-Feld ohne TM-Freigabe.
+2. `useBoardLayout(computed(() => device?.hardware_type))` fuer Pin-Listen/Defaults.
+3. WROOM-Devices: bestehendes Verhalten 1:1 lassen (Regression-Test mit ESP32-dev Mock).
+4. Unbekannter Board-Typ: explizite Warnung, kein silent Fallback auf WROOM-Pinplan.
+5. Actuator-Icons / ZoneAssignment / sensorId-Schema **nicht** aendern, ausser explizit im Auftrag.
+
+---
+
 ## Referenz-Dokumentation
 
 | Referenz | Pfad | Wann lesen? |
@@ -1425,7 +1506,9 @@ Ziel: **repo-spezifische** Leitplanken fuer KI- und Menschen-Reviews; keine para
 
 ## Versions-Historie
 
-**Version:** 10.16 | **Letzte Aktualisierung:** 2026-05-25
+**Version:** 10.16 | **Letzte Aktualisierung:** 2026-05-29
+
+- 2026-05-29: **AUT-528 S5c** — Section 20 ESP32-S3 Board-Awareness: `useBoardLayout`, `hardware_type`-SSOT in `esp.ts` (Search-vor-Create: kein paralleles Board-Feld in sensor/dashboard stores), SensorConfigPanel ADC1/I2C, GpioPicker/gpioConfig Gap, unveraendertes sensorId-Format + ActuatorCard/ZoneAssignmentPanel.
 
 - 2026-05-25: `actuator.store` — `config_response` mit Firmware-`fw_*`-`correlation_id` wird auf ein einziges pending Config-Intent pro ESP gemappt; fehlendes Pending unterdrückt Integrations-Toast (kein `CONTRACT_UNKNOWN_CODE` bei parallelem Config-Push).
 

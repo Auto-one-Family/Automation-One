@@ -13,6 +13,7 @@ static const SensorCapability SHT31_TEMP_CAP = {
     .i2c_address = 0x44,  // Default SHT31 address (0x45 if ADR pin to VIN)
     .is_multi_value = true,
     .is_i2c = true,
+    .is_uart = false,
 };
 
 static const SensorCapability SHT31_HUMIDITY_CAP = {
@@ -21,6 +22,7 @@ static const SensorCapability SHT31_HUMIDITY_CAP = {
     .i2c_address = 0x44,
     .is_multi_value = true,
     .is_i2c = true,
+    .is_uart = false,
 };
 
 // SHT31 Base type — resolves "sht31" from server config to a valid capability
@@ -32,6 +34,7 @@ static const SensorCapability SHT31_BASE_CAP = {
     .i2c_address = 0x44,
     .is_multi_value = true,
     .is_i2c = true,
+    .is_uart = false,
 };
 
 // DS18B20 Sensor (OneWire, Single-Value: Temperature)
@@ -41,6 +44,7 @@ static const SensorCapability DS18B20_CAP = {
     .i2c_address = 0x00,  // Not I2C
     .is_multi_value = false,
     .is_i2c = false,
+    .is_uart = false,
 };
 
 // BMP280 Sensor (I2C, Multi-Value: Pressure + Temperature)
@@ -50,6 +54,7 @@ static const SensorCapability BMP280_PRESSURE_CAP = {
     .i2c_address = 0x76,  // Default BMP280 address (0x77 if SDO to VCC)
     .is_multi_value = true,
     .is_i2c = true,
+    .is_uart = false,
 };
 
 static const SensorCapability BMP280_TEMP_CAP = {
@@ -58,6 +63,7 @@ static const SensorCapability BMP280_TEMP_CAP = {
     .i2c_address = 0x76,
     .is_multi_value = true,
     .is_i2c = true,
+    .is_uart = false,
 };
 
 // BMP280 Base type — resolves "bmp280" from server config
@@ -67,6 +73,7 @@ static const SensorCapability BMP280_BASE_CAP = {
     .i2c_address = 0x76,
     .is_multi_value = true,
     .is_i2c = true,
+    .is_uart = false,
 };
 
 // BME280 Sensor (I2C, Multi-Value: Pressure + Temperature + Humidity)
@@ -76,6 +83,7 @@ static const SensorCapability BME280_PRESSURE_CAP = {
     .i2c_address = 0x76,  // Default BME280 address (0x77 if SDO to VCC)
     .is_multi_value = true,
     .is_i2c = true,
+    .is_uart = false,
 };
 
 static const SensorCapability BME280_TEMP_CAP = {
@@ -84,6 +92,7 @@ static const SensorCapability BME280_TEMP_CAP = {
     .i2c_address = 0x76,
     .is_multi_value = true,
     .is_i2c = true,
+    .is_uart = false,
 };
 
 static const SensorCapability BME280_HUMIDITY_CAP = {
@@ -92,6 +101,7 @@ static const SensorCapability BME280_HUMIDITY_CAP = {
     .i2c_address = 0x76,
     .is_multi_value = true,
     .is_i2c = true,
+    .is_uart = false,
 };
 
 // BME280 Base type — resolves "bme280" from server config
@@ -101,6 +111,7 @@ static const SensorCapability BME280_BASE_CAP = {
     .i2c_address = 0x76,
     .is_multi_value = true,
     .is_i2c = true,
+    .is_uart = false,
 };
 
 // pH Sensor (Analog ADC, Single-Value)
@@ -110,6 +121,7 @@ static const SensorCapability PH_SENSOR_CAP = {
     .i2c_address = 0x00,  // Not I2C
     .is_multi_value = false,
     .is_i2c = false,
+    .is_uart = false,
 };
 
 // EC Sensor (Analog ADC, Single-Value)
@@ -119,6 +131,7 @@ static const SensorCapability EC_SENSOR_CAP = {
     .i2c_address = 0x00,  // Not I2C
     .is_multi_value = false,
     .is_i2c = false,
+    .is_uart = false,
 };
 
 // Moisture Sensor (Analog ADC, Single-Value)
@@ -128,6 +141,17 @@ static const SensorCapability MOISTURE_CAP = {
     .i2c_address = 0x00,  // Not I2C
     .is_multi_value = false,
     .is_i2c = false,
+    .is_uart = false,
+};
+
+// CO2 Sensor (UART MH-Z19 / SEN0220, Single-Value RAW PPM)
+static const SensorCapability CO2_CAP = {
+    .server_sensor_type = "co2",
+    .device_type = "mhz19",
+    .i2c_address = 0x00,
+    .is_multi_value = false,
+    .is_i2c = false,
+    .is_uart = true,
 };
 
 // ============================================
@@ -178,6 +202,10 @@ static const SensorTypeMapping SENSOR_TYPE_MAP[] = {
     // Moisture sensor
     {"moisture", &MOISTURE_CAP},
     {"soil_moisture", &MOISTURE_CAP},  // Alias — canonical name is "moisture"
+
+    // CO2 (UART MH-Z19 / SEN0220)
+    {"co2", &CO2_CAP},
+    {"mhz19_co2", &CO2_CAP},
 
     // End marker
     {nullptr, nullptr}

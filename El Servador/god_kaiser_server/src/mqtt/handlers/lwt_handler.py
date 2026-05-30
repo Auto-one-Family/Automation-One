@@ -34,6 +34,7 @@ from ...core.metrics import (
     increment_contract_terminalization_blocked,
     increment_disconnect_reason,
 )
+
 from ...db.models.audit_log import AuditEventType, AuditSeverity
 from ...db.repositories import CommandContractRepository, ESPRepository
 from ...db.repositories.actuator_repo import ActuatorRepository

@@ -902,6 +902,7 @@ class ConfigPayloadBuilder:
             return None
 
         actuator_gpio: Optional[int] = None
+        action_duration_seconds: int = 0
         time_window_target_state: Optional[bool] = None
         for action in actions:
             if not isinstance(action, dict):
@@ -918,6 +919,15 @@ class ConfigPayloadBuilder:
                 actuator_gpio = int(raw_gpio)
             except (ValueError, TypeError):
                 continue
+            raw_duration = (
+                action.get("duration_seconds")
+                if "duration_seconds" in action
+                else action.get("duration", 0)
+            )
+            try:
+                action_duration_seconds = max(0, int(raw_duration or 0))
+            except (TypeError, ValueError):
+                action_duration_seconds = 0
 
             command = str(action.get("command", "")).strip().upper()
             if command == "ON":
@@ -1285,6 +1295,10 @@ class ConfigPayloadBuilder:
             "activate_above": float(activate_above) if activate_above is not None else 0.0,
             "deactivate_below": float(deactivate_below) if deactivate_below is not None else 0.0,
             "current_state_active": current_state_active,
+            # Carry per-action runtime cap into offline rules so firmware can
+            # enforce "ON for N seconds" even when server-side command dispatch
+            # is unavailable (MQTT disconnect / OFFLINE_ACTIVE).
+            "max_on_seconds": action_duration_seconds,
         }
         if time_filter is not None:
             offline_rule["time_filter"] = time_filter

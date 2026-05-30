@@ -1,0 +1,10 @@
+services:
+  el-frontend:
+    volumes:
+      - "C:/Users/robin/Documents/PlatformIO/Projects/Auto-one/.claude/worktrees/flamboyant-leavitt-116c64/El Frontend/src:/app/src:ro"
+      - "C:/Users/robin/Documents/PlatformIO/Projects/Auto-one/.claude/worktrees/flamboyant-leavitt-116c64/El Frontend/public:/app/public:ro"
+      - "C:/Users/robin/Documents/PlatformIO/Projects/Auto-one/.claude/worktrees/flamboyant-leavitt-116c64/El Frontend/index.html:/app/index.html:ro"
+      - "C:/Users/robin/Documents/PlatformIO/Projects/Auto-one/.claude/worktrees/flamboyant-leavitt-116c64/El Frontend/vite.config.ts:/app/vite.config.ts:ro"
+      - "C:/Users/robin/Documents/PlatformIO/Projects/Auto-one/.claude/worktrees/flamboyant-leavitt-116c64/El Frontend/tsconfig.json:/app/tsconfig.json:ro"
+      - "C:/Users/robin/Documents/PlatformIO/Projects/Auto-one/.claude/worktrees/flamboyant-leavitt-116c64/El Frontend/tailwind.config.js:/app/tailwind.config.js:ro"
+      - "C:/Users/robin/Documents/PlatformIO/Projects/Auto-one/.claude/worktrees/flamboyant-leavitt-116c64/El Frontend/postcss.config.js:/app/postcss.config.js:ro"

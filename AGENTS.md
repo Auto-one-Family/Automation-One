@@ -127,7 +127,8 @@ Nach JEDER Code-Aenderung die passenden Checks ausfuehren:
 
 | Bereich | Befehl | Erfolgskriterium |
 |---------|--------|-----------------|
-| ESP32 Firmware | `cd "/home/robin/autoone/El Trabajante" && .venv-pio/bin/pio run -e esp32_dev` | Exit-Code 0, keine Errors |
+| ESP32 Firmware (WROOM) | `cd "El Trabajante" && pio run -e esp32_dev` (Windows/CI) oder `cd "/home/robin/autoone/El Trabajante" && .venv-pio/bin/pio run -e esp32_dev` (Pi/Linux) | Exit-Code 0, keine Errors |
+| ESP32 Firmware (S3 N8R8) | `cd "El Trabajante" && pio run -e esp32-s3-devkitc-1` | Exit-Code 0; bei S3-Changes zusaetzlich `seeed_xiao_esp32c3` + `wokwi_simulation` |
 | Server Backend | `cd "/workspace/El Servador/god_kaiser_server" && poetry run pytest tests/ --timeout=120 --tb=short -q` | Alle Tests gruen |
 | Server Lint | `cd "/workspace/El Servador/god_kaiser_server" && poetry run ruff check src/` | Keine Errors |
 | Frontend Build | `cd "/workspace/El Frontend" && npx vite build` | Exit-Code 0, keine TS-Errors |
@@ -209,6 +210,7 @@ Tiefe technische Referenzen unter `.claude/reference/`:
 | `.claude/reference/testing/TEST_WORKFLOW.md` | Test-Strategie |
 | `.claude/reference/security/PRODUCTION_CHECKLIST.md` | Security-Hardening |
 | `.claude/reference/TM_WORKFLOW.md` | Technical-Manager Workflow |
+| `.claude/rules/slack-linear-konvention.md` | Vier-Systeme-Modell, Slack-Channel-IDs, NEED-Format, Risiko-Stufen |
 
 ---
 

@@ -1,7 +1,8 @@
 # Log-System - AutomationOne
 
-> **Version:** 4.17 | **Aktualisiert:** 2026-05-25
-> **Änderungen 4.17:** §5.0 Pi/Linux: kanonischer PIO-Pfad `El Trabajante/.venv-pio/bin/pio`, Monitor nach `logs/device-monitor-*.log`, Upload-Port `/dev/ttyUSB0`.
+> **Version:** 4.17 | **Aktualisiert:** 2026-05-29
+> **Änderungen 4.17 (HEAD):** Merge-Konflikt §2.3a bereinigt; `event_class`-Werte an Code angeglichen (`RULE_ARBITRATION`, `QUEUE_PRESSURE`); `failure_class`-Hinweis beibehalten.
+> **Änderungen 4.17 (AUT-539):** §5.0 Pi/Linux: kanonischer PIO-Pfad `El Trabajante/.venv-pio/bin/pio`, Monitor nach `logs/device-monitor-*.log`, Upload-Port `/dev/ttyUSB0`.
 > **Änderungen 4.16:** Pi-5 Ist-Check ergänzt: Hardware-Serial-Container kann `Exited` sein; in diesem Fall ESP-Liveness über MQTT-Heartbeats + DB `esp_devices.last_seen` verifizieren, nicht nur über `automationone-esp32-serial` Logs.
 > **Änderungen 4.15:** OUTBOX-Trace Tags in ESP32-Serial erweitert (siehe §5.9, Changelog unten)
 > **Änderungen 4.14:** Docker-Dev Ground Truth: Zwei Handler (`setup_logging`) — Datei (`logs/server/god_kaiser.log`) JSON, Docker-stdout lesbarer Text; Host-Datei und `docker logs` sind nicht byte-identisch.
@@ -314,7 +315,6 @@ logs/server/              # Host-Verzeichnis (Docker Bind-Mount)
 }
 ```
 
-<<<<<<< Updated upstream
 ### 2.3a Strukturierte `event_class`-Labels (Welle 1 Observability, 2026-04-20)
 
 Ab PKG-02 / PKG-06 (`INC-2026-04-20-offline-mode-observability-hardening`) verwenden
@@ -323,19 +323,19 @@ können damit "erwartete" Betriebszustände von echten Fehlern trennen.
 
 | `event_class` | Quelle | Semantik | Erwartet? |
 |---------------|--------|----------|-----------|
-| `rule_arbitration` | `services/logic/safety/conflict_manager.py` (PKG-02) | Deterministisches `first_wins` (policy-Feld). Felder: `result` (`blocked`/`applied`), `policy`, `actuator_key`, `winner_rule_id`, `winner_priority`, `loser_rule_id`, `loser_priority`. | ja |
+| `RULE_ARBITRATION` | `services/logic/safety/conflict_manager.py` (PKG-02) | Deterministisches `first_wins` (policy-Feld). Felder: `result` (`blocked`/`applied`), `policy`, `actuator_key`, `winner_rule_id`, `winner_priority`, `loser_rule_id`, `loser_priority`. | ja |
 | `CONFIG_GUARD` | `mqtt/handlers/config_handler.py:168` (PKG-06) | Idempotenz-Schutz: stale `config_response` per Terminal-Authority verworfen. Felder: `action=skip_stale_response`, `reason=terminal_authority`, `status=expected`, `esp_id`, `config_type`, `authority_key`. | ja |
+| `QUEUE_PRESSURE` | `mqtt/handlers/queue_pressure_handler.py` | ESP meldet Queue-Druck (entered/recovered). | ja |
 
 **Filter-Beispiele (Loki LogQL):**
 ```
-{compose_service="god-kaiser-server"} | json | event_class="rule_arbitration"
+{compose_service="god-kaiser-server"} | json | event_class="RULE_ARBITRATION"
 {compose_service="god-kaiser-server"} | json | event_class="CONFIG_GUARD" | status="expected"
 ```
 
-Weitere `event_class`-Werte folgen in Welle 2+ (z. B. `queue_pressure`).
-=======
+Weitere `event_class`-Werte folgen in Welle 2+ (z. B. `command_transport_fail`, `EMERGENCY_ACK`).
+
 **failure_class:** Nur bei gesetztem `extra=` am Logger (Pilot: kleines String-Set, z. B. `mqtt_json_parse`, `mqtt_route`, `sensor_payload_validation`). **Docker-Console:** gleiches Feld als Text-Suffix `failure_class=…` am Zeilenende (kein JSON in stdout).
->>>>>>> Stashed changes
 
 ### 2.4 Zugriffs-Commands
 

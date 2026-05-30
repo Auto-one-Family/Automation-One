@@ -16,6 +16,24 @@ from sqlalchemy.exc import OperationalError, InterfaceError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
+# asyncpg raises its own exception hierarchy that does NOT inherit from SQLAlchemy's
+# OperationalError / InterfaceError in all code paths (S4 fix).
+# Collect them into a single tuple so every except-clause stays consistent.
+try:
+    import asyncpg.exceptions as _asyncpg_exc
+
+    _DB_CONNECTION_ERRORS: tuple = (
+        OperationalError,
+        InterfaceError,
+        _asyncpg_exc.CannotConnectNowError,
+        _asyncpg_exc.ConnectionDoesNotExistError,
+        _asyncpg_exc.ConnectionFailureError,
+    )
+except ImportError:
+    _DB_CONNECTION_ERRORS = (OperationalError, InterfaceError)
+
+_DB_INIT_ERRORS: tuple = _DB_CONNECTION_ERRORS + (OSError,)
+
 from ..core.config import get_settings
 from ..core.logging_config import get_logger
 from ..core.resilience import (
@@ -226,7 +244,7 @@ async def init_db(max_retries: int = 5, retry_delay: float = 2.0) -> None:
 
             logger.info("Database initialization complete")
             return
-        except (*_DB_CONNECTION_ERRORS, OSError) as e:
+        except _DB_INIT_ERRORS as e:
             if attempt < max_retries:
                 wait = retry_delay * (2 ** (attempt - 1))
                 logger.warning(

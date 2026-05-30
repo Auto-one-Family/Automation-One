@@ -16,7 +16,9 @@ Dynamic sensor configuration via MQTT allows God-Kaiser to add, modify, or remov
 - `src/services/config/config_response.h` (lines 1-31) - Response builder interface
 - `src/utils/json_helpers.h` (lines 9-82) - JSON field extraction helpers
 - `src/utils/topic_builder.cpp` (lines 124-138) - Topic generation
-- `src/models/sensor_types.h` (lines 1-46) - SensorConfig and SensorReading structures
+- `src/models/sensor_types.h` (lines 1-86) - SensorConfig and SensorReading structures (incl. UART fields)
+- `src/models/sensor_registry.cpp` - SensorCapability registry (`is_uart`, `co2`, `mhz19_co2`)
+- `src/drivers/mhz19_uart.cpp/.h` - MH-Z19/SEN0220 UART driver (`Serial2`, RAW PPM)
 - `src/models/config_types.h` (lines 1-74) - ConfigResponsePayload, ConfigType, ConfigStatus
 - `src/models/error_codes.h` (lines 130-191) - ConfigErrorCode enum and string conversion
 
@@ -61,6 +63,18 @@ MQTT message received on configuration topic: `kaiser/{kaiser_id}/esp/{esp_id}/c
       "subzone_id": "irrigation",
       "active": true,
       "raw_mode": true
+    },
+    {
+      "gpio": 18,
+      "sensor_type": "co2",
+      "sensor_name": "Greenhouse CO2",
+      "subzone_id": "section_A",
+      "active": true,
+      "raw_mode": true,
+      "interface_type": "UART",
+      "uart_rx_pin": 18,
+      "uart_tx_pin": 17,
+      "uart_baud": 9600
     }
   ],
   "actuators": []
@@ -329,6 +343,79 @@ bool extractBool(const JsonObjectConst& obj, const char* key, bool& out, bool de
 | `subzone_id` | String | "" | Empty string if not provided |
 | `active` | Boolean | true | Used for removal if false |
 | `raw_mode` | Boolean | true | Server-centric mode (always true in practice) |
+| `onewire_address` | String | "" | 16 hex chars for DS18B20 (OneWire bus) |
+| `i2c_address` | Number | 0 | 7-bit I2C address (e.g. 0x44 for SHT31) |
+| `interface_type` | String | "" | Bus hint from server (e.g. `"UART"` for CO2) |
+| `uart_rx_pin` | Number | 255 | ESP RX ← sensor TX (255 = unset) |
+| `uart_tx_pin` | Number | 255 | ESP TX → sensor RX (255 = unset) |
+| `uart_baud` | Number | 9600 | UART baud rate (9600–115200 for CO2) |
+| `operating_mode` | String | `"continuous"` | `continuous`, `on_demand`, `paused`, `scheduled` |
+| `measurement_interval_seconds` | Number | 30 | 1–300 seconds |
+
+---
+
+### STEP 3.1: Interface-Specific Fields (UART CO2)
+
+**Files:** `src/main.cpp` (`parseAndConfigureSensorWithTracking`), `src/models/sensor_registry.cpp`, `src/services/config/config_manager.cpp` (`validateSensorConfig`)
+
+**Registry types:** `co2`, `mhz19_co2` → `SensorCapability.is_uart = true`, server type `co2`.
+
+**Parsing (optional MQTT fields):**
+
+```cpp
+JsonHelpers::extractString(sensor_obj, "interface_type", config.interface_type, "");
+
+int uart_rx = 255;
+int uart_tx = 255;
+int uart_baud = 9600;
+JsonHelpers::extractInt(sensor_obj, "uart_rx_pin", uart_rx, 255);
+JsonHelpers::extractInt(sensor_obj, "uart_tx_pin", uart_tx, 255);
+JsonHelpers::extractInt(sensor_obj, "uart_baud", uart_baud, 9600);
+config.uart_rx_pin = static_cast<uint8_t>(uart_rx);
+config.uart_tx_pin = static_cast<uint8_t>(uart_tx);
+config.uart_baud = static_cast<uint32_t>(uart_baud);
+```
+
+**UART CO2 detection** (any of):
+
+1. `findSensorCapability(sensor_type)->is_uart == true`
+2. `interface_type` equals `"UART"` (case-insensitive)
+3. Both `uart_rx_pin` and `uart_tx_pin` set (not 255, not 0)
+
+**Validation rules (`validateSensorConfig`):**
+
+| Rule | Failure |
+|------|---------|
+| `uart_rx_pin` / `uart_tx_pin` required | != 255 and != 0 |
+| `uart_baud` in range | 9600–115200 |
+| UART pins not board-reserved | `GPIOManager::isPinReserved()` |
+| `gpio` | Logical sensor slot / MQTT topic index — **not ADC** for UART CO2 |
+
+**Pin semantics (AUT-527 / ESP32-S3):**
+
+| Field | Example | Role |
+|-------|---------|------|
+| `gpio` | 18 | Logical slot → topic `.../sensor/18/data` |
+| `uart_rx_pin` | 18 | ESP RX ← MH-Z19 TX |
+| `uart_tx_pin` | 17 | ESP TX → MH-Z19 RX |
+| `uart_baud` | 9600 | MH-Z19 default 9600 8N1 |
+
+**Reference payload:**
+
+```json
+{
+  "gpio": 18,
+  "sensor_type": "co2",
+  "sensor_name": "Greenhouse CO2",
+  "subzone_id": "section_A",
+  "active": true,
+  "raw_mode": true,
+  "interface_type": "UART",
+  "uart_rx_pin": 18,
+  "uart_tx_pin": 17,
+  "uart_baud": 9600
+}
+```
 
 ---
 
@@ -432,6 +519,24 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
 5. Add to sensor registry
 6. Persist to NVS
 
+**UART CO2 branch** (`sensor_manager.cpp`, when `is_uart` / `interface_type=UART`):
+
+1. Validate `uart_rx_pin` + `uart_tx_pin` (`hasValidUartPinConfig` — pins != 255 and != 0)
+2. Reserve **both** UART pins via `GPIOManager::requestPin()` (plus logical `gpio` if distinct)
+3. Initialize `Mhz19UartReader` → `Serial2.begin(baud, SERIAL_8N1, rx, tx)`
+4. Store config; set `uart_configured_at_ms = millis()` (warmup gate, not NVS)
+5. Persist to NVS (incl. `sen_%d_if`, `sen_%d_urx`, `sen_%d_utx`, `sen_%d_ubd`)
+
+**UART CO2 removal:** `removeSensor()` releases RX/TX pins, calls `mhz19UartReader.end()`.
+
+**UART CO2 measurement** (after config — see [Sensor Reading Flow](02-sensor-reading-flow.md)):
+
+- Warmup: 180s after configure → `valid=false`, `quality=warming_up`
+- After warmup: `readRawPpm()` → `raw_value` = PPM, `raw_mode=true`
+- **No** `readRawAnalog()` — avoids ADC2+WiFi false zero on wrong GPIO
+
+**Error codes:** `ERROR_UART_INIT_FAILED` (1033), `ERROR_UART_READ_TIMEOUT` (1034), `ERROR_UART_CHECKSUM_FAILED` (1035), `ERROR_UART_INVALID_PPM` (1036)
+
 ---
 
 ### STEP 5: Validate Sensor Configuration
@@ -468,6 +573,8 @@ bool ConfigManager::validateSensorConfig(const SensorConfig& config) const {
 1. GPIO must not be 255 (invalid marker)
 2. GPIO must be 0-39 (ESP32 valid range)
 3. Sensor type must not be empty
+4. **UART CO2:** `uart_rx_pin` / `uart_tx_pin` required (not 255, not 0); `uart_baud` 9600–115200; UART pins not reserved
+5. **I2C:** GPIO validation skipped (shared bus); see `sensor_manager.cpp` I2C branch
 
 ---
 
@@ -567,6 +674,15 @@ static void buildSensorKey(char* buffer, size_t buffer_size, uint8_t index, cons
 - `sensor_{i}_active` (bool) - Active flag
 - `sensor_{i}_raw_mode` (bool) - Raw mode flag
 
+**UART CO2 keys (implementation in `config_manager.cpp`, prefix `sen_%d_*`):**
+
+- `sen_%d_if` (String) - Interface type (e.g. `"UART"`)
+- `sen_%d_urx` (uint8_t) - UART RX pin
+- `sen_%d_utx` (uint8_t) - UART TX pin
+- `sen_%d_ubd` (uint32_t) - UART baud rate
+
+See `docs/NVS_KEYS.md` for full sensor NVS schema.
+
 **Example NVS Layout:**
 
 ```
@@ -584,6 +700,12 @@ Namespace: sensor_config
   sensor_1_subzone = "irrigation"
   sensor_1_active = true
   sensor_1_raw_mode = true
+  sen_2_gpio = 18
+  sen_2_type = "co2"
+  sen_2_if = "UART"
+  sen_2_urx = 18
+  sen_2_utx = 17
+  sen_2_ubd = 9600
 ```
 
 ---
@@ -906,8 +1028,11 @@ MQTT Config Message (kaiser/{kaiser_id}/esp/{esp_id}/config)
   │     │     ├─► JsonHelpers::extractString() for sensor_type
   │     │     └─► JsonHelpers::extractString() for sensor_name
   │     │
-  │     ├─► Extract optional fields (subzone_id, active, raw_mode)
-  │     │     └─► JsonHelpers::extractString/Bool() with defaults
+  │     ├─► Extract optional fields (subzone_id, active, raw_mode, onewire, i2c, uart)
+  │     │     └─► JsonHelpers::extractString/Bool/Int() with defaults
+  │     │
+  │     ├─► STEP 3.1: UART CO2 fields (if co2/mhz19_co2 or interface_type=UART)
+  │     │     └─► Validate uart_rx_pin, uart_tx_pin, uart_baud
   │     │
   │     ├─► STEP 5: Validate Configuration (config_manager.cpp:603-623)
   │     │     ├─► GPIO != 255
@@ -930,7 +1055,9 @@ MQTT Config Message (kaiser/{kaiser_id}/esp/{esp_id}/config)
   │           ├─► STEP 4: Configure in SensorManager
   │           │     ├─► Check if exists (reconfiguration)
   │           │     ├─► Check MAX_SENSORS limit
-  │           │     ├─► Check GPIO availability
+  │           │     ├─► I2C branch OR UART CO2 branch OR OneWire/ADC branch
+  │           │     │     └─► UART: reserve rx+tx, Mhz19UartReader.begin(), warmup timestamp
+  │           │     ├─► Check GPIO availability (non-I2C)
   │           │     ├─► Reserve GPIO via GPIOManager
   │           │     └─► Add/update in sensor registry
   │           │
@@ -1058,6 +1185,7 @@ MQTT Config Message (kaiser/{kaiser_id}/esp/{esp_id}/config)
 - GPIO = 255 (invalid marker)
 - GPIO > 39 (out of range)
 - sensor_type empty string
+- **UART CO2:** missing/invalid `uart_rx_pin` or `uart_tx_pin` (255 or 0); `uart_baud` out of range; reserved UART pins
 
 **Detection:** `ConfigManager::validateSensorConfig()` returns false
 
@@ -1207,6 +1335,29 @@ mosquitto_pub -h 192.168.0.198 -p 8883 \
   }'
 ```
 
+**Publish UART CO2 configuration (ESP32-S3 example):**
+```bash
+mosquitto_pub -h 192.168.0.198 -p 1883 \
+  -t "kaiser/god/esp/ESP_AEAE64/config" \
+  -m '{
+    "sensors": [
+      {
+        "gpio": 18,
+        "sensor_type": "co2",
+        "sensor_name": "CO2 Sensor",
+        "subzone_id": "greenhouse",
+        "active": true,
+        "raw_mode": true,
+        "interface_type": "UART",
+        "uart_rx_pin": 18,
+        "uart_tx_pin": 17,
+        "uart_baud": 9600
+      }
+    ],
+    "actuators": []
+  }'
+```
+
 ### Serial Monitor Output
 
 **Successful Configuration:**
@@ -1222,6 +1373,16 @@ mosquitto_pub -h 192.168.0.198 -p 8883 \
 [INFO] ConfigManager: Saved sensor config for GPIO 4
 [INFO] Sensor configured: GPIO 4 (ph_sensor)
 [INFO] ConfigResponse published [sensor] status=success
+```
+
+**Successful UART CO2 Configuration:**
+```
+[INFO] Handling sensor configuration from MQTT
+[INFO] ConfigManager: UART sensor 'co2' rx=18 tx=17 baud=9600
+[INFO] Sensor Manager: Configured UART CO2 'co2' Serial2 rx=18 tx=17 baud=9600 (logical GPIO 18)
+[INFO]   ✅ Configuration persisted to NVS
+[INFO] ConfigResponse published [sensor] status=success
+[DEBUG] SensorManager: CO2 warmup (178s remaining)
 ```
 
 **Error Example:**
@@ -1276,6 +1437,8 @@ Namespace: sensor_config
 - `requestPin(gpio, "sensor", name)` - Reserve GPIO
 - `releasePin(gpio)` - Release GPIO on removal
 
+**UART CO2:** Reserves `uart_rx_pin` and `uart_tx_pin` (and logical `gpio` when distinct). Removal releases all three and ends `Serial2`.
+
 **Conflict Prevention:**
 - Prevents multiple sensors on same GPIO
 - Prevents sensor/actuator GPIO conflicts
@@ -1303,6 +1466,10 @@ Namespace: sensor_config
 - `ERROR_SENSOR_INIT_FAILED` - Sensor configuration failure
 - `ERROR_GPIO_CONFLICT` - GPIO already in use
 - `ERROR_GPIO_RESERVED` - GPIO reservation failed
+- `ERROR_UART_INIT_FAILED` (1033) - UART CO2 init / missing pins
+- `ERROR_UART_READ_TIMEOUT` (1034) - MH-Z19 read timeout
+- `ERROR_UART_CHECKSUM_FAILED` (1035) - Invalid UART frame
+- `ERROR_UART_INVALID_PPM` (1036) - PPM out of range
 
 **Severity:** ERROR level
 

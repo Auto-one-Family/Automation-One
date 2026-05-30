@@ -17,12 +17,26 @@
 
 // Memory guard (ESP32 without PSRAM):
 // 15 slots consumed ~33 KB heap and repeatedly prevented CommTask creation on real devices.
-// 10 slots (AUT-481 P3): +2 headroom for 4-msg actuator toggle bursts without hitting shed watermark.
+// Base sizing (AUT-481 P3): 10 slots via publish_queue_constants.h (+2 headroom for 4-msg actuator
+// toggle bursts without hitting shed watermark). S3 N8R8 overrides below for larger PSRAM budget.
 // (AUT-344: older docs may still say 15 — single queue `g_publish_queue`, depth is PUBLISH_QUEUE_SIZE.)
+//
+// S3 N8R8 (ESP32_S3_DEVKIT_MODE) override: 16 slots × ~2180 B ≈ 35 KB DRAM (~9% free heap after init).
+// Dev/WROOM uses publish_queue_constants.h defaults (SIZE=10, SHED=5).
+#ifdef ESP32_S3_DEVKIT_MODE
+// S3 N8R8: larger PSRAM budget allows 16 slots and 2048 B payloads (AUT-495).
+static const uint8_t  PUBLISH_QUEUE_SIZE           = 16;
+static const uint16_t PUBLISH_PAYLOAD_MAX_LEN      = 2048;
+static const uint8_t  PUBLISH_QUEUE_SHED_WATERMARK = 8;   // 50% of 16 slots
+#else
+// Dev/WROOM: publish_queue_constants.h defines SIZE=10 / SHED=5 (AUT-481 P3).
+// Re-declared here for S3 vs non-S3 symmetry; values must match publish_queue_constants.h.
+static const uint16_t PUBLISH_PAYLOAD_MAX_LEN = 1536;
+// PUBLISH_QUEUE_SIZE and PUBLISH_QUEUE_SHED_WATERMARK come from publish_queue_constants.h
+#endif
 static const uint16_t PUBLISH_TOPIC_MAX_LEN   = 128;
 // AUT-134: Heartbeat payload can exceed 1KB during reconnect/config bursts.
-// 1536 B provides headroom without materially impacting heap safety.
-static const uint16_t PUBLISH_PAYLOAD_MAX_LEN = 1536;
+// 1536 B (Dev) / 2048 B (S3) provides headroom without materially impacting heap safety.
 
 // AUT-55: When queue fill >= watermark, non-critical messages are proactively shed
 // to preserve slots for critical publishes (alerts, responses, intent_outcome).
@@ -80,7 +94,8 @@ PublishQueueEnqueueResult tryQueuePublish(const char* topic,
                                           uint8_t qos,
                                           bool retain = false,
                                           bool critical = false,
-                                          const IntentMetadata* metadata = nullptr);
+                                          const IntentMetadata* metadata = nullptr,
+                                          unsigned long defer_ms = 0);
 
 inline bool queuePublish(const char* topic,
                          const char* payload,

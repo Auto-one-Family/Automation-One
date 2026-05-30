@@ -2,11 +2,11 @@
 name: esp32-development
 description: |
   ESP32 El Trabajante Firmware-Entwicklung für AutomationOne IoT-Framework.
-  Verwenden bei: C++, PlatformIO, Sensor hinzufügen, Actuator erstellen,
+  Verwenden bei: C++, PlatformIO, ESP32-S3 DevKitC-1 N8R8, Sensor hinzufügen, Actuator erstellen,
   Driver implementieren, Service erweitern, NVS-Key hinzufügen, MQTT erweitern,
   Error-Code definieren, GPIO-Logik, Config-Struktur, Pattern finden,
   Manager erweitern, Safety-Controller, HealthMonitor, ErrorTracker,
-  I2C-Protokoll, OneWire-Bus, PWM-Controller, Wokwi-Simulation.
+  I2C-Protokoll, OneWire-Bus, UART CO2 (MH-Z19/SEN0220), PWM-Controller, Wokwi-Simulation.
   NICHT verwenden für: Server-seitige Logic, Python-Code, Log-Analyse.
   Abgrenzung: esp32-debug für Log-Analyse, server-dev für Server-Code.
 allowed-tools: Read, Grep, Glob, Bash, Write, Edit
@@ -25,11 +25,11 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 | Aspekt | Ist im Repo |
 |--------|-------------|
 | **Platform / Framework** | `platform = espressif32`, `framework = arduino` (alle ESP-Umgebungen) |
-| **Boards** | `esp32dev` (`env:esp32_dev`), `seeed_xiao_esp32c3` (`env:seeed_xiao_esp32c3`); Wokwi erbt von `esp32_dev` |
+| **Boards** | `esp32dev` (`env:esp32_dev`), `esp32-s3-devkitc-1` N8R8 (`env:esp32-s3-devkitc-1`, Alias `esp32_s3_dev`), `seeed_xiao_esp32c3` (`env:seeed_xiao_esp32c3`); Wokwi erbt von `esp32_dev` |
 | **MQTT-Backend** | Standard: ESP-IDF `esp_mqtt_client` über SDK-Header `<mqtt_client.h>` in `services/communication/mqtt_client.h`. **`MQTT_USE_PUBSUBCLIENT=1`:** `seeed_xiao_esp32c3`, `wokwi_simulation` / `wokwi_esp01|02|03` (PubSubClient in `lib_deps`) |
 | **Zentrale `lib_deps` (esp32_dev)** | u. a. `ArduinoJson`, `NTPClient`, `OneWire`, `DallasTemperature`, `WebServer`, `DNSServer`, Adafruit BME280, `Unity`; **kein** PubSubClient |
 | **Native Tests** | `env:native` + Unity; aktive Tests u. a. unter `test/test_infra/`, `test/test_managers/` (siehe `test_ignore` in `platformio.ini`) |
-| **Feature-Makros** | u. a. `ESP32_DEV_MODE` / `XIAO_ESP32C3_MODE`, `MAX_SENSORS`, `MAX_ACTUATORS`, `MQTT_MAX_PACKET_SIZE`, `KAISER_FIRMWARE_VERSION_STRING` |
+| **Feature-Makros** | u. a. `ESP32_DEV_MODE` / `ESP32_S3_DEVKIT_MODE` / `XIAO_ESP32C3_MODE`, `MAX_SENSORS`, `MAX_ACTUATORS`, `MQTT_MAX_PACKET_SIZE`, `KAISER_FIRMWARE_VERSION_STRING` |
 
 **Header-Konflikt vermeiden:** In `mqtt_client.h` dokumentiert: SDK `<mqtt_client.h>` vs. lokaler Dateiname — Winkelklammern für ESP-IDF-API, nicht mit lokalem Header verwechseln.
 
@@ -47,8 +47,8 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 | Subscribe-/Publish-QoS in der Firmware | `El Trabajante/src/main.cpp` (z. B. `mqttClient.subscribe(..., qos)`), `mqtt_client.cpp` — kann von der Markdown-Tabelle in `MQTT_TOPICS.md` abweichen; **immer Code prüfen** |
 | Sensor-/Aktor-Rohdaten | `raw_mode: true` (Skill + `.cursor/rules/firmware.mdc`); Verarbeitung auf dem Server |
 | Error-Codes | `El Trabajante/src/models/error_codes.h`, `.claude/reference/errors/ERROR_CODES.md` |
-| Pins / ADC2 vs. WiFi | `El Trabajante/src/config/hardware/esp32_dev.h`, `xiao_esp32c3.h` (u. a. `RESERVED_GPIO_PINS`, `ADC2_GPIO_PINS`, Kommentar ADC2+WiFi) |
-| Publish-Queue Größe / Pacing (AUT-481 P3) | `El Trabajante/src/tasks/publish_queue_constants.h` (SIZE=10, SHED=5), `publish_queue_policy.h` (adaptive Drain, status-defer), `mqtt_client.cpp` (`processPublishQueue`) |
+| Pins / ADC2 vs. WiFi | `El Trabajante/src/config/hardware/esp32_dev.h`, `esp32_s3_devkit.h` (N8R8: Octal Flash+PSRAM GPIO 26–37), `xiao_esp32c3.h` (u. a. `RESERVED_GPIO_PINS`, `ADC2_GPIO_PINS`, Kommentar ADC2+WiFi) |
+| Publish-Queue Größe / Pacing (AUT-481 P3) | `El Trabajante/src/tasks/publish_queue_constants.h` (SIZE=10, SHED=5), `publish_queue_policy.h` (adaptive Drain, status-defer), `publish_queue.h` (S3-Override: 16×2048 B, Shed=8), `mqtt_client.cpp` (`processPublishQueue`) |
 
 **Hinweis QoS:** `.cursor/rules/firmware.mdc` nennt für Aktor-Befehle QoS 2; `MQTT_TOPICS.md` listet Server→ESP teils als QoS 2; die Firmware subscribed in `main.cpp` u. a. mit **QoS 1**. Keine Annahme treffen — drei Stellen oder gezielter `Grep` nach `subscribe(` / `publish(`.
 
@@ -71,6 +71,7 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 | **Watchdog-NVS / 24h** | MODULE_REGISTRY.md §6.1 | `utils/watchdog_storage.h` |
 | **Firmware-Version (Build)** | `platformio.ini` + `config/firmware_version.h` | `KAISER_FIRMWARE_VERSION_STRING` |
 | **Wokwi ts=0 / NTP** | [Wokwi-Limitierungen](#wokwi-limitierungen-ts0) | Server-Fallback (sensor_handler, heartbeat_handler) |
+| **ESP32-S3 Hardware / Pins / Readflows** | [ESP32-S3 N8R8](#esp32-s3-devkitc-1-n8r8--hardware-referenz-zusaetzlich) | `config/hardware/esp32_s3_devkit.h`, `docs/ESP32-S3-DEVKITC-1-ACCEPTANCE.md` |
 | **MQTT-Backend (M2)** | [MQTT-Patterns](#mqtt-patterns) | Standard = ESP-IDF; `MQTT_USE_PUBSUBCLIENT=1` nur seeed/wokwi — `platformio.ini`, `sdkconfig.defaults`, `mqtt_client.h` |
 | **Comm-Task / Publish-Queue (M3)** | [Init-Reihenfolge](#initialisierungs-reihenfolge-maincpp) | `tasks/communication_task.*`, `tasks/publish_queue.*`, `MQTTClient::processPublishQueue()` |
 
@@ -81,7 +82,7 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 El Trabajante/
 ├── src/
 │   ├── main.cpp              ← Hauptlogik (~3000 Zeilen)
-│   ├── drivers/              ← GPIO, I2C, OneWire, PWM
+│   ├── drivers/              ← GPIO, I2C, OneWire, UART CO2 (mhz19_uart), PWM
 │   ├── services/
 │   │   ├── sensor/           ← SensorManager, PiEnhancedProcessor
 │   │   ├── actuator/         ← ActuatorManager, SafetyController
@@ -99,7 +100,7 @@ El Trabajante/
 │   ├── error_handling/       ← ErrorTracker, CircuitBreaker, HealthMonitor
 │   ├── utils/                ← Logger, TopicBuilder, watchdog_storage
 │   └── config/               ← Feature Flags, firmware_version.h, Hardware-Configs
-│       └── hardware/         ← esp32_dev.h, xiao_esp32c3.h
+│       └── hardware/         ← esp32_dev.h, esp32_s3_devkit.h, xiao_esp32c3.h
 └── platformio.ini
 ```
 
@@ -113,7 +114,7 @@ El Trabajante/
 | GPIO reservieren | `drivers/gpio_manager.h` |
 | Error tracken | `error_handling/error_tracker.h` |
 | Health/Diagnostics | `error_handling/health_monitor.h` |
-| Board-Config | `config/hardware/esp32_dev.h` |
+| Board-Config | `config/hardware/esp32_dev.h`, `esp32_s3_devkit.h` |
 
 **API-Details:** Siehe `MODULE_REGISTRY.md`
 
@@ -123,7 +124,7 @@ El Trabajante/
 
 **Wichtig:** PlatformIO-Befehle müssen aus `El Trabajante/` ausgeführt werden (dort liegt `platformio.ini`).
 
-- **Umgebungsnamen exakt:** In `platformio.ini` heißen die Envs u. a. `esp32_dev` (ESP32 DevKit / WROOM-32), `seeed_xiao_esp32c3` (Seeed XIAO ESP32-C3), `wokwi_simulation`, `wokwi_esp01` … `wokwi_esp03`, `native`. Der Kurzname `seeed` als `-e`-Ziel existiert **nicht** — siehe `AGENTS.md` Verifikationstabelle.
+- **Umgebungsnamen exakt:** In `platformio.ini` heißen die Envs u. a. `esp32_dev` (ESP32 DevKit / WROOM-32), `esp32-s3-devkitc-1` (S3 N8R8, Alias `esp32_s3_dev`), `seeed_xiao_esp32c3` (Seeed XIAO ESP32-C3), `wokwi_simulation`, `wokwi_esp01` … `wokwi_esp03`, `native`. Der Kurzname `seeed` als `-e`-Ziel existiert **nicht** — siehe `.claude/CLAUDE.md` / `AGENTS.md` Verifikationstabelle.
 - **Linux / Pi (Repo-Host, kanonisch):** `pio` nicht im PATH → **`El Trabajante/.venv-pio/bin/pio`** (absolut: `/home/robin/autoone/El Trabajante/.venv-pio/bin/pio`). USB typisch **`/dev/ttyUSB0`**. Vor Flash: `docker stop automationone-esp32-serial` falls der Serial-Logger den Port hält.
 - **Git Bash (Windows):** `pio` oft nicht im PATH → `~/.platformio/penv/Scripts/pio.exe`.
 - **PowerShell:** `&&` in PS 5.x unzuverlässig → Befehle mit `;` trennen oder Zeilenweise.
@@ -152,6 +153,9 @@ cd "El Trabajante"
 ~/.platformio/penv/Scripts/pio.exe run -e esp32_dev
 ~/.platformio/penv/Scripts/pio.exe run -e esp32_dev -t upload
 timeout 30 ~/.platformio/penv/Scripts/pio.exe device monitor -e esp32_dev
+~/.platformio/penv/Scripts/pio.exe run -e esp32-s3-devkitc-1
+~/.platformio/penv/Scripts/pio.exe run -e esp32-s3-devkitc-1 -t upload --upload-port COM8
+~/.platformio/penv/Scripts/pio.exe device monitor -e esp32-s3-devkitc-1 --port COM8
 ~/.platformio/penv/Scripts/pio.exe run -e seeed_xiao_esp32c3
 ~/.platformio/penv/Scripts/pio.exe run -e wokwi_esp01
 ~/.platformio/penv/Scripts/pio.exe run -e wokwi_esp02
@@ -177,6 +181,133 @@ cd "El Trabajante"
 | **PWM nur Serial** | Keine echte Hardware-Ausgabe | Logging statt GPIO |
 
 **Wichtig:** Firmware NICHT anpassen fuer ts=0 — der Server behandelt das in `sensor_handler.py` und `heartbeat_handler.py`. Echte ESPs mit NTP senden `ts > 0` und nutzen den normalen Pfad.
+
+---
+
+## ESP32-S3-DevKitC-1 N8R8 — Hardware-Referenz (zusaetzlich)
+
+> **Scope:** Nur `env:esp32-s3-devkitc-1` (`ESP32_S3_DEVKIT_MODE`). ESP32-dev/WROOM-Abschnitte in diesem Skill bleiben unveraendert.
+> **Kanonisch:** `El Trabajante/src/config/hardware/esp32_s3_devkit.h`, `El Trabajante/docs/ESP32-S3-DEVKITC-1-ACCEPTANCE.md`, `MODULE_REGISTRY.md` (Publish-Queue, NVS).
+> **Parent-Issue:** AUT-528 S5a (AUT-523). GPIO 26–37 in §0.1 bereits via AUT-497 — hier nicht wiederholen.
+
+### Build / Discriminator
+
+| Makro / Konstante | Wert | Quelle |
+|-------------------|------|--------|
+| PlatformIO-Env | `esp32-s3-devkitc-1` (Alias `esp32_s3_dev`) | `platformio.ini` |
+| Compile-Define | `ESP32_S3_DEVKIT_MODE` | `platformio.ini` |
+| `BOARD_TYPE` | `ESP32_S3_DEVKITC1` | `esp32_s3_devkit.h` L13 |
+| Heartbeat / Server | `hardware_type`: `"ESP32_S3_DEVKITC1"` | `HardwareConfig::HEARTBEAT_HARDWARE_TYPE` → `mqtt_client.cpp` (Heartbeat-Payload) |
+
+Server-seitige Pin-Validierung und Frontend-Layouts nutzen denselben String (`ESP32_S3_DEVKITC1`) — siehe AUT-523 S2–S4, nicht hier duplizieren.
+
+### Hardware-Vergleich S3 vs. ESP32-dev (WROOM-32)
+
+| Eigenschaft | ESP32-S3 N8R8 | ESP32-dev (WROOM-32) | Relevanz |
+|-------------|---------------|----------------------|----------|
+| CPU | Xtensa LX7 Dual-Core 240 MHz | Xtensa LX6 Dual-Core 240 MHz | Task-Stack-Groessen wie WROOM OK |
+| SRAM | 512 KB intern | 520 KB intern | ~gleich |
+| PSRAM | 8 MB Octal (SPI GPIO 26–37) | keines | S3: PSRAM moeglich, Pins 26–37 gesperrt |
+| Flash | 8 MB Octal (GPIO 26–37) | 4 MB SPI | S3: `sdkconfig.s3.defaults`, groessere OUTBOX |
+| USB | USB-CDC nativ (kein CH340) | UART-Bridge | Monitor: COM-Port = CDC; `monitor_dtr/rts = 0` in `platformio.ini` |
+| I2C Default | SDA=GPIO8, SCL=GPIO9 | SDA=GPIO21, SCL=GPIO22 | **KRITISCH** — anders als WROOM |
+| OneWire Default | GPIO4 | GPIO4 | identisch |
+| ADC1 | GPIO 1–10 | GPIO 32–39 | **KRITISCH** — pH/EC/soil auf S3 nur 1–10 |
+| ADC2 | GPIO 11–20 | GPIO 0,2,4,12–15,25–27 | Mit WiFi nicht fuer Analog — andere GPIO-Nummern |
+| RESERVED (Board) | GPIO 26–37 (Flash+PSRAM), 38/48 (RGB), 43/44 (UART0), USB 19/20 | Strapping + UART0 0–3 | **GPIO 26–37 NIE belegen** |
+| Strapping (nicht als I/O) | 0 (Boot), 3 (JTAG), 46 (VDD_SPI); Header auch 45 RESERVED | 0, 2, 12, 15 | Vor Sensor/Aktor-Plan pruefen |
+| SAFE Header | 1–18, 21, 39–42, 47 (laut `SAFE_GPIO_PINS`) | `esp32_dev.h` `SAFE_GPIO_PINS` | Sensor/Aktor nur hier |
+
+### Strapping, RESERVED und SAFE (Tabelle)
+
+Quelle: `esp32_s3_devkit.h` — `GPIOManager` lehnt RESERVED ab (`initializeAllPinsToSafeMode` darf 26–37 nicht anfassen, sonst WDT).
+
+| Kategorie | GPIO | Grund |
+|-----------|------|-------|
+| **Strapping — nicht als I/O** | 0, 3, 46 | Boot / JTAG / VDD_SPI |
+| **RESERVED — nie nutzen** | 19, 20 | USB Serial/JTAG (CDC) |
+| **RESERVED — nie nutzen** | 26–37 | Octal Flash + Octal PSRAM |
+| **RESERVED — nie nutzen** | 38, 48 | On-board RGB LED (v1.1 / v1.0) |
+| **RESERVED — nie nutzen** | 43, 44 | UART0 (Boot-Log vor CDC) |
+| **RESERVED — nie nutzen** | 45 | ROM debug / Strapping-Kontext |
+| **SAFE (DevKit-Header)** | 1, 2, 4–18, 21, 39–42, 47 | `SAFE_GPIO_PINS[]` |
+
+### ADC1-only-Regel (pH, EC, soil_moisture)
+
+- **S3:** Nur GPIO **1–10** liefern zuverlaessige ADC1-Werte mit aktivem WiFi.
+- **WROOM:** ADC1 typisch GPIO **32–39** (siehe `esp32_dev.h`, INPUT_ONLY 34–39).
+- **Firmware:** `analogRead(gpio)` → Rohwert 0–4095, `raw_mode: true`; `applyLocalConversion()` fuer `ph`, `ec`, `moisture` = Passthrough (keine lokale Kalibrierung).
+- **Offline-Rules:** `evaluateOfflineRules()` filtert diese Typen via `requiresCalibration()` — physikalische Schwellen nur auf dem Server.
+- **Beispiel-Planung S3:** EC → GPIO7, pH → GPIO6, soil_moisture → GPIO5 (frei waehlbar innerhalb 1–10, nicht 26–37).
+
+**ADC2 (GPIO 11–20 auf S3):** wie WROOM-ADC2-Regel — mit WiFi nicht fuer Produktiv-Analog nutzen (`ADC2_GPIO_PINS` in Header dokumentiert).
+
+### Default-Pin-Map S3 (Board-Header)
+
+| Bus / Funktion | S3 Default | WROOM (Vergleich) | Code |
+|----------------|------------|-------------------|------|
+| I2C SDA / SCL | 8 / 9 | 21 / 22 | `I2C_SDA_PIN`, `I2C_SCL_PIN` in `esp32_s3_devkit.h`; `i2c_bus.cpp` via `#ifdef ESP32_S3_DEVKIT_MODE` |
+| OneWire | GPIO4 | GPIO4 | `DEFAULT_ONEWIRE_PIN`; `onewire_bus.cpp` |
+| Aktoren (Relay/Pump/Valve/PWM) | **kein** fester Default im Header | ebenso | GPIO nur per Server Config-Push auf SAFE-Pins; `ActuatorManager::configureActuator()` + `gpio_manager.requestPin()` |
+
+### UART CO2 — SEN0220 / MH-Z19 (AUT-527)
+
+- S3: `USB_CDC_ON_BOOT=1` → USB-CDC auf GPIO **19/20**; UART0 = **43/44** (RESERVED). CO2 nutzt **`Serial2`** mit config-getriebenen Pins — kein Konflikt mit USB/UART0.
+- Referenz-Deployment **ESP_AEAE64** (`esp32-s3-devkitc-1`): RX=GPIO18, TX=GPIO17, 9600 8N1; logischer Slot `gpio=18` (kein ADC).
+- Driver: `drivers/mhz19_uart.cpp` — MH-Z19 9-Byte-Frame, RAW ppm, ~3 min Warmup (`quality=warming_up`).
+- WROOM: historisch UART **16 RX / 17 TX** moeglich; S3-Pins frei waehlbar innerhalb `SAFE_GPIO_PINS`.
+- Detail: `docs/ESP32-S3-DEVKITC-1-ACCEPTANCE.md` § AUT-527
+
+### Boot-Reihenfolge und Power-Mode
+
+- **Reihenfolge:** Identisch zu [Initialisierungs-Reihenfolge](#initialisierungs-reihenfolge-maincpp) — `GPIOManager.initializeAllPinsToSafeMode()` bleibt Schritt 1.
+- **S3-spezifisch:** USB-CDC-Boot-Zeile in `main.cpp` (`[BOOT] ESP32-S3 USB-CDC`); Provisioning-AP sendet Serial-Heartbeat alle 15s (`provision_manager.cpp`, `ESP32_S3_DEVKIT_MODE`).
+- **Deep-Sleep / RTC:** `ESP_RST_DEEPSLEEP` in Reset-Telemetrie (`mqtt_client.cpp`, `health_monitor.cpp`); keine separate S3-Boot-Abzweigung — Wake-Pins muessen RESERVED/Strapping respektieren (RTC IO nur auf SAFE/Header-Pins planen).
+- **Detail-Flow:** `El Trabajante/docs/system-flows/01-boot-sequence.md`
+
+### NVS-Blob-Kompatibilitaet (identisch zu ESP32-dev)
+
+| Artefakt | Keys / Format | Referenz |
+|----------|---------------|----------|
+| Sensor-Slots | `sen_%d_gpio`, `sen_%d_type`, `sen_%d_name`, `sen_%d_sz`, `sen_%d_act`, `sen_%d_raw`, `sen_%d_mode`, `sen_%d_int`, `sen_%d_ow`, `sen_%d_i2c`, `sen_%d_if`, `sen_%d_urx`, `sen_%d_utx`, `sen_%d_ubd` | `config_manager.cpp` |
+| Offline-Rules | `ofr_blob` + CRC8-Trailer, `ofr_ver`, `ofr_count` | `offline_mode_manager.cpp`, `docs/NVS_KEYS.md`, `MODULE_REGISTRY.md` §6 |
+| Partition | Default 24 KB NVS — S3 hat mehr Flash, Schema unveraendert | Kein separates S3-NVS-Layout |
+
+### Sensor-Readflow pro Typ (S3 ausfuehren)
+
+Server-Centric unveraendert: ESP liefert RAW, Verarbeitung in El Servador. Pfade: `sensor_manager.cpp`, Bus-Treiber unter `drivers/`.
+
+| Typ | Bus | S3 Readflow | Abweichung vs. WROOM |
+|-----|-----|-------------|----------------------|
+| **DS18B20** | OneWire GPIO4 | ROM-Code in Config (`onewire_address`) → `onewire_bus.cpp` / DallasTemperature; ROM-Match in `sensor_manager` | Keiner (Pin 4 gleich) |
+| **SHT31** (`temperature_sht31`, `humidity_sht31`) | I2C **8/9** | Direktes I2C (Cmd `0x2400`, 6-Byte-Response) — **kein** Adafruit-Pfad im Produktivcode | Nur I2C-Pin-Default |
+| **BMP280 / BME280** | I2C **8/9** | Sub-Types `bmp280_*`, `bme280_*` unveraendert; I2C Addr typ. 0x76 | Nur I2C-Pin-Default |
+| **EC DFR0300** (`ec_sensor` → Server `ec`) | ADC1 | `analogRead` auf GPIO **1–10** (z. B. 7); RAW 0–4095; DS18B20-Temp-Kompensation serverseitig | WROOM oft GPIO32 |
+| **pH Haoshi H-101** (`ph_sensor` → `ph`) | ADC1 | wie EC, z. B. GPIO6 | WROOM oft ADC1 high GPIO |
+| **Soil moisture** (`moisture`) | ADC1 | wie EC/pH; `requiresCalibration()`-Guard fuer Offline-Rules | WROOM GPIO-Nummern anders |
+| **SEN0220 CO2** (`co2`, `mhz19_co2`) | UART `Serial2` | `interface_type=UART`, `uart_rx_pin`/`uart_tx_pin`/`uart_baud` → `mhz19_uart.cpp`; GPIO 17+18 reserviert; kein `readRawAnalog` | S3: 18/17 (AUT-527); WROOM: 16/17 |
+
+Publish: `TopicBuilder::buildSensorDataTopic(gpio)`, Payload `raw_mode: true` — siehe [MQTT-Patterns](#mqtt-patterns).
+
+### Aktor Read/Write-Flow (S3)
+
+Keine S3-spezifische Aktor-Logik — nur GPIO auf SAFE-Pins legen.
+
+1. **Config-Push (MQTT):** `ActuatorManager` parst `default_state`, `runtime_protection` — `actuator_manager.cpp`.
+2. **Runtime:** `PumpActuator` / `ValveActuator` — `RuntimeProtection` (max_runtime_ms, Aktivierungen/h, Cooldown); siehe [Safety-Patterns](#safety-patterns).
+3. **Offline:** Keine Rules → Disconnect sofort `default_state` (P1); mit Rules → P4 `evaluateOfflineRules()` im Safety-Task (`offline_mode_manager.cpp`).
+4. **Emergency:** `SafetyController.emergencyStopAll()` — unveraendert, <50ms.
+
+### S3 Build-Verifikation
+
+```bash
+cd "El Trabajante"
+pio run -e esp32-s3-devkitc-1
+# Regression WROOM nach S3-Aenderungen an gemeinsamem Code:
+pio run -e esp32_dev
+```
+
+Publish-Queue S3: 16×2048 B (`publish_queue.h`, `ESP32_S3_DEVKIT_MODE`) — Details `MODULE_REGISTRY.md`, nicht hier duplizieren.
 
 ---
 
@@ -231,9 +362,10 @@ ESP32: Display/Log
 ### Neuen Sensor hinzufügen
 
 1. **Server:** Library in `El Servador/.../sensor_libraries/active/` erstellen
-2. **ESP32:** Nur wenn neuer Bus-Typ (I2C/OneWire):
+2. **ESP32:** Nur wenn neuer Bus-Typ (I2C/OneWire/UART):
    - I2C: Protocol in `drivers/i2c_sensor_protocol.cpp` registrieren
    - OneWire: ROM-Code in Config angeben
+   - UART CO2: Eintrag in `sensor_registry.cpp` (`is_uart=true`) + Driver unter `drivers/` (Pattern: `mhz19_uart.cpp`)
 3. **Config via MQTT:** Server sendet SensorConfig
 
 ### SensorConfig Struktur
@@ -246,6 +378,10 @@ config.raw_mode = true;             // IMMER true
 config.measurement_interval_ms = 30000;
 config.onewire_address = "28FF..."; // Für OneWire (64-bit ROM)
 config.i2c_address = 0x44;          // Für I2C (7-bit Adresse)
+config.interface_type = "UART";     // Für UART CO2
+config.uart_rx_pin = 18;
+config.uart_tx_pin = 17;
+config.uart_baud = 9600;
 ```
 
 **Interface-spezifische Felder:**
@@ -254,6 +390,7 @@ config.i2c_address = 0x44;          // Für I2C (7-bit Adresse)
 |-----------|-------------|--------------|--------------|
 | OneWire | `onewire_address` | `onewire_address` | 64-bit ROM-Code (16 Hex-Zeichen) |
 | I2C | `i2c_address` | `i2c_address` | 7-bit Adresse (0-127) |
+| UART CO2 | `interface_type`, `uart_rx_pin`, `uart_tx_pin`, `uart_baud` | gleiche Felder | MH-Z19/SEN0220; Pins != 0 und != 255 |
 
 ### Sensor-Registry Mapping
 
@@ -270,6 +407,7 @@ config.i2c_address = 0x44;          // Für I2C (7-bit Adresse)
 | `ph_sensor` | `ph` | ADC | - |
 | `ec_sensor` | `ec` | ADC | - |
 | `moisture` | `moisture` | ADC | - |
+| `co2` / `mhz19_co2` | `co2` | UART | - |
 
 **ADC-Sensoren und Offline-Rules:** `ph`, `ec`, `moisture` liefern im ValueCache nur ADC-Rohwerte (0–4095), da `applyLocalConversion()` für diese Typen keine lokale Umrechnung hat. Offline-Rule-Thresholds sind in physikalischen Einheiten — ein Vergleich wäre sinnlos. `evaluateOfflineRules()` filtert diese Typen via `requiresCalibration()` Guard heraus; betroffene Aktoren bleiben sicher AUS.
 
@@ -446,7 +584,7 @@ gpioManager.requestPin(gpio, "sensor", "DS18B20");
 
 | Range | Category |
 |-------|----------|
-| 1000-1999 | HARDWARE (GPIO, I2C, OneWire) |
+| 1000-1999 | HARDWARE (GPIO, I2C, OneWire, UART CO2 1033-1036) |
 | 2000-2999 | SERVICE (NVS, Config) |
 | 3000-3999 | COMMUNICATION (WiFi, MQTT) |
 | 4000-4999 | APPLICATION (State, Watchdog) |
@@ -533,7 +671,7 @@ XManager& xManager = XManager::getInstance();
 ### Typische Fehler (vermeiden)
 
 - Falsche PlatformIO-Umgebung oder nicht existierende `-e`-Namen (nur Namen aus `platformio.ini` verwenden).
-- GPIO/ADC-I2C-Pins erfinden statt `config/hardware/esp32_dev.h` / `xiao_esp32c3.h` und `gpio_manager` zu lesen (ADC2 + WiFi auf klassischem ESP32, Strapping, `INPUT_ONLY_PINS`).
+- GPIO/ADC-I2C-Pins erfinden statt `config/hardware/esp32_dev.h` / `esp32_s3_devkit.h` / `xiao_esp32c3.h` und `gpio_manager` zu lesen (S3: ADC1 = GPIO 1–10, RESERVED 26–37; WROOM: ADC2 + WiFi, Strapping, `INPUT_ONLY_PINS`).
 - Topics oder JSON-Felder ändern ohne `topic_builder`, `MQTT_TOPICS.md` und betroffene `subscribe`/`publish`-Stellen.
 - `delay()` oder lange blockierende Schleifen in Pfaden, die MQTT/WiFi/Watchdog erwarten (siehe `.cursor/rules/firmware.mdc`).
 - Große `DynamicJsonDocument`-Kapazitäten willkürlich erhöhen — Speicherbudget beachten (`MQTT_MAX_PACKET_SIZE` u. a. in `platformio.ini`).

@@ -58,6 +58,16 @@ struct SensorConfig {
   uint8_t i2c_address = 0;
 
   // ============================================
+  // UART SUPPORT (MH-Z19 / SEN0220 CO2, etc.)
+  // ============================================
+  // interface_type from server (e.g. "UART"); gpio is logical sensor slot only
+  String interface_type = "";
+  uint8_t uart_rx_pin = 255;   // ESP RX ← sensor TX (255 = unset)
+  uint8_t uart_tx_pin = 255;   // ESP TX → sensor RX
+  uint32_t uart_baud = 9600;
+  unsigned long uart_configured_at_ms = 0;  // Runtime warmup gate (not NVS)
+
+  // ============================================
   // CIRCUIT BREAKER STATE (per-sensor runtime)
   // ============================================
   // Prevents endless retries on defective/disconnected sensors.

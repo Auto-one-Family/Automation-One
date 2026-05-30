@@ -24,6 +24,7 @@ struct SensorCapability {
     uint8_t i2c_address;            // I2C device address (0x00 if not I2C)
     bool is_multi_value;             // Provides multiple values?
     bool is_i2c;                     // Is I2C sensor?
+    bool is_uart;                    // Is UART sensor (e.g. MH-Z19 CO2)?
 };
 
 // ============================================

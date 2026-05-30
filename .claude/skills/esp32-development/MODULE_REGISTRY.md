@@ -28,6 +28,7 @@ description: Vollständige API-Referenz aller ESP32-Module. Laden bei Bedarf fü
 | HealthMonitor | `error_handling/health_monitor.h` | ✅ | STEP 10.5 |
 | I2CBusManager | `drivers/i2c_bus.h` | ✅ | STEP 11 |
 | OneWireBusManager | `drivers/onewire_bus.h` | ✅ | STEP 11 |
+| Mhz19UartReader | `drivers/mhz19_uart.h` | ✅ | On-demand (UART CO2 configure) |
 | PWMController | `drivers/pwm_controller.h` | ✅ | STEP 11 |
 | SensorManager | `services/sensor/sensor_manager.h` | ✅ | STEP 12 |
 | SafetyController | `services/actuator/safety_controller.h` | ✅ | STEP 13 (vor Actuator!) |
@@ -98,7 +99,7 @@ GPIOManager delegiert alle Hardware-Zugriffe an ein `IGPIOHal`-Interface. In Pro
 
 **Pfad:** `src/services/sensor/sensor_manager.h/.cpp`
 
-**Dependencies:** GPIOManager, MQTTClient, I2CBusManager, OneWireBusManager, PiEnhancedProcessor
+**Dependencies:** GPIOManager, MQTTClient, I2CBusManager, OneWireBusManager, Mhz19UartReader (UART CO2), PiEnhancedProcessor
 
 **Manuelle Messung:** `struct ManualMeasurementResult` und Signatur `triggerManualMeasurement(uint8_t gpio, uint32_t timeout_ms = 5000)` in `sensor_manager.h`.
 
@@ -239,9 +240,9 @@ extern ConfigManager& configManager;
 
 **Pfad:** `src/services/communication/mqtt_client.h/.cpp`
 
-**Backends:** **Standard (ohne Define, `esp32_dev`):** ESP-IDF MQTT (`esp_mqtt_client_handle_t`, `g_mqtt_connected`, Event-Handler `MQTT_EVENT_*`). **`MQTT_USE_PUBSUBCLIENT=1`** (seeed_xiao, Wokwi): PubSubClient + `offline_buffer_`, `setCallback`. Partition/SDK: optional `sdkconfig.defaults` (`CONFIG_MQTT_TASK_CORE_SELECTION_*`) für MQTT-Task auf Core 0.
+**Backends:** **Standard (ohne Define, `esp32_dev`):** ESP-IDF MQTT (`esp_mqtt_client_handle_t`, `g_mqtt_connected`, Event-Handler `MQTT_EVENT_*`). **`MQTT_USE_PUBSUBCLIENT=1`** (seeed_xiao, Wokwi): PubSubClient + `offline_buffer_`, `setCallback`. Partition/SDK: `sdkconfig.defaults` (OUTBOX 16384, `CONFIG_MQTT_TASK_CORE_SELECTION_*`); S3-Env merged `sdkconfig.s3.defaults` (OUTBOX 65536, LWIP 32768, AUT-494).
 
-**SAFETY-RTOS M3 (nur ESP-IDF):** `void processPublishQueue()` leert `g_publish_queue` (Core 1 → Core 0, **10** Slots / Shed **5** — `publish_queue_constants.h`); adaptive Drain 1–2/Tick (`publish_queue_policy.h`); Aufruf aus `communication_task.cpp` nach `loop()`. `publish()` auf Core 1 enqueued.
+**SAFETY-RTOS M3 (nur ESP-IDF):** `void processPublishQueue()` leert `g_publish_queue` (Core 1 → Core 0); Aufruf aus `communication_task.cpp` nach `loop()`. `publish()` auf Core 1 enqueued. Queue-Konstanten: Basis-Sizing in `publish_queue_constants.h` (SIZE=10, SHED=5, AUT-481 P3); adaptive Drain 1–2/Tick (`publish_queue_policy.h`); S3 N8R8 (`ESP32_S3_DEVKIT_MODE`) überschreibt in `publish_queue.h` auf 16×2048 B, Shed-Watermark 8 (AUT-495).
 
 **Dependencies:** WiFiManager, CircuitBreaker, TopicBuilder
 ```cpp
@@ -596,6 +597,32 @@ extern OneWireBusManager& oneWireBusManager;
 
 ---
 
+## 13.5 Mhz19UartReader
+
+**Pfad:** `src/drivers/mhz19_uart.h/.cpp`
+
+**Dependencies:** GPIOManager (Pin-Reservation via SensorManager), HardwareSerial (`Serial2`)
+
+```cpp
+class Mhz19UartReader {
+public:
+    static Mhz19UartReader& getInstance();
+
+    bool begin(uint8_t rx_pin, uint8_t tx_pin, uint32_t baud = 9600);
+    void end();
+    bool isInitialized() const;
+
+    // RAW PPM 0-50000, millis()-Timeout, MH-Z19 9-byte frame + checksum
+    bool readRawPpm(uint16_t& ppm_out);
+};
+
+extern Mhz19UartReader& mhz19UartReader;
+```
+
+**Verwendung:** `SensorManager::configureSensor()` bei `sensor_registry` `is_uart=true` (`co2`, `mhz19_co2`). Pins aus MQTT/NVS (`uart_rx_pin`, `uart_tx_pin`, `uart_baud`). Warmup ~180s nach Configure. Error-Codes 1033-1036.
+
+---
+
 ## 14. ProvisionManager
 
 **Pfad:** `src/services/provisioning/provision_manager.h/.cpp`
@@ -645,8 +672,9 @@ public:
 | `ph_sensor` | `ph` | ADC | - | Nein |
 | `ec_sensor` | `ec` | ADC | - | Nein |
 | `moisture` | `moisture` | ADC | - | Nein |
+| `co2` / `mhz19_co2` | `co2` | UART (MH-Z19) | - | Nein |
 
-**Hinweis:** Multi-Value bedeutet, dass ein physisches Device mehrere Sensor-Typen liefert (z.B. SHT31 → Temperatur + Humidity).
+**Hinweis:** Multi-Value bedeutet, dass ein physisches Device mehrere Sensor-Typen liefert (z.B. SHT31 → Temperatur + Humidity). UART-CO2: `gpio` = logischer Slot (kein ADC); RX/TX über Config-Felder.
 
 ---
 
@@ -862,7 +890,7 @@ uint32_t getCriticalOutcomeDropCountTelemetry();  // Heartbeat / Telemetrie
 
 | Range | Category | Examples |
 |-------|----------|----------|
-| 1000-1999 | HARDWARE | GPIO, I2C, PWM, OneWire |
+| 1000-1999 | HARDWARE | GPIO, I2C, PWM, OneWire, UART CO2 (1033-1036) |
 | 2000-2999 | SERVICE | NVS, Config, Logger, Subzone |
 | 3000-3999 | COMMUNICATION | WiFi, MQTT, HTTP |
 | 4000-4999 | APPLICATION | State, Memory, Watchdog |
@@ -873,6 +901,10 @@ uint32_t getCriticalOutcomeDropCountTelemetry();  // Heartbeat / Telemetrie
 #define ERROR_I2C_DEVICE_NOT_FOUND  1011
 #define ERROR_I2C_BUS_STUCK         1015
 #define ERROR_ONEWIRE_NO_DEVICES    1021
+#define ERROR_UART_INIT_FAILED      1033
+#define ERROR_UART_READ_TIMEOUT     1034
+#define ERROR_UART_CHECKSUM_FAILED  1035
+#define ERROR_UART_INVALID_PPM      1036
 #define ERROR_DS18B20_SENSOR_FAULT  1060
 #define ERROR_SUBZONE_GPIO_CONFLICT 2501
 #define ERROR_MQTT_CONNECT_FAILED   3011

@@ -50,6 +50,8 @@
 // Phase 4: Required for DEFAULT_ONEWIRE_PIN in OneWire-Scan command
 #ifdef XIAO_ESP32C3
     #include "config/hardware/xiao_esp32c3.h"
+#elif defined(ESP32_S3_DEVKIT_MODE)
+    #include "config/hardware/esp32_s3_devkit.h"
 #else
     #include "config/hardware/esp32_dev.h"
 #endif
@@ -86,7 +88,7 @@ static const char* TAG = "BOOT";
 // CONSTANTS
 // ============================================
 // ✅ FIX #3+#4: LED pin for hardware safe-mode feedback
-const uint8_t LED_PIN = 2;  // ESP32 onboard LED (GPIO2)
+static const uint8_t LED_PIN = HardwareConfig::LED_PIN;
 static const time_t APPROVAL_TS_PERSIST_INTERVAL_S = 24 * 60 * 60;  // AUT-61: max one approval-ts write/day
 
 // ============================================
@@ -2634,6 +2636,12 @@ void setup() {
   Serial.println("[WOKWI] Serial initialized - simulation mode active");
   Serial.flush();  // Ensure output is sent before continuing
   delay(100);
+  #elif defined(ESP32_S3_DEVKIT_MODE)
+  // USB-CDC: nicht blockieren — Output auch wenn der Monitor erst spaeter geoeffnet wird
+  Serial.setTxTimeoutMs(0);
+  Serial.println("[BOOT] ESP32-S3 USB-CDC — oeffne Monitor auf COM8, 115200");
+  Serial.flush();
+  delay(300);
   #else
   delay(100);  // Allow Serial to stabilize on real hardware
   #endif
@@ -2685,6 +2693,7 @@ void setup() {
   const unsigned long HOLD_TIME_MS = 10000;  // 10 seconds
 
   pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
+  delay(50);  // Strapping/Glitch abklingen lassen (besonders ESP32-S3)
 
   if (digitalRead(BOOT_BUTTON_PIN) == LOW) {
     Serial.println("╔════════════════════════════════════════╗");
@@ -3245,7 +3254,9 @@ void setup() {
   mqtt_config.client_id = configManager.getESPId();
   mqtt_config.username = wifi_config.mqtt_username;  // Can be empty (Anonymous)
   mqtt_config.password = wifi_config.mqtt_password;  // Can be empty (Anonymous)
-  mqtt_config.keepalive = 90;
+  // AUT-539 Fix 3: 90s -> 60s. FritzBox-NAT-Timeout typ. 300s.
+  // k=60 -> 5 PINGREQ/5min Marge; k=90 wuerde nur 3 erlauben.
+  mqtt_config.keepalive = 60;
   mqtt_config.timeout = 10;
 
   if (!mqttClient.connect(mqtt_config)) {
@@ -4168,6 +4179,18 @@ bool parseAndConfigureSensorWithTracking(const JsonObjectConst& sensor_obj, Conf
   if (JsonHelpers::extractInt(sensor_obj, "i2c_address", i2c_addr_int, 0)) {
     config.i2c_address = static_cast<uint8_t>(i2c_addr_int);
   }
+
+  JsonHelpers::extractString(sensor_obj, "interface_type", config.interface_type, "");
+
+  int uart_rx = 255;
+  int uart_tx = 255;
+  int uart_baud = 9600;
+  JsonHelpers::extractInt(sensor_obj, "uart_rx_pin", uart_rx, 255);
+  JsonHelpers::extractInt(sensor_obj, "uart_tx_pin", uart_tx, 255);
+  JsonHelpers::extractInt(sensor_obj, "uart_baud", uart_baud, 9600);
+  config.uart_rx_pin = static_cast<uint8_t>(uart_rx);
+  config.uart_tx_pin = static_cast<uint8_t>(uart_tx);
+  config.uart_baud = static_cast<uint32_t>(uart_baud);
 
   bool bool_value = true;
   if (JsonHelpers::extractBool(sensor_obj, "active", bool_value, true)) {
