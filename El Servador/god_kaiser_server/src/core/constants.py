@@ -121,9 +121,39 @@ GPIO_RESERVED_ESP32_WROOM = {6, 7, 8, 9, 10, 11}  # Flash SPI pins only
 GPIO_RANGE_XIAO_ESP32C3 = range(0, 22)
 GPIO_RESERVED_XIAO_ESP32C3 = {18, 19}  # USB pins
 
+# ESP32-S3-DevKitC-1 N8R8: Octal Flash+PSRAM (26-37), USB (19-20), RGB (38,48), strap/UART
+GPIO_RANGE_ESP32_S3_DEVKITC1 = range(0, 49)
+GPIO_RESERVED_ESP32_S3_DEVKITC1 = {
+    0,
+    3,
+    19,
+    20,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    43,
+    44,
+    45,
+    46,
+    48,
+}
+
 # Safe GPIO pins for each board
 GPIO_SAFE_ESP32_WROOM = set(GPIO_RANGE_ESP32_WROOM) - GPIO_RESERVED_ESP32_WROOM
 GPIO_SAFE_XIAO_ESP32C3 = set(GPIO_RANGE_XIAO_ESP32C3) - GPIO_RESERVED_XIAO_ESP32C3
+GPIO_SAFE_ESP32_S3_DEVKITC1 = (
+    set(GPIO_RANGE_ESP32_S3_DEVKITC1) - GPIO_RESERVED_ESP32_S3_DEVKITC1
+)
 
 # =============================================================================
 # SENSOR TYPES
@@ -181,10 +211,12 @@ ACTUATOR_TYPES = [
 
 HARDWARE_TYPE_ESP32_WROOM = "ESP32_WROOM"
 HARDWARE_TYPE_XIAO_ESP32C3 = "XIAO_ESP32_C3"
+HARDWARE_TYPE_ESP32_S3_DEVKITC1 = "ESP32_S3_DEVKITC1"
 
 HARDWARE_TYPES = [
     HARDWARE_TYPE_ESP32_WROOM,
     HARDWARE_TYPE_XIAO_ESP32C3,
+    HARDWARE_TYPE_ESP32_S3_DEVKITC1,
 ]
 
 # =============================================================================

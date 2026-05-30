@@ -25,6 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.logging_config import get_logger
 from ..core.constants import (
     HARDWARE_TYPE_ESP32_WROOM,
+    HARDWARE_TYPE_ESP32_S3_DEVKITC1,
+    GPIO_RESERVED_ESP32_S3_DEVKITC1,
 )
 from ..db.repositories.sensor_repo import SensorRepository
 from ..db.repositories.actuator_repo import ActuatorRepository
@@ -96,6 +98,9 @@ SYSTEM_RESERVED_PINS_C3: Set[int] = {
     19,  # USB D+
 }
 
+# ESP32-S3-DevKitC-1 N8R8: Octal Flash+PSRAM, USB, RGB, strap/UART (mirrors esp32_s3_devkit.h)
+SYSTEM_RESERVED_PINS_S3: Set[int] = GPIO_RESERVED_ESP32_S3_DEVKITC1
+
 # Legacy alias — kept for backward compat, points to WROOM set
 SYSTEM_RESERVED_PINS: Set[int] = SYSTEM_RESERVED_PINS_WROOM
 
@@ -139,6 +144,32 @@ SYSTEM_PIN_NAMES_WROOM: Dict[int, str] = {
 SYSTEM_PIN_NAMES_C3: Dict[int, str] = {
     18: "USB D-",
     19: "USB D+",
+}
+
+# Menschenlesbare Namen für System-Pins (ESP32-S3-DevKitC-1)
+SYSTEM_PIN_NAMES_S3: Dict[int, str] = {
+    0: "Boot-Strapping",
+    3: "JTAG Strapping",
+    19: "USB D-",
+    20: "USB D+",
+    26: "Octal Flash/PSRAM",
+    27: "Octal Flash/PSRAM",
+    28: "Octal Flash/PSRAM",
+    29: "Octal Flash/PSRAM",
+    30: "Octal Flash/PSRAM",
+    31: "Octal Flash/PSRAM",
+    32: "Octal Flash/PSRAM",
+    33: "Octal Flash/PSRAM",
+    34: "Octal Flash/PSRAM",
+    35: "Octal Flash/PSRAM",
+    36: "Octal Flash/PSRAM",
+    37: "Octal Flash/PSRAM",
+    38: "RGB LED (v1.1)",
+    43: "UART0 TX",
+    44: "UART0 RX",
+    45: "Strapping",
+    46: "VDD_SPI Strapping",
+    48: "RGB LED (v1.0)",
 }
 
 # Legacy alias — kept for backward compat
@@ -203,6 +234,13 @@ class GpioValidationService:
         if board_model_upper in ("XIAO_ESP32_C3", "XIAO_ESP32C3", "ESP32_C3"):
             return SYSTEM_RESERVED_PINS_C3, SYSTEM_PIN_NAMES_C3
 
+        if board_model_upper in (
+            HARDWARE_TYPE_ESP32_S3_DEVKITC1,
+            "ESP32_S3_DEVKIT",
+            "ESP32_S3",
+        ):
+            return SYSTEM_RESERVED_PINS_S3, SYSTEM_PIN_NAMES_S3
+
         # Default: WROOM-style Flash SPI pins
         return SYSTEM_RESERVED_PINS_WROOM, SYSTEM_PIN_NAMES_WROOM
 
@@ -239,6 +277,19 @@ class GpioValidationService:
                 i2c_bus_pins={4, 5},
                 system_reserved_pins=SYSTEM_RESERVED_PINS_C3,
                 gpio_max=21,
+            )
+
+        # ESP32-S3-DevKitC-1 N8R8 (mirrors esp32_s3_devkit.h)
+        if board_model_upper in (
+            HARDWARE_TYPE_ESP32_S3_DEVKITC1,
+            "ESP32_S3_DEVKIT",
+            "ESP32_S3",
+        ):
+            return BoardConstraints(
+                input_only_pins=set(),
+                i2c_bus_pins={8, 9},
+                system_reserved_pins=SYSTEM_RESERVED_PINS_S3,
+                gpio_max=48,
             )
 
         # Default to WROOM if unknown
