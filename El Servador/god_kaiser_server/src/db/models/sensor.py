@@ -96,7 +96,7 @@ class SensorConfig(Base, TimestampMixin):
         String(20),
         nullable=False,
         default="ANALOG",
-        doc="Interface type: I2C, ONEWIRE, ANALOG, DIGITAL, VIRTUAL",
+        doc="Interface type: I2C, ONEWIRE, ANALOG, DIGITAL, UART, VIRTUAL",
     )
 
     i2c_address: Mapped[Optional[int]] = mapped_column(
