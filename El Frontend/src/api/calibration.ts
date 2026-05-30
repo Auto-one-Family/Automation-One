@@ -4,7 +4,8 @@ import api from './index'
 export interface CalibrationPoint {
   raw: number
   reference: number
-  point_role?: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference' | 'air'
+  /** AUT-487: ec_linear_2point uses reference_low + reference_high roles */
+  point_role?: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference' | 'air' | 'reference_low' | 'reference_high'
   point_id?: string
 }
 
@@ -38,7 +39,7 @@ export interface CalibrationSessionResponse {
   expected_points: number
   points_collected?: number
   calibration_points: {
-    points: Array<CalibrationPoint & { id?: string; point_role?: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference' | 'air' }>
+    points: Array<CalibrationPoint & { id?: string; point_role?: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference' | 'air' | 'reference_low' | 'reference_high' }>
     history?: Array<Record<string, unknown>>
   } | null
   calibration_result: Record<string, unknown> | null
@@ -58,6 +59,8 @@ export type CalibrationSessionMethod =
   | 'ph_2point'
   | 'ec_1point'
   | 'ec_2point'
+  /** AUT-487: EC 2-point linear with reference_low + reference_high roles */
+  | 'ec_linear_2point'
   | string
 
 export interface StartSessionRequest {
@@ -75,7 +78,8 @@ export interface StartSessionRequest {
 export interface AddPointRequest {
   raw_value: number
   reference_value: number
-  point_role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference' | 'air'
+  /** AUT-487: ec_linear_2point adds reference_low + reference_high */
+  point_role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference' | 'air' | 'reference_low' | 'reference_high'
   overwrite?: boolean
   quality?: string
   intent_id?: string
@@ -86,7 +90,8 @@ export interface AddPointRequest {
 export interface UpdatePointRequest {
   raw_value: number
   reference_value: number
-  point_role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference' | 'air'
+  /** AUT-487: ec_linear_2point adds reference_low + reference_high */
+  point_role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference' | 'air' | 'reference_low' | 'reference_high'
   quality?: string
   intent_id?: string
   measured_at?: string
@@ -97,7 +102,7 @@ function getRequiredPoints(method?: CalibrateRequest['method']): number {
   return method === 'offset' ? 1 : 2
 }
 
-const VALID_POINT_ROLES = new Set(['dry', 'wet', 'buffer_high', 'buffer_low', 'reference', 'air'])
+const VALID_POINT_ROLES = new Set(['dry', 'wet', 'buffer_high', 'buffer_low', 'reference', 'air', 'reference_low', 'reference_high'])
 
 /** Pass through the wizard role unchanged; server accepts all semantic roles. */
 function toServerPointRole(role: string): string {

@@ -519,7 +519,7 @@ onUnmounted(() => { /* cleanup */ })
 | actuator_status | esp_id, gpio, actuator_type (server-normalisiert), hardware_type (ESP32-Typ), state, value, emergency | MQTT→Server→WS |
 | esp_health | esp_id, status, heap, rssi, optional Telemetrie (`persistence_degraded`, `network_degraded`, `critical_outcome_drop_count`, …), Offline-Kontext (`source`, `reason`, `timeout_seconds`, `actuator_states_reset`), Reconnect-Hinweise (`is_reconnect`, `is_flapping`, `lwt_count_5m`) | Heartbeat/LWT/Timeout→Server→WS |
 | esp_reconnect_phase | esp_id, phase (`adopting`/`adopted`/`delta_enforced`/`converged`), timestamp, offline_seconds?, config_push_pending? | Heartbeat-Reconnect→Server→WS |
-| config_response | esp_id, status, error_code, correlation_id (pflicht), request_id? | ESP→MQTT→Server→WS (terminal nur per correlation_id) |
+| config_response | esp_id, status, error_code, correlation_id (pflicht), request_id? | ESP→MQTT→Server→WS (terminal nur per correlation_id); `fw_*`-IDs: `actuator.store` mappt auf einziges pending Config-Intent pro ESP |
 | config_published | esp_id, config_keys[], correlation_id? | Server Publish→WS (non-terminal, pending) |
 | config_failed | esp_id, config_keys[], error, correlation_id (pflicht), request_id? | Server Publish→WS (terminal nur per correlation_id) |
 | intent_outcome | esp_id, intent_id, flow, outcome, code, correlation_id, … (kanonisch) | MQTT→Server→WS |
@@ -1508,6 +1508,8 @@ Beispiel S3: `ESP_ABC123:7:ec` — GPIO-Nummer ist board-spezifisch, das Format 
 **Version:** 10.16 | **Letzte Aktualisierung:** 2026-05-29
 
 - 2026-05-29: **AUT-528 S5c** — Section 20 ESP32-S3 Board-Awareness: `useBoardLayout`, `hardware_type`-SSOT in `esp.ts` (Search-vor-Create: kein paralleles Board-Feld in sensor/dashboard stores), SensorConfigPanel ADC1/I2C, GpioPicker/gpioConfig Gap, unveraendertes sensorId-Format + ActuatorCard/ZoneAssignmentPanel.
+
+- 2026-05-25: `actuator.store` — `config_response` mit Firmware-`fw_*`-`correlation_id` wird auf ein einziges pending Config-Intent pro ESP gemappt; fehlendes Pending unterdrückt Integrations-Toast (kein `CONTRACT_UNKNOWN_CODE` bei parallelem Config-Push).
 
 - 2026-05-07: pH-Kalibrierung Slope-Fix und `point_role`-Erweiterung — Server (`calibration_sessions.py`, `calibration_service.py`) akzeptiert jetzt nativ alle semantischen Rollen (`dry|wet|buffer_high|buffer_low|reference|air`); `toServerPointRole()` in `api/calibration.ts` leitet Rollen unverändert durch (kein Mapping mehr). `_compute_ph_2point` berechnet Slope/Offset jetzt im Volt-Raum (pH/V, passend zu `PHSensorProcessor._adc_to_voltage`); vorheriger ADC-Count-Raum verursachte Wert-Clamp auf pH 14.0.
 

@@ -12,6 +12,8 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import { Activity, AlertCircle, ArrowLeft, Check, FlaskConical, Loader, Radar, RefreshCw, ShieldCheck, X } from 'lucide-vue-next'
 import { useEspStore } from '@/stores/esp'
 import { useCalibrationWizard } from '@/composables/useCalibrationWizard'
+import { EC_PRESETS } from '@/composables/useCalibrationWizard'
+import type { EcPresetId } from '@/composables/useCalibrationWizard'
 import CalibrationStep from './CalibrationStep.vue'
 
 const espStore = useEspStore()
@@ -71,6 +73,12 @@ const {
   calibrationTemperatureSource,
   setCalibrationTemperature,
   skipCurrentPoint,
+  ecPreset,
+  previewEcUsCm,
+  previewAvailable,
+  lastStable,
+  lastAdcStddev,
+  lastTemperatureUsed,
 } = useCalibrationWizard({
   skipSelect: props.skipSelect,
   espId: props.espId,
@@ -132,6 +140,25 @@ const linkedTemperatureValue = computed<number | null>(() => {
 const isEcCalibration = computed(() =>
   (currentPreset.value?.calibrationMethod ?? '').startsWith('ec_'),
 )
+
+/**
+ * P1b (AUT-490): Human-readable method label for the confirm phase.
+ * Derived from currentPreset.calibrationMethod so it is always consistent
+ * with the actual method — fixes the bug where ec_linear_2point showed "EC 1-Punkt".
+ */
+const CALIBRATION_METHOD_LABELS: Record<string, string> = {
+  ec_1point: 'EC 1-Punkt',
+  ec_2point: 'EC 2-Punkt (mit Luft-Referenz)',
+  ec_linear_2point: 'EC 2-Punkt Linear',
+  ph_2point: 'pH 2-Punkt',
+  moisture_2point: 'Feuchte 2-Punkt',
+  linear_2point: '2-Punkt Linear',
+}
+const confirmMethodLabel = computed((): string => {
+  const method = currentPreset.value?.calibrationMethod
+  if (!method) return selectedSensorType.value || '—'
+  return CALIBRATION_METHOD_LABELS[method] ?? method
+})
 const usesLinkedTemperature = computed(() =>
   isEcCalibration.value && linkedTemperatureValue.value != null,
 )
@@ -381,6 +408,30 @@ defineExpose({
         </button>
       </div>
 
+      <div v-if="selectedSensorType === 'ec'" class="calibration-wizard__ec-preset-row">
+        <p class="calibration-wizard__label">EC-Kalibrier-Verfahren</p>
+        <div class="calibration-wizard__ec-preset-grid">
+          <button
+            v-for="(preset, presetId) in EC_PRESETS"
+            :key="presetId"
+            type="button"
+            class="calibration-wizard__ec-preset"
+            :class="{ 'calibration-wizard__ec-preset--active': ecPreset === presetId }"
+            @click="ecPreset = presetId as EcPresetId"
+          >
+            {{ preset.label }}
+          </button>
+          <button
+            type="button"
+            class="calibration-wizard__ec-preset"
+            :class="{ 'calibration-wizard__ec-preset--active': ecPreset === 'custom' }"
+            @click="ecPreset = 'custom'"
+          >
+            Manuell
+          </button>
+        </div>
+      </div>
+
       <div v-if="selectedSensorType" class="calibration-wizard__device-list">
         <p class="calibration-wizard__label">ESP-Geraet und GPIO waehlen:</p>
         <div v-for="entry in availableDeviceSensors" :key="espStore.getDeviceId(entry.device)" class="calibration-wizard__device-row">
@@ -416,8 +467,9 @@ defineExpose({
       <div v-if="selectedSensorType === 'ph'" class="calibration-wizard__hint">
         <p>Sonde mit destilliertem Wasser zwischen den Pufferlösungen spülen. 30 Sekunden stabilisieren lassen.</p>
       </div>
-      <div v-if="selectedSensorType === 'ec'" class="calibration-wizard__hint">
-        <p>Referenzlösung auf Raumtemperatur bringen (25°C ±2°C). Sonde vollständig eintauchen.</p>
+      <div v-if="selectedSensorType === 'ec'" class="calibration-wizard__hint calibration-wizard__conditioning">
+        <p><strong>Erstnutzung / lange Lagerung:</strong> Sonde 2–24 Stunden in destilliertem Wasser konditionieren, danach mit destilliertem Wasser spülen.</p>
+        <p>Referenzlösung auf Raumtemperatur bringen (25°C ±2°C). Sonde vollständig eintauchen und ≥5s stabilisieren lassen.</p>
       </div>
 
       <!-- AUT-299: Temperatur-Eingabe (nur EC und pH) -->
@@ -496,6 +548,11 @@ defineExpose({
         :is-fresh-measurement="isFreshMeasurement"
         :capture-label="currentPreset?.expectedPoints === 1 ? 'Kalibrierung uebernehmen' : 'Punkt uebernehmen'"
         :require-good-quality="isEcCalibration"
+        :preview-ec-us-cm="previewEcUsCm"
+        :preview-available="previewAvailable"
+        :stable="lastStable"
+        :adc-stddev="lastAdcStddev"
+        :temperature-used="lastTemperatureUsed"
         @captured="onPoint1Captured"
         @request-measurement="triggerLiveMeasurement"
       />
@@ -528,6 +585,11 @@ defineExpose({
         :measurement-quality="measurementQuality"
         :is-fresh-measurement="isFreshMeasurement"
         :require-good-quality="isEcCalibration"
+        :preview-ec-us-cm="previewEcUsCm"
+        :preview-available="previewAvailable"
+        :stable="lastStable"
+        :adc-stddev="lastAdcStddev"
+        :temperature-used="lastTemperatureUsed"
         @captured="onPoint2Captured"
         @request-measurement="triggerLiveMeasurement"
       />
@@ -581,19 +643,51 @@ defineExpose({
       </template>
 
       <template v-else-if="selectedSensorType === 'ec'">
-        <div class="calibration-wizard__summary-row">
-          <span class="calibration-wizard__summary-label">Referenzloesung</span>
-          <span class="calibration-wizard__summary-mono">
-            RAW {{ points.find(p => p.point_role === 'reference')?.raw.toFixed(1) ?? '—' }} →
-            Ref {{ points.find(p => p.point_role === 'reference')?.reference ?? '—' }}
-          </span>
-        </div>
-        <div v-if="currentSessionId && points.find(p => p.point_role === 'reference')?.point_id" class="calibration-wizard__summary-row">
-          <span class="calibration-wizard__summary-label">Referenzloesung bearbeiten</span>
-          <button class="calibration-wizard__inline-action-btn" @click="deletePoint('reference')">
-            Loeschen
-          </button>
-        </div>
+        <!-- P1b (AUT-490): EC 2-Punkt linear (ec_linear_2point) — reference_low + reference_high -->
+        <template v-if="currentPreset?.calibrationMethod === 'ec_linear_2point'">
+          <div class="calibration-wizard__summary-row">
+            <span class="calibration-wizard__summary-label">Referenz-Low (1413 µS/cm)</span>
+            <span class="calibration-wizard__summary-mono">
+              RAW {{ points.find(p => p.point_role === 'reference_low')?.raw.toFixed(1) ?? '—' }} →
+              Ref {{ points.find(p => p.point_role === 'reference_low')?.reference ?? '—' }}
+            </span>
+          </div>
+          <div v-if="currentSessionId && points.find(p => p.point_role === 'reference_low')?.point_id" class="calibration-wizard__summary-row">
+            <span class="calibration-wizard__summary-label">Referenz-Low bearbeiten</span>
+            <button class="calibration-wizard__inline-action-btn" @click="deletePoint('reference_low')">
+              Loeschen
+            </button>
+          </div>
+          <div class="calibration-wizard__summary-row">
+            <span class="calibration-wizard__summary-label">Referenz-High ({{ currentPreset.point2Ref }} µS/cm)</span>
+            <span class="calibration-wizard__summary-mono">
+              RAW {{ points.find(p => p.point_role === 'reference_high')?.raw.toFixed(1) ?? '—' }} →
+              Ref {{ points.find(p => p.point_role === 'reference_high')?.reference ?? '—' }}
+            </span>
+          </div>
+          <div v-if="currentSessionId && points.find(p => p.point_role === 'reference_high')?.point_id" class="calibration-wizard__summary-row">
+            <span class="calibration-wizard__summary-label">Referenz-High bearbeiten</span>
+            <button class="calibration-wizard__inline-action-btn" @click="deletePoint('reference_high')">
+              Loeschen
+            </button>
+          </div>
+        </template>
+        <!-- EC 1-Punkt (custom preset) -->
+        <template v-else>
+          <div class="calibration-wizard__summary-row">
+            <span class="calibration-wizard__summary-label">Referenzloesung</span>
+            <span class="calibration-wizard__summary-mono">
+              RAW {{ points.find(p => p.point_role === 'reference')?.raw.toFixed(1) ?? '—' }} →
+              Ref {{ points.find(p => p.point_role === 'reference')?.reference ?? '—' }}
+            </span>
+          </div>
+          <div v-if="currentSessionId && points.find(p => p.point_role === 'reference')?.point_id" class="calibration-wizard__summary-row">
+            <span class="calibration-wizard__summary-label">Referenzloesung bearbeiten</span>
+            <button class="calibration-wizard__inline-action-btn" @click="deletePoint('reference')">
+              Loeschen
+            </button>
+          </div>
+        </template>
       </template>
 
       <template v-else>
@@ -625,9 +719,8 @@ defineExpose({
 
       <div class="calibration-wizard__summary-row">
         <span class="calibration-wizard__summary-label">Methode</span>
-        <span>
-          {{ selectedSensorType === 'ph' ? 'pH 2-Punkt Linear' : selectedSensorType === 'ec' ? 'EC 1-Punkt' : '2-Punkt Linear' }}
-        </span>
+        <!-- P1b (AUT-490): Method label derived from currentPreset — fixes bug where ec_linear_2point showed "EC 1-Punkt" -->
+        <span>{{ confirmMethodLabel }}</span>
       </div>
 
       <div v-if="currentSessionId" class="calibration-wizard__summary-row">
@@ -1067,6 +1160,23 @@ defineExpose({
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+  margin-top: var(--space-3);
+}
+
+.calibration-wizard__ec-preset-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.calibration-wizard__ec-preset--active {
+  border-color: var(--color-iridescent-1);
+  background: color-mix(in srgb, var(--color-iridescent-1) 12%, transparent);
+}
+
+.calibration-wizard__conditioning {
+  border-left: 3px solid var(--color-info);
+  padding-left: var(--space-3);
 }
 
 .calibration-wizard__ec-preset {

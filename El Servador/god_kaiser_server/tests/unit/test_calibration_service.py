@@ -473,6 +473,267 @@ async def test_canonical_structure_ph_2point(db_session):
     assert result["points"][1]["point_role"] == "buffer_low"
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# EC linear 2-point Calibration Tests (AUT-487)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_ec_linear_2point_happy_path(db_session):
+    """EC linear 2-point calibration with standard KCl reference solutions."""
+    await _create_bound_sensor(db_session, esp_id="ESP_EC_LIN_001", gpio=32, sensor_type="ec")
+    service = CalibrationService(db_session)
+
+    session = await service.start_session(
+        esp_id="ESP_EC_LIN_001",
+        gpio=32,
+        sensor_type="ec",
+        method="ec_linear_2point",
+        expected_points=2,
+        initiated_by="tester",
+    )
+
+    # reference_low: 1413 µS/cm (0.01 M KCl), ADC reading in low-conductivity solution
+    session = await service.add_point(
+        session_id=session.id,
+        raw=625.0,
+        reference=1413.0,
+        point_role="reference_low",
+    )
+    assert session.points_collected == 1
+
+    # reference_high: 12880 µS/cm (0.1 M KCl), ADC reading in high-conductivity solution
+    session = await service.add_point(
+        session_id=session.id,
+        raw=3200.0,
+        reference=12880.0,
+        point_role="reference_high",
+    )
+    assert session.points_collected == 2
+
+    session = await service.finalize(session.id)
+    assert session.status.value == "finalizing"
+    assert session.calibration_result is not None
+
+    result = session.calibration_result
+    assert result["method"] == "ec_linear_2point"
+
+    derived = result["derived"]
+    assert "slope" in derived
+    assert "offset" in derived
+    assert derived["type"] == "ec_linear_2point"
+    assert derived["point_low_raw"] == 625.0
+    assert derived["point_low_ref"] == 1413.0
+    assert derived["point_high_raw"] == 3200.0
+    assert derived["point_high_ref"] == 12880.0
+    # Slope must be positive (EC sensor: higher voltage = higher conductivity)
+    assert derived["slope"] > 0
+    # Verify slope and offset produce correct readings at calibration points
+    _ADC_MAX = 4095.0
+    _ADC_VOLTAGE = 3.3
+    voltage_low = (625.0 / _ADC_MAX) * _ADC_VOLTAGE
+    voltage_high = (3200.0 / _ADC_MAX) * _ADC_VOLTAGE
+    computed_low = derived["slope"] * voltage_low + derived["offset"]
+    computed_high = derived["slope"] * voltage_high + derived["offset"]
+    assert abs(computed_low - 1413.0) < 1.0  # within 1 µS/cm at 25°C
+    assert abs(computed_high - 12880.0) < 1.0
+
+
+@pytest.mark.asyncio
+async def test_ec_linear_2point_canonical_structure(db_session):
+    """ec_linear_2point finalize produces canonical calibration_result structure."""
+    await _create_bound_sensor(db_session, esp_id="ESP_EC_LIN_002", gpio=32, sensor_type="ec")
+    service = CalibrationService(db_session)
+
+    session = await service.start_session(
+        esp_id="ESP_EC_LIN_002",
+        gpio=32,
+        sensor_type="ec",
+        method="ec_linear_2point",
+        expected_points=2,
+        initiated_by="tester",
+    )
+    await service.add_point(session_id=session.id, raw=625.0, reference=1413.0, point_role="reference_low")
+    await service.add_point(session_id=session.id, raw=3200.0, reference=12880.0, point_role="reference_high")
+
+    session = await service.finalize(session.id)
+    result = session.calibration_result
+
+    assert "method" in result
+    assert result["method"] == "ec_linear_2point"
+    assert "points" in result
+    assert isinstance(result["points"], list)
+    assert len(result["points"]) == 2
+    assert "derived" in result
+    assert isinstance(result["derived"], dict)
+    assert "metadata" in result
+    assert result["metadata"]["schema_version"] == 1
+
+    # Check point roles preserved
+    roles = {p["point_role"] for p in result["points"]}
+    assert roles == {"reference_low", "reference_high"}
+
+
+@pytest.mark.asyncio
+async def test_ec_linear_2point_missing_reference_low(db_session):
+    """ec_linear_2point finalize should fail if reference_low is missing."""
+    service = CalibrationService(db_session)
+    session = await service.start_session(
+        esp_id="ESP_EC_LIN_003",
+        gpio=32,
+        sensor_type="ec",
+        method="ec_linear_2point",
+        expected_points=2,
+    )
+    # Add only reference_high, skip reference_low
+    await service.add_point(session_id=session.id, raw=600.0, reference=1413.0, point_role="reference_low")
+    await service.add_point(session_id=session.id, raw=3200.0, reference=12880.0, point_role="reference_high")
+    # Overwrite reference_low with a wrong role to simulate missing scenario by checking
+    # that invalid role is rejected first
+
+    # Test the static method with two points but missing reference_low role
+    with pytest.raises(ValueError, match="reference_low"):
+        CalibrationService._compute_ec_linear_2point(
+            [
+                {"point_role": "reference_high", "raw": 3200.0, "reference": 12880.0},
+                {"point_role": "air", "raw": 100.0, "reference": 0.0},
+            ],
+        )
+
+
+@pytest.mark.asyncio
+async def test_ec_linear_2point_monotonicity_violation(db_session):
+    """ec_linear_2point should reject when ADC_high <= ADC_low (inverted sensor)."""
+    service = CalibrationService(db_session)
+    session = await service.start_session(
+        esp_id="ESP_EC_LIN_004",
+        gpio=32,
+        sensor_type="ec",
+        method="ec_linear_2point",
+        expected_points=2,
+    )
+
+    # ADC inverted: high-conductivity solution produces lower ADC than low-conductivity
+    session = await service.add_point(
+        session_id=session.id,
+        raw=3000.0,  # ADC for low solution — intentionally higher than high solution
+        reference=1413.0,
+        point_role="reference_low",
+    )
+    session = await service.add_point(
+        session_id=session.id,
+        raw=800.0,  # ADC for high solution — inverted
+        reference=12880.0,
+        point_role="reference_high",
+    )
+
+    with pytest.raises(CalibrationError) as exc:
+        await service.finalize(session.id)
+
+    assert exc.value.code == "COMPUTE_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_ec_linear_2point_reference_high_not_greater_than_low(db_session):
+    """ec_linear_2point should reject when reference_high <= reference_low."""
+    service = CalibrationService(db_session)
+    session = await service.start_session(
+        esp_id="ESP_EC_LIN_005",
+        gpio=32,
+        sensor_type="ec",
+        method="ec_linear_2point",
+        expected_points=2,
+    )
+
+    # Swapped reference values: reference_low (1413) > reference_high (500) — invalid
+    await service.add_point(
+        session_id=session.id,
+        raw=500.0,
+        reference=500.0,  # reference_high has lower EC than reference_low — invalid
+        point_role="reference_low",
+    )
+    await service.add_point(
+        session_id=session.id,
+        raw=3000.0,
+        reference=200.0,  # reference_high < reference_low
+        point_role="reference_high",
+    )
+
+    with pytest.raises(CalibrationError) as exc:
+        await service.finalize(session.id)
+
+    assert exc.value.code == "COMPUTE_FAILED"
+
+
+def test_ec_linear_2point_static_compute_slope_and_offset():
+    """Unit test for _compute_ec_linear_2point static method at 25°C (no temp correction)."""
+    points = [
+        {"point_role": "reference_low", "raw": 625.0, "reference": 1413.0},
+        {"point_role": "reference_high", "raw": 3200.0, "reference": 12880.0},
+    ]
+    result = CalibrationService._compute_ec_linear_2point(points, temperature=25.0)
+
+    assert result["type"] == "ec_linear_2point"
+    assert result["point_low_raw"] == 625.0
+    assert result["point_low_ref"] == 1413.0
+    assert result["point_high_raw"] == 3200.0
+    assert result["point_high_ref"] == 12880.0
+    assert result["calibration_temperature"] == 25.0
+    # At 25°C: no temperature normalization, ref_at_cal_temp == reference
+    assert abs(result["ref_low_at_cal_temp"] - 1413.0) < 0.01
+    assert abs(result["ref_high_at_cal_temp"] - 12880.0) < 0.01
+
+    # Verify computed slope/offset round-trip
+    _ADC_MAX = 4095.0
+    _ADC_VOLTAGE = 3.3
+    v_low = (625.0 / _ADC_MAX) * _ADC_VOLTAGE
+    v_high = (3200.0 / _ADC_MAX) * _ADC_VOLTAGE
+    expected_slope = (12880.0 - 1413.0) / (v_high - v_low)
+    expected_offset = 1413.0 - expected_slope * v_low
+    import pytest
+    assert result["slope"] == pytest.approx(expected_slope, rel=0.001)
+    assert result["offset"] == pytest.approx(expected_offset, rel=0.001)
+
+
+def test_ec_linear_2point_static_compute_temperature_normalization():
+    """ec_linear_2point at 30°C should normalize reference EC to actual-at-cal-temp."""
+    points = [
+        {"point_role": "reference_low", "raw": 625.0, "reference": 1413.0},
+        {"point_role": "reference_high", "raw": 3200.0, "reference": 12880.0},
+    ]
+    result_25 = CalibrationService._compute_ec_linear_2point(points, temperature=25.0)
+    result_30 = CalibrationService._compute_ec_linear_2point(points, temperature=30.0)
+
+    # At 30°C: actual EC = reference * (1 + 0.02 * (30 - 25)) = reference * 1.1
+    # ref_low_at_cal_temp(30°C) = 1413 * 1.1 ≈ 1554.3
+    import pytest
+    assert result_30["ref_low_at_cal_temp"] == pytest.approx(1413.0 * 1.1, rel=0.001)
+    assert result_30["ref_high_at_cal_temp"] == pytest.approx(12880.0 * 1.1, rel=0.001)
+
+    # Slope at 30°C is higher (normalized to higher actual EC values)
+    assert result_30["slope"] > result_25["slope"]
+
+
+def test_ec_linear_2point_static_monotonicity_rejection():
+    """_compute_ec_linear_2point raises ValueError when ADC_high <= ADC_low."""
+    points = [
+        {"point_role": "reference_low", "raw": 3000.0, "reference": 1413.0},
+        {"point_role": "reference_high", "raw": 800.0, "reference": 12880.0},
+    ]
+    with pytest.raises(ValueError, match="ADC for reference_high"):
+        CalibrationService._compute_ec_linear_2point(points)
+
+
+def test_ec_linear_2point_static_reference_sanity_rejection():
+    """_compute_ec_linear_2point raises ValueError when reference_high <= reference_low."""
+    points = [
+        {"point_role": "reference_low", "raw": 500.0, "reference": 5000.0},
+        {"point_role": "reference_high", "raw": 3000.0, "reference": 1000.0},
+    ]
+    with pytest.raises(ValueError, match="reference_high"):
+        CalibrationService._compute_ec_linear_2point(points)
+
+
 @pytest.mark.asyncio
 async def test_canonical_structure_ec_1point(db_session):
     """Canonical calibration result structure for ec_1point."""

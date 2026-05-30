@@ -178,6 +178,8 @@ El Trabajante/src/services/communication/mqtt_client.md
 .claude/*.local.md
 .claude/local-marketplace/
 docker/**/__pycache__/
+docker/mosquitto/passwd
+docker/mosquitto/.mqtt-credentials-*
 .serena/
 
 # ========== WINDOWS INSTALLER BINARIES ==========

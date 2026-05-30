@@ -31,6 +31,7 @@
 #ifndef MQTT_USE_PUBSUBCLIENT
     #include "../../tasks/safety_task.h"         // g_safety_task_handle, NOTIFY_* bits
     #include "../../tasks/publish_queue.h"       // M3: Core 1 → Core 0 publish queue
+    #include "../../tasks/publish_queue_policy.h"
     #include "../../error_handling/error_tracker.h"
     // Forward declarations from main.cpp
     extern void routeIncomingMessage(const char* topic, const char* payload);
@@ -325,6 +326,7 @@ MQTTClient::MQTTClient()
       last_disconnect_ms_(0),
       manual_reconnect_suspended_(false),
       pending_session_announce_msg_id_(-1),
+      last_runtime_critical_publish_ms_(0UL),
 #endif
       publish_seq_(0),
       safe_publish_retry_count_(0),
@@ -447,6 +449,16 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     // Extra outbox headroom reduces transport write pressure during command bursts
     // (e.g. calibration/manual measurement + heartbeat + responses).
     mqtt_cfg.out_buffer_size = 8192;
+    // AUT-477: Flat esp_mqtt_client_config_t (Arduino-ESP32 SDK) has no runtime outbox.limit;
+    // OUTBOX capacity is compile-time in prebuilt libmqtt.a (default 4096 B).
+    // sdkconfig.defaults CONFIG_MQTT_OUTBOX_SIZE_BYTES=16384 does NOT apply to Arduino
+    // framework builds — runtime size is logged after MQTT_EVENT_CONNECTED.
+#if defined(CONFIG_MQTT_OUTBOX_SIZE_BYTES) && (CONFIG_MQTT_OUTBOX_SIZE_BYTES < 16384)
+#warning "AUT-477: CONFIG_MQTT_OUTBOX_SIZE_BYTES below 16384 — transport burst risk"
+#endif
+#if !defined(CONFIG_MQTT_OUTBOX_SIZE_BYTES)
+#pragma message("AUT-477: CONFIG_MQTT_OUTBOX_SIZE_BYTES undefined — expect prebuilt libmqtt OUTBOX=4096")
+#endif
 
     mqtt_cfg.client_id = config.client_id.c_str();
     if (!anonymous_mode_) {
@@ -511,24 +523,26 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     // [FIX2-VERIFY] Log MQTT buffer config at connect time so serial monitor confirms
     // CONFIG_MQTT_OUTBOX_SIZE_BYTES from sdkconfig is active.
     // out_buffer_size is the transport send buffer (runtime); OUTBOX is compile-time sdkconfig.
+    // compile-time CONFIG_MQTT_* may be absent with Arduino prebuilt SDK; runtime OUTBOX
+    // is additionally logged in MQTT_EVENT_CONNECTED via esp_mqtt_client_get_outbox_size().
     {
-        char cfg_log[160];
+        char cfg_log[192];
 #if defined(CONFIG_MQTT_OUTBOX_EXPIRED_TIMEOUT_MS)
         const unsigned outbox_expiry_ms = static_cast<unsigned>(CONFIG_MQTT_OUTBOX_EXPIRED_TIMEOUT_MS);
 #else
         const unsigned outbox_expiry_ms = 0U;
 #endif
 #if defined(CONFIG_MQTT_OUTBOX_SIZE_BYTES)
-        const unsigned outbox_size_bytes = static_cast<unsigned>(CONFIG_MQTT_OUTBOX_SIZE_BYTES);
+        const unsigned outbox_compile_bytes = static_cast<unsigned>(CONFIG_MQTT_OUTBOX_SIZE_BYTES);
 #else
-        const unsigned outbox_size_bytes = 16384U;
+        const unsigned outbox_compile_bytes = 0U;
 #endif
         snprintf(cfg_log, sizeof(cfg_log),
                  "[FIX2-VERIFY] MQTT cfg: out_buffer=%u buffer=%u "
-                 "OUTBOX=%u(sdkconfig) expiry=%ums net_timeout=%dms",
+                 "OUTBOX_COMPILE=%u runtime_logged_on_connect expiry=%ums net_timeout=%dms",
                  (unsigned)mqtt_cfg.out_buffer_size,
                  (unsigned)mqtt_cfg.buffer_size,
-                 outbox_size_bytes,
+                 outbox_compile_bytes,
                  outbox_expiry_ms,
                  mqtt_cfg.network_timeout_ms);
         LOG_I(TAG, cfg_log);
@@ -697,6 +711,66 @@ const char* MQTTClient::getLastPublishFailureReasonClassName() const {
 // ============================================
 // PUBLISHING (WITH CIRCUIT BREAKER)
 // ============================================
+#ifndef MQTT_USE_PUBSUBCLIENT
+bool MQTTClient::shouldApplyRuntimeCriticalPublishPace_(const String& topic) const {
+    if (topic.indexOf("/system/intent_outcome/lifecycle") >= 0) {
+        return false;
+    }
+    return isRealtimeResponsePublishTopic(topic) || isIntentOutcomePublishTopic(topic);
+}
+
+bool MQTTClient::deferRuntimeCriticalPublishPace_(const String& topic,
+                                                const String& payload,
+                                                uint8_t qos,
+                                                bool critical,
+                                                PublishFailureReasonClass* set_reason) {
+    if (!shouldApplyRuntimeCriticalPublishPace_(topic)) {
+        return false;
+    }
+
+    const unsigned long now_ms = millis();
+    if (last_runtime_critical_publish_ms_ == 0UL) {
+        return false;
+    }
+
+    const unsigned long next_allowed_ms =
+        last_runtime_critical_publish_ms_ + RUNTIME_CRITICAL_PUBLISH_INTER_PACE_MS;
+    if (now_ms >= next_allowed_ms) {
+        return false;
+    }
+
+    const unsigned long defer_ms = next_allowed_ms - now_ms;
+    IntentMetadata metadata =
+        extractIntentMetadataFromPayload(payload.c_str(), critical ? "critical_pub_pace" : "pub_pace");
+    const PublishQueueEnqueueResult pq =
+        tryQueuePublish(topic.c_str(), payload.c_str(), qos, false, critical, &metadata, defer_ms);
+    if (pq == PublishQueueEnqueueResult::Enqueued) {
+        if (set_reason != nullptr) {
+            *set_reason = PublishFailureReasonClass::None;
+        }
+        static unsigned long s_last_runtime_pace_log_ms = 0UL;
+        if (s_last_runtime_pace_log_ms == 0UL ||
+            (now_ms - s_last_runtime_pace_log_ms) >= 2000UL) {
+            s_last_runtime_pace_log_ms = now_ms;
+            LOG_D(TAG, String("[AUT-484] Runtime publish paced defer_ms=") + String(defer_ms) +
+                           " topic=" + topic);
+        }
+        return true;
+    }
+
+    if (set_reason != nullptr) {
+        *set_reason = mapQueueEnqueueResultToFailureReason(pq);
+    }
+    return false;
+}
+
+void MQTTClient::markRuntimeCriticalPublishCompleted_(const String& topic) {
+    if (shouldApplyRuntimeCriticalPublishPace_(topic)) {
+        last_runtime_critical_publish_ms_ = millis();
+    }
+}
+#endif
+
 bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos) {
     auto set_reason = [this](PublishFailureReasonClass reason) {
         last_publish_failure_reason_ = reason;
@@ -758,6 +832,14 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
         set_reason(PublishFailureReasonClass::TransportError);
         return false;
     }
+
+#ifndef MQTT_USE_PUBSUBCLIENT
+    const bool critical_for_pace = isCriticalPublishTopic(topic);
+    if (deferRuntimeCriticalPublishPace_(topic, payload, qos, critical_for_pace, nullptr)) {
+        set_reason(PublishFailureReasonClass::None);
+        return true;
+    }
+#endif
 
 #ifndef MQTT_USE_PUBSUBCLIENT
     if (mqtt_client_ == nullptr) {
@@ -895,6 +977,7 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
         } else {
             LOG_D(TAG, "Published [msg_id=" + String(msg_id) + "]: " + topic);
         }
+        markRuntimeCriticalPublishCompleted_(topic);
         return true;
     } else if (msg_id == -2) {
         uint32_t full_count = g_publish_outbox_full_count.fetch_add(1) + 1;
@@ -1342,7 +1425,22 @@ void MQTTClient::processManagedReconnect_() {
                    " last_errno=" + String(last_transport_errno_));
     // #endregion
 
-    esp_err_t err = esp_mqtt_client_reconnect(mqtt_client_);
+    esp_err_t err;
+    if (managed_reconnect_attempts_ > 5) {
+        /* AUT-539 Fix 2: Hard-Reset after 5 failed soft-reconnects.
+         * esp_mqtt_client_reconnect() hangs on CLOSE_WAIT zombie socket in
+         * esp_transport_close() — recovery loop breaks. stop+start mirrors the
+         * initial connect path (Z.467-472) and forces full transport teardown
+         * including socket close. */
+        ESP_LOGW(TAG, "[AUT-539] Hard-Reset MQTT-Client nach %u Soft-Reconnect-Versuchen",
+                 (unsigned)managed_reconnect_attempts_);
+        esp_mqtt_client_stop(mqtt_client_);
+        vTaskDelay(pdMS_TO_TICKS(200));
+        err = esp_mqtt_client_start(mqtt_client_);
+        managed_reconnect_attempts_ = 0;
+    } else {
+        err = esp_mqtt_client_reconnect(mqtt_client_);
+    }
     if (err != ESP_OK) {
         LOG_W(TAG, String("[INC-EA5484] managed reconnect request failed: ") + esp_err_to_name(err));
         // Keep managed reconnect active even after transient ESP_FAIL/INVALID_STATE.
@@ -1391,6 +1489,10 @@ void MQTTClient::processSubscriptionQueue() {
         if (is_config_topic && bootstrap_heartbeat_pending_) {
             pending_bootstrap_config_subscribe_msg_id_ = msg_id;
             LOG_I(TAG, "[SYNC] Bootstrap heartbeat waiting for config SUBSCRIBED (msg_id=" + String(msg_id) + ")");
+        }
+        // AUT-484 F1: Pace remaining bootstrap subscriptions to protect keepalive/TCP.
+        if (pending_subscription_count_ > 0) {
+            pending_subscriptions_[0].next_attempt_ms = millis() + SUBSCRIPTION_INTER_PACE_MS;
         }
         return;
     }
@@ -1443,13 +1545,10 @@ static uint32_t getRetryBackoffMs(uint8_t attempt) {
 
 // Drain limit per communication tick to avoid publish micro-bursts that can
 // saturate the TCP write path (observed as errno=11 under load).
-// AUT-54: Drain at most one queued publish per comm-task tick — was 3, which stacked
+// AUT-54: Drain at most one queued publish per comm-task tick by default — was 3, which stacked
 // multiple esp_mqtt_client_publish calls in one loop iteration and amplified TCP write
 // pressure during rapid actuator ON/OFF + sensor/heartbeat traffic.
-// AUT-360: Intentional fixed 1/tick — a separate write-timeout drain throttle (PKG-18)
-// became dead code once the default budget was lowered to 1; write-path backpressure is
-// still handled via retry/shed paths using isWritePathTimeoutErrno (AUT-55).
-static constexpr uint8_t PUBLISH_DRAIN_BUDGET_PER_TICK = 1;
+// AUT-481 P3: Adaptive boost to 2/tick when fill>=3 and transport is healthy (see policy helper).
 static constexpr uint8_t MAX_PRESSURE_DEFER_PER_MESSAGE = 3;
 
 void MQTTClient::processPublishQueue() {
@@ -1498,6 +1597,14 @@ void MQTTClient::processPublishQueue() {
     }
     processIntentOutcomeOutbox();
 
+    const uint8_t queue_fill_at_tick =
+        static_cast<uint8_t>(uxQueueMessagesWaiting(g_publish_queue));
+    const uint8_t drain_budget = computeAdaptivePublishDrainBudget(
+        queue_fill_at_tick,
+        transport_write_timeout_count_ > 0,
+        circuit_breaker_.allowRequest(),
+        isPublishQueuePaused());
+
     // AUT-117-fix: Write-timeout drain guard.
     // After a write timeout on this connection, esp_mqtt_client_publish() can block
     // again on the same degraded socket. If we continue draining here, we accumulate
@@ -1523,7 +1630,7 @@ void MQTTClient::processPublishQueue() {
     unsigned long now_ms = millis();
     uint8_t drained_this_tick = 0;
 
-    while (drained_this_tick < PUBLISH_DRAIN_BUDGET_PER_TICK &&
+    while (drained_this_tick < drain_budget &&
            xQueueReceive(g_publish_queue, &req, 0) == pdTRUE) {
         if (now_ms < req.next_retry_ms) {
             if (xQueueSend(g_publish_queue, &req, 0) != pdTRUE) {
@@ -1590,6 +1697,20 @@ void MQTTClient::processPublishQueue() {
                            " defer_count=" + String(req.pressure_defer_count));
         }
 
+        const String req_topic = String(req.topic);
+        if (shouldApplyRuntimeCriticalPublishPace_(req_topic)) {
+            const unsigned long next_allowed_ms =
+                last_runtime_critical_publish_ms_ + RUNTIME_CRITICAL_PUBLISH_INTER_PACE_MS;
+            if (last_runtime_critical_publish_ms_ > 0UL && now_ms < next_allowed_ms) {
+                req.next_retry_ms = next_allowed_ms;
+                if (xQueueSend(g_publish_queue, &req, 0) != pdTRUE) {
+                    LOG_W(TAG, "Runtime publish pace requeue failed, dropping: " + req_topic);
+                    g_publish_outbox_noncritical_drops.fetch_add(1);
+                }
+                break;
+            }
+        }
+
         const bool mqtt_connected_before_call = g_mqtt_connected.load();
         const bool wifi_connected_before_call = WiFi.isConnected();
         if (!mqtt_connected_before_call || !wifi_connected_before_call) {
@@ -1651,6 +1772,7 @@ void MQTTClient::processPublishQueue() {
             // Drain-Erfolge wurden vom CB nicht registriert.
             circuit_breaker_.recordSuccess();
             req.pressure_defer_count = 0;
+            markRuntimeCriticalPublishCompleted_(req_topic);
             continue;
         }
 
@@ -2184,6 +2306,16 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             LOG_I(TAG, String("[OUTBOX-TRACE] session_present=") +
                        String(event->session_present) +
                        " (1=broker replays pending QoS-1 state -> OUTBOX may pre-fill)");
+            if (self->mqtt_client_ != nullptr) {
+                const int runtime_outbox_bytes = esp_mqtt_client_get_outbox_size(self->mqtt_client_);
+                LOG_I(TAG, String("[FIX2-VERIFY] IDF runtime outbox_size=") +
+                           String(runtime_outbox_bytes) + " bytes");
+                if (runtime_outbox_bytes > 0 && runtime_outbox_bytes <= 4096) {
+                    LOG_W(TAG, "[AUT-477] OUTBOX at prebuilt default 4096 B — "
+                               "sdkconfig.defaults inactive (Arduino libmqtt.a); "
+                               "paced actuator bursts risk queue/outbox pressure");
+                }
+            }
 
             // Update shared connection state (atomic — read by Safety-Task Core 1)
             g_mqtt_connected.store(true);
@@ -2210,6 +2342,7 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             self->next_managed_reconnect_ms_ = 0;
             self->managed_reconnect_attempts_ = 0;
             self->manual_reconnect_suspended_ = false;
+            self->last_runtime_critical_publish_ms_ = 0UL;
 
             // PKG-18: Capture write-timeout history before counter reset.
             // Used below to decide post-reconnect queue stabilization duration.

@@ -197,6 +197,10 @@ private:
     static const uint8_t MAX_SUBSCRIBE_RETRIES = 6;
     static const unsigned long SUBSCRIBE_RETRY_BASE_MS = 200;
     static const unsigned long SUBSCRIBE_RETRY_MAX_MS = 5000;
+    // AUT-484 F1: Pace post-connect SUBSCRIBE bursts (keepalive/TCP headroom).
+    static const unsigned long SUBSCRIPTION_INTER_PACE_MS = 120;
+    // AUT-484: Pace runtime actuator/response + intent_outcome publishes (post-connect).
+    static const unsigned long RUNTIME_CRITICAL_PUBLISH_INTER_PACE_MS = 120;
 
     // ESP-IDF MQTT client handle
     esp_mqtt_client_handle_t mqtt_client_;
@@ -208,6 +212,13 @@ private:
 
     bool enqueueSubscription_(const String& topic, uint8_t qos, bool critical, bool front = false);
     void clearSubscriptionQueue_();
+    bool shouldApplyRuntimeCriticalPublishPace_(const String& topic) const;
+    bool deferRuntimeCriticalPublishPace_(const String& topic,
+                                          const String& payload,
+                                          uint8_t qos,
+                                          bool critical,
+                                          PublishFailureReasonClass* set_reason);
+    void markRuntimeCriticalPublishCompleted_(const String& topic);
     void scheduleManagedReconnect_(const char* reason, unsigned long base_delay_ms = 1500);
     void processManagedReconnect_();
     unsigned long computeReconnectJitterMs_(uint16_t attempt) const;
@@ -326,6 +337,7 @@ private:
     unsigned long last_disconnect_ms_;
     bool manual_reconnect_suspended_;
     int pending_session_announce_msg_id_;
+    unsigned long last_runtime_critical_publish_ms_;
 #endif
 
     static MQTTClient* instance_;

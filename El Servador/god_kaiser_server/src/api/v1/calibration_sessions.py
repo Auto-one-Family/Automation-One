@@ -60,7 +60,13 @@ class AddPointRequest(BaseModel):
 
     raw_value: float = Field(..., description="Raw ADC/sensor value")
     reference_value: float = Field(..., description="Known reference value")
-    point_role: str = Field(..., description="Calibration point role: dry|wet|buffer_high|buffer_low|reference|air")
+    point_role: str = Field(
+        ...,
+        description=(
+            "Calibration point role: "
+            "dry|wet|buffer_high|buffer_low|reference|air|reference_low|reference_high"
+        ),
+    )
     overwrite: bool = Field(default=False, description="Overwrite point with same role if true")
     quality: str = Field(default="good", max_length=20)
     intent_id: Optional[str] = Field(default=None, max_length=64)
@@ -78,8 +84,20 @@ class AddPointRequest(BaseModel):
     @classmethod
     def _validate_point_role(cls, value: str) -> str:
         normalized = value.strip().lower()
-        if normalized not in {"dry", "wet", "buffer_high", "buffer_low", "reference", "air"}:
-            raise ValueError("must be one of: dry, wet, buffer_high, buffer_low, reference, air")
+        if normalized not in {
+            "dry",
+            "wet",
+            "buffer_high",
+            "buffer_low",
+            "reference",
+            "air",
+            "reference_low",
+            "reference_high",
+        }:
+            raise ValueError(
+                "must be one of: dry, wet, buffer_high, buffer_low, "
+                "reference, air, reference_low, reference_high"
+            )
         return normalized
 
 
@@ -88,7 +106,13 @@ class UpdatePointRequest(BaseModel):
 
     raw_value: float = Field(..., description="Raw ADC/sensor value")
     reference_value: float = Field(..., description="Known reference value")
-    point_role: str = Field(..., description="Calibration point role: dry|wet|buffer_high|buffer_low|reference|air")
+    point_role: str = Field(
+        ...,
+        description=(
+            "Calibration point role: "
+            "dry|wet|buffer_high|buffer_low|reference|air|reference_low|reference_high"
+        ),
+    )
     quality: str = Field(default="good", max_length=20)
     intent_id: Optional[str] = Field(default=None, max_length=64)
     measured_at: Optional[str] = Field(default=None, max_length=64)
@@ -105,8 +129,20 @@ class UpdatePointRequest(BaseModel):
     @classmethod
     def _validate_point_role(cls, value: str) -> str:
         normalized = value.strip().lower()
-        if normalized not in {"dry", "wet", "buffer_high", "buffer_low", "reference", "air"}:
-            raise ValueError("must be one of: dry, wet, buffer_high, buffer_low, reference, air")
+        if normalized not in {
+            "dry",
+            "wet",
+            "buffer_high",
+            "buffer_low",
+            "reference",
+            "air",
+            "reference_low",
+            "reference_high",
+        }:
+            raise ValueError(
+                "must be one of: dry, wet, buffer_high, buffer_low, "
+                "reference, air, reference_low, reference_high"
+            )
         return normalized
 
 

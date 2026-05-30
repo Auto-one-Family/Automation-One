@@ -327,12 +327,9 @@ static void loadOutboxStatsIfNeeded() {
     loadOutboxStatsLocked();
 }
 
-static void persistOutboxStats() {
-    OutboxLockGuard guard("persist_stats");
-    if (!guard.locked()) {
-        LOG_W(IC_TAG, "Outbox stats lock timeout (persist)");
-        return;
-    }
+static bool s_outbox_stats_dirty = false;
+
+static void persistOutboxStatsLocked() {
     if (!beginOutcomeOutboxPrefs(false)) {
         return;
     }
@@ -346,6 +343,31 @@ static void persistOutboxStats() {
         markOutboxStorageDegraded("persist_stats", "stats");
     }
     s_outcome_outbox_prefs.end();
+}
+
+static void persistOutboxStats() {
+    OutboxLockGuard guard("persist_stats");
+    if (!guard.locked()) {
+        LOG_W(IC_TAG, "Outbox stats lock timeout (persist)");
+        return;
+    }
+    persistOutboxStatsLocked();
+}
+
+static void requestPersistOutboxStats() {
+    s_outbox_stats_dirty = true;
+}
+
+void processDeferredOutboxStatsPersist() {
+    if (!s_outbox_stats_dirty) {
+        return;
+    }
+    const PublishQueuePressureStats pq_stats = getPublishQueuePressureStats();
+    if (pq_stats.fill_level >= PUBLISH_QUEUE_SHED_WATERMARK) {
+        return;
+    }
+    s_outbox_stats_dirty = false;
+    persistOutboxStats();
 }
 
 static bool saveOutboxEntryAt(uint8_t idx,
@@ -976,8 +998,8 @@ static IntentMetadata extractIntentMetadataFromPayloadInternal(const char* paylo
     // Contract: primary fields are top-level (intent_id, correlation_id, generation, …).
     // Optional nested mirror under "data" is supported when the server wraps metadata
     // (data.intent_id, data.correlation_id, …). Top-level wins if both are present.
-    // 384 B was too tight for some large config payloads and caused false-negative
-    // "missing correlation_id" contract violations.
+    // 1024 B filter-parse: keep stack small on mqtt_task (actuator hot path).
+    // Config-only wire fallback: tryWireFillIntentCorrelation() when parse misses fields.
     StaticJsonDocument<1024> doc;
     StaticJsonDocument<256> filter;
     filter["intent_id"] = true;
@@ -1060,6 +1082,55 @@ IntentMetadata extractIntentMetadataFromPayload(const char* payload, const char*
 IntentMetadata extractIntentMetadataFromPayloadNoCorrelationFallback(const char* payload,
                                                                      const char* fallback_prefix) {
     return extractIntentMetadataFromPayloadInternal(payload, fallback_prefix, false);
+}
+
+static bool copyQuotedJsonField(const char* payload, const char* key, char* dest, size_t dest_len) {
+    if (payload == nullptr || key == nullptr || dest == nullptr || dest_len < 2) {
+        return false;
+    }
+    char needle[80];
+    const int needle_len = snprintf(needle, sizeof(needle), "\"%s\":\"", key);
+    if (needle_len <= 0 || static_cast<size_t>(needle_len) >= sizeof(needle)) {
+        return false;
+    }
+    const char* value_start = strstr(payload, needle);
+    if (value_start == nullptr) {
+        return false;
+    }
+    value_start += static_cast<size_t>(needle_len);
+    const char* value_end = strchr(value_start, '"');
+    if (value_end == nullptr || value_end <= value_start) {
+        return false;
+    }
+    size_t value_len = static_cast<size_t>(value_end - value_start);
+    if (value_len >= dest_len) {
+        value_len = dest_len - 1;
+    }
+    memcpy(dest, value_start, value_len);
+    dest[value_len] = '\0';
+    return value_len > 0;
+}
+
+void tryWireFillIntentCorrelation(IntentMetadata* metadata, const char* payload) {
+    if (metadata == nullptr || payload == nullptr || strlen(payload) == 0) {
+        return;
+    }
+    if (strlen(metadata->correlation_id) > 0) {
+        return;
+    }
+    char wire_id[CORRELATION_ID_MAX_LEN];
+    wire_id[0] = '\0';
+    if (!copyQuotedJsonField(payload, "correlation_id", wire_id, sizeof(wire_id)) &&
+        !copyQuotedJsonField(payload, "request_id", wire_id, sizeof(wire_id)) &&
+        !copyQuotedJsonField(payload, "intent_id", wire_id, sizeof(wire_id))) {
+        return;
+    }
+    strncpy(metadata->correlation_id, wire_id, sizeof(metadata->correlation_id) - 1);
+    metadata->correlation_id[sizeof(metadata->correlation_id) - 1] = '\0';
+    if (strlen(metadata->intent_id) == 0) {
+        strncpy(metadata->intent_id, wire_id, sizeof(metadata->intent_id) - 1);
+        metadata->intent_id[sizeof(metadata->intent_id) - 1] = '\0';
+    }
 }
 
 IntentInvalidationReason getIntentInvalidationReason(const IntentMetadata& metadata, uint32_t current_epoch) {
@@ -1174,6 +1245,7 @@ bool publishIntentOutcome(const char* flow,
                           bool retryable) {
     loadOutboxStatsIfNeeded();
     const char* normalized_outcome = outcome != nullptr ? outcome : "failed";
+    const bool terminal_outcome = isTerminalOutcome(normalized_outcome);
 
     // Defensive guard: intent_id must never be empty in the published payload.
     // An empty intent_id (e.g. from NVS migration, corruption or missing field) causes
@@ -1192,7 +1264,9 @@ bool publishIntentOutcome(const char* flow,
     }
     const IntentMetadata& active_metadata = safe_metadata;
     bool command_flow = flow != nullptr && strcmp(flow, "command") == 0;
-    if (command_flow) {
+    // Keep chain-stage chatter off the hot terminal path. This lowers per-command
+    // burst volume during OFF storms while preserving non-terminal tracing.
+    if (command_flow && !terminal_outcome) {
         recordIntentChainStage(active_metadata,
                                "outcome_publish_attempted",
                                flow,
@@ -1200,7 +1274,7 @@ bool publishIntentOutcome(const char* flow,
                                "attempting outcome publish");
     }
     bool critical = isCriticalOutcomeClass(flow, normalized_outcome);
-    if (isTerminalOutcome(normalized_outcome)) {
+    if (terminal_outcome) {
         bool allow_publish = true;
         bool regression_blocked = false;
         char previous_final_outcome[16] = {0};
@@ -1256,10 +1330,9 @@ bool publishIntentOutcome(const char* flow,
     processIntentOutcomeOutbox();
 
     String topic = TopicBuilder::buildIntentOutcomeTopic();
-    // AUT-54: All intent_outcome publishes at QoS 0. Terminal QoS-1 filled the IDF OUTBOX;
-    // slow PUBACK + OUTBOX-expiry housekeeping caused write-timeout disconnects (AAAAA.md).
-    // Critical outcomes still persist to NVS and replay when publish fails.
-    const uint8_t outcome_qos = 0;
+    // Terminal command outcomes must be durable for end-to-end finality.
+    // Keep non-terminal chatter at QoS 0, but elevate command terminal frames.
+    const uint8_t outcome_qos = (command_flow && terminal_outcome) ? 1 : 0;
     uint8_t outcome_retries = 3;
 #ifndef MQTT_USE_PUBSUBCLIENT
     const PublishQueuePressureStats pq_stats = getPublishQueuePressureStats();
@@ -1271,7 +1344,7 @@ bool publishIntentOutcome(const char* flow,
     bool ok = mqttClient.safePublish(topic, payload, outcome_qos, outcome_retries);
     bool persisted_for_replay = false;
     if (ok) {
-        if (command_flow) {
+        if (command_flow && !terminal_outcome) {
             recordIntentChainStage(active_metadata,
                                    "outcome_publish_ok",
                                    flow,
@@ -1279,10 +1352,10 @@ bool publishIntentOutcome(const char* flow,
                                    "outcome publish delivered");
         }
         s_outcome_final_confirmed_count++;
-        persistOutboxStats();
+        requestPersistOutboxStats();
     }
     if (!ok) {
-        if (command_flow) {
+        if (command_flow && !terminal_outcome) {
             recordIntentChainStage(active_metadata,
                                    "outcome_publish_failed",
                                    flow,
@@ -1309,7 +1382,7 @@ bool publishIntentOutcome(const char* flow,
                 persisted_for_replay = true;
                 LOG_W(IC_TAG, "[INC-EA5484] Critical outcome persisted for replay [" + String(active_metadata.intent_id) + "]");
             }
-            persistOutboxStats();
+            requestPersistOutboxStats();
         }
     }
     return ok || persisted_for_replay;

@@ -21,7 +21,7 @@ Error Codes:
 import asyncio
 import time as _time_module
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from ...core.config import get_settings
 from ...core.error_codes import (
@@ -281,6 +281,14 @@ class SensorDataHandler:
                     # raw_mode defaults to True (ESP32 always works in raw mode)
                     raw_mode = payload.get("raw_mode", True)
 
+                    sampling_metadata: dict[str, Any] = {}
+                    if payload.get("sample_count") is not None:
+                        sampling_metadata["sample_count"] = int(payload["sample_count"])
+                    if payload.get("adc_stddev") is not None:
+                        sampling_metadata["adc_stddev"] = float(payload["adc_stddev"])
+                    if payload.get("stable") is not None:
+                        sampling_metadata["stable"] = bool(payload["stable"])
+
                     # AUT-327: EC ADC reads 0 on disconnected probe or power fault → drop before persist.
                     # A raw ADC of 0 on an ESP32 12-bit ADC (range 0–4095) is physically implausible
                     # for a connected EC probe and indicates a hardware fault, not a valid measurement.
@@ -324,6 +332,7 @@ class SensorDataHandler:
                         # ATC pre-lookup: for EC sensors, fetch latest temperature from
                         # this ESP before calling the processor (session available here).
                         if sensor_type == "ec":
+                            ec_extra_params.update(sampling_metadata)
                             atc_temp, atc_source = await self._try_get_ec_temperature(
                                 esp_device, session, sensor_config=sensor_config
                             )
@@ -365,6 +374,10 @@ class SensorDataHandler:
                             # Filtered out before passing to processor (processor ignores unknown keys
                             # but we strip it explicitly below to keep the interface clean).
                             ec_extra_params["_atc_source"] = atc_source
+                            ec_extra_params["temp_compensated"] = atc_source not in (
+                                "default_25",
+                                None,
+                            )
 
                         # AUT-320: ATC pre-lookup for pH sensors.
                         # PHSensorProcessor._apply_temperature_compensation() applies
@@ -432,6 +445,11 @@ class SensorDataHandler:
                             processed_value = pi_result["processed_value"]
                             unit = pi_result["unit"]
                             quality = pi_result["quality"]
+                            proc_meta = pi_result.get("metadata") or {}
+                            if proc_meta.get("ec_stddev") is not None:
+                                sampling_metadata["ec_stddev"] = proc_meta["ec_stddev"]
+                            if proc_meta.get("calibrated") is not None:
+                                sampling_metadata["calibrated"] = proc_meta["calibrated"]
 
                             # Publish processed data back to ESP
                             self.publisher.publish_pi_enhanced_response(
@@ -575,6 +593,7 @@ class SensorDataHandler:
 
                     # Build metadata with interface addresses for historical traceability
                     sensor_metadata = {"raw_mode": raw_mode}
+                    sensor_metadata.update(sampling_metadata)
                     if i2c_address:
                         sensor_metadata["i2c_address"] = i2c_address
                     if onewire_address:
@@ -586,6 +605,9 @@ class SensorDataHandler:
                             "temperature_compensation", 25.0
                         )
                         sensor_metadata["temp_source"] = atc_source_meta
+                        sensor_metadata["temp_compensated"] = ec_extra_params.get(
+                            "temp_compensated", False
+                        )
                     # AUT-320: Enrich metadata for pH sensors with ATC provenance
                     if sensor_type == "ph" and ph_extra_params:
                         ph_atc_source_meta = ph_extra_params.get("_atc_source", "default_25c")
@@ -706,6 +728,7 @@ class SensorDataHandler:
                                 "config_id": str(sensor_config.id) if sensor_config else None,
                                 "i2c_address": i2c_address if i2c_address else None,
                                 "onewire_address": onewire_address if onewire_address else None,
+                                **sampling_metadata,
                             },
                         )
                     except Exception as e:
@@ -1613,6 +1636,30 @@ class SensorDataHandler:
                     f"esp_id={payload.get('esp_id')}, gpio={payload.get('gpio')}"
                 )
 
+        if payload.get("sample_count") is not None and not isinstance(payload["sample_count"], int):
+            return {
+                "valid": False,
+                "error": "Field 'sample_count' must be integer",
+                "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+            }
+
+        if payload.get("adc_stddev") is not None:
+            try:
+                float(payload["adc_stddev"])
+            except (ValueError, TypeError):
+                return {
+                    "valid": False,
+                    "error": "Field 'adc_stddev' must be numeric",
+                    "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+                }
+
+        if payload.get("stable") is not None and not isinstance(payload["stable"], bool):
+            return {
+                "valid": False,
+                "error": "Field 'stable' must be boolean",
+                "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+            }
+
         # Validate i2c_address field (optional, for I2C sensor identification)
         i2c_address = payload.get("i2c_address")
         if i2c_address is not None:
@@ -1822,6 +1869,7 @@ class SensorDataHandler:
                 "processed_value": result.value,
                 "unit": result.unit,
                 "quality": result.quality,
+                "metadata": result.metadata,
             }
 
         except Exception as e:

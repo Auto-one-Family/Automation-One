@@ -25,6 +25,20 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       host: '0.0.0.0',
+      allowedHosts: [
+        'localhost',
+        '127.0.0.1',
+        'pi-home',
+        'pi-elbherb',
+        'phyta',
+        '.ts.net',
+        'growy2',
+        'growy2.local',
+        'AutoOne44',
+        'AutoOne44.local',
+        '192.168.0.2',
+        '192.168.178.67',
+      ],
       proxy: {
         '/api': {
           target: env.VITE_API_TARGET || 'http://localhost:8000',

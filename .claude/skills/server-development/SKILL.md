@@ -530,7 +530,8 @@ LogicEngine
 │   └── SequenceActionExecutor (Sub-Aktionen)
 │
 └── Safety Components
-    ├── ConflictManager (Actuator-Konflikte)
+    ├── ConflictManager (Actuator-Konflikte, Regel-vs-Regel)
+    ├── ActuatorService.send_command (pro `esp_id:gpio` asyncio.Lock — serialisiert Manual+Logic-MQTT)
     ├── RateLimiter (max_executions_per_hour)
     └── LoopDetector (Feedback-Schleifen)
 ```

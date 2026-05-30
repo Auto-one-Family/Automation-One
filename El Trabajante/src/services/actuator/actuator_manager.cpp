@@ -3,6 +3,8 @@
 #include <memory>
 
 #include "../../tasks/rtos_globals.h"  // SAFETY-RTOS M4: g_actuator_mutex
+#include "../../tasks/publish_queue.h"
+#include "../../tasks/publish_queue_policy.h"
 #include "../../drivers/gpio_manager.h"
 #include "../../error_handling/error_tracker.h"
 #include "../../models/config_types.h"
@@ -85,6 +87,40 @@ bool extractJSONBool(const String& json, const String& key, bool default_value =
 }
 
 }  // namespace
+
+void ActuatorManager::preserveSoftPolicyFromRegistered(ActuatorConfig& merged,
+                                                       const ActuatorConfig& policy) {
+  merged.fail_safe_on_disconnect = policy.fail_safe_on_disconnect;
+  merged.has_fail_safe_override  = policy.has_fail_safe_override;
+  merged.critical                = policy.critical;
+  merged.actuator_name           = policy.actuator_name;
+  merged.subzone_id              = policy.subzone_id;
+  merged.inverted_logic          = policy.inverted_logic;
+  merged.default_state           = policy.default_state;
+  merged.default_pwm             = policy.default_pwm;
+  merged.runtime_protection.max_runtime_ms = policy.runtime_protection.max_runtime_ms;
+  merged.runtime_protection.timeout_enabled = policy.runtime_protection.timeout_enabled;
+}
+
+void ActuatorManager::syncRegisteredConfigFromDriver(RegisteredActuator& slot) {
+  if (!slot.driver) {
+    return;
+  }
+  const ActuatorConfig policy = slot.config;
+  slot.config = slot.driver->getConfig();
+  preserveSoftPolicyFromRegistered(slot.config, policy);
+}
+
+void ActuatorManager::syncDriverSoftPolicyFromRegistered(RegisteredActuator& slot) {
+  if (!slot.driver) {
+    return;
+  }
+  if (slot.config.actuator_type == String(ActuatorTypeTokens::PUMP) ||
+      slot.config.actuator_type == String(ActuatorTypeTokens::RELAY)) {
+    static_cast<PumpActuator*>(slot.driver.get())
+        ->syncRuntimeLimitsFromConfig(slot.config);
+  }
+}
 
 ActuatorManager& ActuatorManager::getInstance() {
   static ActuatorManager instance;
@@ -241,6 +277,8 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
                         (prev.inverted_logic   != config.inverted_logic)   ||
                         (prev.default_state    != config.default_state)    ||
                         (prev.default_pwm      != config.default_pwm)        ||
+                        (prev.fail_safe_on_disconnect != config.fail_safe_on_disconnect) ||
+                        (prev.has_fail_safe_override  != config.has_fail_safe_override)  ||
                         (prev.runtime_protection.max_runtime_ms !=
                             config.runtime_protection.max_runtime_ms)      ||
                         (prev.runtime_protection.timeout_enabled !=
@@ -263,6 +301,8 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
       existing->config.inverted_logic  = config.inverted_logic;
       existing->config.default_state   = config.default_state;
       existing->config.default_pwm     = config.default_pwm;
+      existing->config.fail_safe_on_disconnect = config.fail_safe_on_disconnect;
+      existing->config.has_fail_safe_override  = config.has_fail_safe_override;
       {
         unsigned long keep_activation = existing->config.runtime_protection.activation_start_ms;
         existing->config.runtime_protection.max_runtime_ms   =
@@ -271,11 +311,7 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
             config.runtime_protection.timeout_enabled;
         existing->config.runtime_protection.activation_start_ms = keep_activation;
       }
-      if (existing->driver &&
-          existing->config.actuator_type == String(ActuatorTypeTokens::PUMP)) {
-        static_cast<PumpActuator*>(existing->driver.get())
-            ->syncRuntimeLimitsFromConfig(existing->config);
-      }
+      syncDriverSoftPolicyFromRegistered(*existing);
 
       ActuatorConfig actuators[MAX_ACTUATORS];
       uint8_t count = 0;
@@ -453,7 +489,7 @@ bool ActuatorManager::controlActuator(uint8_t gpio, float value) {
   }
 
   bool success = actuator->driver->setValue(normalized_value);
-  actuator->config = actuator->driver->getConfig();
+  syncRegisteredConfigFromDriver(*actuator);
 
   // Phase 2: Runtime protection - track activation timestamp
   if (success) {
@@ -493,7 +529,7 @@ bool ActuatorManager::controlActuatorBinary(uint8_t gpio, bool state) {
   }
 
   bool success = actuator->driver->setBinary(state);
-  actuator->config = actuator->driver->getConfig();
+  syncRegisteredConfigFromDriver(*actuator);
 
   // Phase 2: Runtime protection - track activation timestamp
   if (success) {
@@ -551,7 +587,7 @@ bool ActuatorManager::clearEmergencyStop() {
       success = false;
     } else {
       actuators_[i].emergency_stopped = false;
-      actuators_[i].config = actuators_[i].driver->getConfig();
+      syncRegisteredConfigFromDriver(actuators_[i]);
     }
   }
   return success;
@@ -565,7 +601,7 @@ bool ActuatorManager::clearEmergencyStopActuator(uint8_t gpio) {
   bool cleared = actuator->driver->clearEmergency();
   if (cleared) {
     actuator->emergency_stopped = false;
-    actuator->config = actuator->driver->getConfig();
+    syncRegisteredConfigFromDriver(*actuator);
     publishActuatorStatus(gpio);
   }
   return cleared;
@@ -667,7 +703,7 @@ void ActuatorManager::processActuatorLoops() {
       actuators_[i].last_command_source = "firmware:auto_duration";
       controlActuatorBinary(actuators_[i].config.gpio, false);
       // controlActuatorBinary already calls publishActuatorStatus on state change — no second call.
-      actuators_[i].config = actuators_[i].driver->getConfig();
+      syncRegisteredConfigFromDriver(actuators_[i]);
       continue;  // Skip further processing this iteration
     }
 
@@ -702,7 +738,7 @@ void ActuatorManager::processActuatorLoops() {
 
     // Regular driver loop processing
     actuators_[i].driver->loop();
-    actuators_[i].config = actuators_[i].driver->getConfig();
+    syncRegisteredConfigFromDriver(actuators_[i]);
   }
   xSemaphoreGive(g_actuator_mutex);
 }
@@ -1056,8 +1092,16 @@ void ActuatorManager::publishActuatorStatus(uint8_t gpio) {
     return;
   }
 
+  const PublishQueuePressureStats pq_stats = getPublishQueuePressureStats();
+  if (shouldDeferActuatorStatusPublish(pq_stats.fill_level)) {
+    LOG_D(TAG, "[AUT-481] Deferring actuator status publish (fill=" +
+              String(pq_stats.fill_level) + "/" + String(PUBLISH_QUEUE_SIZE) +
+              " gpio=" + String(gpio) + ")");
+    return;
+  }
+
   ActuatorStatus status = actuator->driver->getStatus();
-  actuator->config = actuator->driver->getConfig();
+  syncRegisteredConfigFromDriver(*actuator);
   String payload = buildStatusPayload(status, actuator->config);
   const char* topic = TopicBuilder::buildActuatorStatusTopic(gpio);
   // AUT-326: QoS 0 — actuator status is supplementary telemetry, not a safety signal.

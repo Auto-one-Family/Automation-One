@@ -780,6 +780,7 @@ void routeIncomingMessage(const char* t, const char* p) {
     String config_topic = String(TopicBuilder::buildConfigTopic());
     if (topic == config_topic) {
         IntentMetadata metadata = extractIntentMetadataFromPayloadNoCorrelationFallback(payload.c_str(), "cfg");
+        tryWireFillIntentCorrelation(&metadata, payload.c_str());
         String corr_id = String(metadata.correlation_id);
         if (corr_id.length() == 0) {
             String fallback_corr_id = ensureCorrelationId(corr_id);
@@ -3241,7 +3242,9 @@ void setup() {
   mqtt_config.client_id = configManager.getESPId();
   mqtt_config.username = wifi_config.mqtt_username;  // Can be empty (Anonymous)
   mqtt_config.password = wifi_config.mqtt_password;  // Can be empty (Anonymous)
-  mqtt_config.keepalive = 90;
+  // AUT-539 Fix 3: 90s -> 60s. FritzBox-NAT-Timeout typ. 300s.
+  // k=60 -> 5 PINGREQ/5min Marge; k=90 wuerde nur 3 erlauben.
+  mqtt_config.keepalive = 60;
   mqtt_config.timeout = 10;
 
   if (!mqttClient.connect(mqtt_config)) {
@@ -4380,10 +4383,34 @@ SensorCommandExecutionResult handleSensorCommand(const String& topic, const Stri
         timeout_ms = requested_timeout;
       }
     }
-    LOG_I(TAG, "Manual measurement requested for GPIO " + String(gpio) +
-                   " (timeout_ms=" + String(timeout_ms) + ")");
 
-    ManualMeasurementResult measurement = sensorManager.triggerManualMeasurement(gpio, timeout_ms);
+    uint8_t sample_count = 0;
+    if (!doc["sample_count"].isNull()) {
+      uint32_t requested_samples = doc["sample_count"].as<uint32_t>();
+      if (requested_samples > 32) {
+        sample_count = 32;
+      } else {
+        sample_count = static_cast<uint8_t>(requested_samples);
+      }
+    }
+
+    uint16_t sample_delay_ms = 0;
+    if (!doc["sample_delay_ms"].isNull()) {
+      uint32_t requested_delay = doc["sample_delay_ms"].as<uint32_t>();
+      if (requested_delay > 1000) {
+        sample_delay_ms = 1000;
+      } else {
+        sample_delay_ms = static_cast<uint16_t>(requested_delay);
+      }
+    }
+
+    LOG_I(TAG, "Manual measurement requested for GPIO " + String(gpio) +
+                   " (timeout_ms=" + String(timeout_ms) +
+                   ", sample_count=" + String(sample_count) +
+                   ", sample_delay_ms=" + String(sample_delay_ms) + ")");
+
+    ManualMeasurementResult measurement =
+        sensorManager.triggerManualMeasurement(gpio, timeout_ms, sample_count, sample_delay_ms);
     bool success = measurement.measurement_ok && measurement.publish_ok && !measurement.timeout_reached;
 
     // Send response with request_id and intent metadata (E-P4)
@@ -4403,6 +4430,11 @@ SensorCommandExecutionResult handleSensorCommand(const String& topic, const Stri
       response["raw"] = measurement.raw_value;
       response["ts"] = timeManager.getUnixTimestamp();
       response["seq"] = mqttClient.getNextSeq();
+      if (measurement.has_sampling_stats && measurement.sample_count > 1) {
+        response["sample_count"] = measurement.sample_count;
+        response["adc_stddev"] = measurement.adc_stddev;
+        response["stable"] = measurement.stable;
+      }
 
       // E-P4: Include intent metadata for server-side correlation
       if (strlen(metadata.intent_id) > 0) {

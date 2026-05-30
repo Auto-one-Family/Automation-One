@@ -47,6 +47,8 @@ class WebSocketManager:
         # Critical lifecycle events must never be dropped by per-client WS throttling.
         # Otherwise UI can miss online transitions and notification updates under burst load.
         self._rate_limit_bypass_types = {
+            # AUT-481 P2: live sensor stream must survive actuator intent bursts
+            "sensor_data",
             # Critical GPIO state changes (AUT-68) — must never be dropped under load
             "actuator_status",
             # PKG-04a: guard-replay terminal event, never rate-limit

@@ -1,7 +1,8 @@
 # SYSTEM_OPERATIONS_REFERENCE.md
 
-> **Version:** 2.18 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-05-22
+> **Version:** 2.19 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-05-25
 > **Zweck:** Vollständige Befehls-Referenz für Debug-Operations-Agent
+> **Änderungen 2.19:** §5.0 Linux/Pi: kanonischer PIO-Pfad `El Trabajante/.venv-pio/bin/pio`, Flash/Monitor mit `/dev/ttyUSB0`, Port-Freigabe vor Upload.
 > **Änderungen 2.18:** Pi-5 Runtime-Check ergänzt (Docker Full-Stack healthy, 2 ESPs online via MQTT/DB), DB-Zugang in §1.1 auf Docker-PostgreSQL als Standard präzisiert, Hardware-Profile-Hinweis in §8.6 um `automationone-esp32-serial`-Fallback erweitert.
 > **Änderungen 2.17:** Windows `scripts/windows/ensure-dev-prerequisites.ps1` (externes Netzwerk `shared-infra-net`, optionale `.env` aus Vorlage); Frontend `El Frontend/.env.development` mit `VITE_API_URL` / `VITE_WS_URL`; §0.1.1 Playwright-Login-Fallback vs. CI
 > **Änderungen 2.16:** Grafana Operations-Dashboard (`system-health.json`): Prometheus-Panels für `god_kaiser_mqtt_errors_total` / `god_kaiser_ws_contract_mismatch_total`; §8.5 Beispielqueries ergänzt
@@ -1135,16 +1136,41 @@ mosquitto_pub -h localhost -t "kaiser/broadcast/emergency" -r -n
 
 ## 5. ESP32-Hardware
 
-**Hinweis:** `pio` ist in Git Bash nicht im PATH. Vollständiger Pfad: `~/.platformio/penv/Scripts/pio.exe` (v6.1.18). Build, Flash UND zeitbegrenzter Monitor funktionieren aus Git Bash (COM5/CH340 verifiziert 2026-02-26). Fuer interaktiven Monitor (Ctrl+C) PowerShell nutzen.
+### 5.0 Linux / Raspberry Pi (Repo-Host, kanonisch)
+
+`pio` ist **nicht** im globalen PATH. Immer die venv-Binary unter dem Firmware-Projekt verwenden:
+
+| Was | Pfad |
+|-----|------|
+| PlatformIO CLI | `/home/robin/autoone/El Trabajante/.venv-pio/bin/pio` |
+| Projektroot | `/home/robin/autoone/El Trabajante` |
+| USB-Serial (typisch CH340) | `/dev/ttyUSB0` |
+| Monitor-Logs | `El Trabajante/logs/device-monitor-*.log` |
+
+```bash
+PIO="/home/robin/autoone/El Trabajante/.venv-pio/bin/pio"
+FW="/home/robin/autoone/El Trabajante"
+PORT="/dev/ttyUSB0"
+
+cd "$FW"
+$PIO device list
+$PIO run -e esp32_dev
+docker stop automationone-esp32-serial 2>/dev/null || true   # Port freigeben falls Serial-Logger läuft
+$PIO run -e esp32_dev -t upload --upload-port "$PORT"
+$PIO device monitor -e esp32_dev --port "$PORT"
+```
+
+**Hinweis Windows:** `pio` ist in Git Bash nicht im PATH. Vollständiger Pfad: `~/.platformio/penv/Scripts/pio.exe` (v6.1.18). Build, Flash UND zeitbegrenzter Monitor funktionieren aus Git Bash (COM5/CH340 verifiziert 2026-02-26). Fuer interaktiven Monitor (Ctrl+C) PowerShell nutzen.
 
 ### 5.1 Flash-Operationen
 
 ```bash
 # Projekt-Verzeichnis
 cd "El Trabajante"
+PIO=".venv-pio/bin/pio"   # Linux/Pi: absolut siehe §5.0
 
 # Build (ESP32 Dev Board)
-pio run -e esp32_dev
+$PIO run -e esp32_dev
 
 # Build (XIAO ESP32-C3)
 pio run -e seeed_xiao_esp32c3
@@ -1157,14 +1183,14 @@ pio run -e wokwi_esp01  # ESP_00000001
 pio run -e wokwi_esp02  # ESP_00000002
 pio run -e wokwi_esp03  # ESP_00000003
 
-# Flash/Upload
-pio run -e esp32_dev -t upload
+# Flash/Upload (Linux: --upload-port /dev/ttyUSB0)
+$PIO run -e esp32_dev -t upload --upload-port /dev/ttyUSB0
 
 # Flash komplett löschen (NVS + Firmware)
-pio run -e esp32_dev -t erase
+$PIO run -e esp32_dev -t erase
 
 # Build + Upload in einem
-pio run -e esp32_dev -t upload
+$PIO run -e esp32_dev -t upload --upload-port /dev/ttyUSB0
 ```
 
 ### 5.2 Monitoring

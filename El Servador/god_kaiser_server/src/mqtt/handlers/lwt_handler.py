@@ -21,7 +21,7 @@ Error Codes:
 import time as time_module
 from collections import deque
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -42,6 +42,7 @@ from ...db.repositories.actuator_repo import ActuatorRepository
 from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...db.session import resilient_session
 from ...services.event_contract_serializers import serialize_esp_health_event
+from ...services.intent_outcome_contract import serialize_intent_outcome_row
 from ...services.system_event_contract import canonicalize_lwt
 from ...services.state_adoption_service import get_state_adoption_service
 from ..topics import TopicBuilder
@@ -178,6 +179,19 @@ class LWTHandler:
                         f"LWT for unknown device {esp_id_str} - ignoring"
                     )
                     return True  # Return True to acknowledge message
+
+                disconnect_reason = str(payload.get("reason", "unexpected_disconnect"))
+                swept_intent_payloads = await self._sweep_open_intents_for_disconnect(
+                    contract_repo=contract_repo,
+                    esp_id=esp_id_str,
+                    reason=disconnect_reason,
+                )
+                if swept_intent_payloads:
+                    logger.warning(
+                        "[LWT] Swept %d open intent(s) to terminal_failed for %s",
+                        len(swept_intent_payloads),
+                        esp_id_str,
+                    )
 
                 # Step 5: Update device status to offline for every non-offline status.
                 # LWT must be terminal-authoritative even when a device is currently
@@ -389,6 +403,10 @@ class LWTHandler:
                         from ...websocket.manager import WebSocketManager
 
                         ws_manager = await WebSocketManager.get_instance()
+                        await self._broadcast_swept_intent_outcomes(
+                            ws_manager=ws_manager,
+                            intent_payloads=swept_intent_payloads,
+                        )
                         broadcast_payload = serialize_esp_health_event(
                             esp_id=esp_id_str,
                             status="offline",
@@ -412,6 +430,24 @@ class LWTHandler:
                         logger.warning(f"Failed to broadcast LWT event via WebSocket: {e}")
 
                 else:
+                    # Even if the device status was already offline, a reconnect-race can leave
+                    # command intents open; still emit sweep outcomes for frontend reconciliation.
+                    if swept_intent_payloads:
+                        await session.commit()
+                        try:
+                            from ...websocket.manager import WebSocketManager
+
+                            ws_manager = await WebSocketManager.get_instance()
+                            await self._broadcast_swept_intent_outcomes(
+                                ws_manager=ws_manager,
+                                intent_payloads=swept_intent_payloads,
+                            )
+                        except Exception as ws_err:
+                            logger.warning(
+                                "Failed to broadcast LWT intent sweep events for %s: %s",
+                                esp_id_str,
+                                ws_err,
+                            )
                     logger.debug(f"Device {esp_id_str} already offline, LWT ignored")
 
                 return True
@@ -506,6 +542,69 @@ class LWTHandler:
 
         # Final fallback keeps deterministic shape while avoiding permanent "ts:0".
         return str(int(datetime.now(timezone.utc).timestamp()))
+
+    async def _sweep_open_intents_for_disconnect(
+        self,
+        *,
+        contract_repo: CommandContractRepository,
+        esp_id: str,
+        reason: str,
+    ) -> list[dict[str, Any]]:
+        open_intents = await contract_repo.list_open_intents_for_esp(esp_id=esp_id)
+        if not open_intents:
+            return []
+
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        broadcast_payloads: list[dict[str, Any]] = []
+        for intent in open_intents:
+            outcome_payload = {
+                "intent_id": intent.intent_id,
+                "correlation_id": intent.correlation_id,
+                "flow": intent.flow,
+                "outcome": "failed",
+                "is_final": True,
+                "code": "ESP_DISCONNECTED_BEFORE_OUTCOME",
+                "reason": f"ESP disconnected before terminal outcome (LWT): {reason}",
+                "retryable": False,
+                "ts": now_ts,
+            }
+            outcome_row, is_stale = await contract_repo.upsert_outcome(outcome_payload, esp_id=esp_id)
+            if is_stale:
+                continue
+
+            payload = {
+                "esp_id": esp_id,
+                **serialize_intent_outcome_row(outcome_row),
+                "domain": outcome_row.flow or "command",
+                "severity": "error",
+                "terminality": "terminal_failure",
+                "retry_policy": "forbidden",
+                "contract_violation": False,
+                "raw_flow": outcome_row.flow,
+                "raw_outcome": outcome_row.outcome,
+                "reconciliation": {"source": "lwt_disconnect_sweep"},
+                "ts": outcome_row.ts or now_ts,
+            }
+            broadcast_payloads.append(payload)
+        return broadcast_payloads
+
+    async def _broadcast_swept_intent_outcomes(
+        self,
+        *,
+        ws_manager: Any,
+        intent_payloads: list[dict[str, Any]],
+    ) -> None:
+        for intent_payload in intent_payloads:
+            correlation_id = (
+                str(intent_payload.get("correlation_id")).strip()
+                if intent_payload.get("correlation_id") is not None
+                else None
+            )
+            await ws_manager.broadcast(
+                "intent_outcome",
+                intent_payload,
+                correlation_id=correlation_id or None,
+            )
 
 
 # Global handler instance

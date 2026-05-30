@@ -242,7 +242,7 @@ extern ConfigManager& configManager;
 
 **Backends:** **Standard (ohne Define, `esp32_dev`):** ESP-IDF MQTT (`esp_mqtt_client_handle_t`, `g_mqtt_connected`, Event-Handler `MQTT_EVENT_*`). **`MQTT_USE_PUBSUBCLIENT=1`** (seeed_xiao, Wokwi): PubSubClient + `offline_buffer_`, `setCallback`. Partition/SDK: `sdkconfig.defaults` (OUTBOX 16384, `CONFIG_MQTT_TASK_CORE_SELECTION_*`); S3-Env merged `sdkconfig.s3.defaults` (OUTBOX 65536, LWIP 32768, AUT-494).
 
-**SAFETY-RTOS M3 (nur ESP-IDF):** `void processPublishQueue()` leert `g_publish_queue` (Core 1 → Core 0); Aufruf aus `communication_task.cpp` nach `loop()`. `publish()` auf Core 1 enqueued. Queue-Konstanten in `publish_queue.h`: Dev/WROOM 8×1536 B, Shed-Watermark 4; S3 N8R8 (`ESP32_S3_DEVKIT_MODE`) 16×2048 B, Shed-Watermark 8 (AUT-495).
+**SAFETY-RTOS M3 (nur ESP-IDF):** `void processPublishQueue()` leert `g_publish_queue` (Core 1 → Core 0); Aufruf aus `communication_task.cpp` nach `loop()`. `publish()` auf Core 1 enqueued. Queue-Konstanten: Basis-Sizing in `publish_queue_constants.h` (SIZE=10, SHED=5, AUT-481 P3); adaptive Drain 1–2/Tick (`publish_queue_policy.h`); S3 N8R8 (`ESP32_S3_DEVKIT_MODE`) überschreibt in `publish_queue.h` auf 16×2048 B, Shed-Watermark 8 (AUT-495).
 
 **Dependencies:** WiFiManager, CircuitBreaker, TopicBuilder
 ```cpp
@@ -862,6 +862,7 @@ struct IntentMetadata {
 
 void initIntentMetadata(IntentMetadata* metadata);
 IntentMetadata extractIntentMetadataFromPayload(const char* payload, const char* fallback_prefix);
+void tryWireFillIntentCorrelation(IntentMetadata* metadata, const char* payload);  // config-only, strstr
 bool isIntentExpired(const IntentMetadata& metadata, uint32_t current_epoch);
 bool isRecoveryIntentAllowed(const char* topic, const char* payload);
 
@@ -879,7 +880,7 @@ uint32_t getCriticalOutcomeDropCountTelemetry();  // Heartbeat / Telemetrie
 **Outcome-Werte:** `accepted` | `rejected` | `applied` | `persisted` | `failed` | `expired`
 **Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/system/intent_outcome` (QoS 1)
 **Lifecycle-Subtopic (CONFIG_PENDING-Transitions, nicht kanonisches Outcome-JSON):** `.../system/intent_outcome/lifecycle` — `TopicBuilder::buildIntentOutcomeLifecycleTopic()`, Schema `config_pending_lifecycle_v1` (`docs/runtime-readiness-policy.md`).
-**Metadaten-Extraktion:** Top-level `intent_id`/`correlation_id`/…; optional gespiegelt unter JSON-`data.*`.
+**Metadaten-Extraktion:** Top-level `intent_id`/`correlation_id`/…; optional gespiegelt unter JSON-`data.*`. Config: `tryWireFillIntentCorrelation()` wenn Filter-Parse fehlschlägt (kein 2048-B-Stack auf Aktor-Pfad).
 **Outbox-NVS:** Namespace `io_outbox` mit Ringbuffer (`head`, `count`, `s{idx}_*`) und Stats (`retry_total`, `recovered_total`, `drop_total`, `fin_ok_total`).
 `fin_ok_total` ist absichtlich kurz benannt (NVS key length limit).
 

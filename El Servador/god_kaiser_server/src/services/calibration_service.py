@@ -356,7 +356,16 @@ class CalibrationService:
             CalibrationError: If session is terminal or already has enough points
         """
         normalized_role = point_role.strip().lower()
-        valid_roles = {"dry", "wet", "buffer_high", "buffer_low", "reference", "air"}
+        valid_roles = {
+            "dry",
+            "wet",
+            "buffer_high",
+            "buffer_low",
+            "reference",
+            "air",
+            "reference_low",
+            "reference_high",
+        }
         if normalized_role not in valid_roles:
             raise CalibrationError(
                 f"point_role must be one of: {', '.join(sorted(valid_roles))}", "VALIDATION_ERROR"
@@ -511,9 +520,19 @@ class CalibrationService:
             self._ensure_finite(reference, "reference_value")
 
             normalized_role = point_role.strip().lower()
-            if normalized_role not in {"dry", "wet", "buffer_high", "buffer_low", "reference", "air"}:
+            if normalized_role not in {
+                "dry",
+                "wet",
+                "buffer_high",
+                "buffer_low",
+                "reference",
+                "air",
+                "reference_low",
+                "reference_high",
+            }:
                 raise CalibrationError(
-                    "point_role must be one of: dry, wet, buffer_high, buffer_low, reference, air",
+                    "point_role must be one of: "
+                    "dry, wet, buffer_high, buffer_low, reference, air, reference_low, reference_high",
                     "VALIDATION_ERROR",
                 )
 
@@ -681,6 +700,12 @@ class CalibrationService:
             if "air" not in roles or "reference" not in roles:
                 raise CalibrationError(
                     "Finalize requires both 'air' and 'reference' points for ec_2point",
+                    "INSUFFICIENT_POINTS",
+                )
+        elif cal_session.method == "ec_linear_2point":
+            if "reference_low" not in roles or "reference_high" not in roles:
+                raise CalibrationError(
+                    "Finalize requires both 'reference_low' and 'reference_high' points for ec_linear_2point",
                     "INSUFFICIENT_POINTS",
                 )
         elif cal_session.method in ("linear_2point", "linear"):
@@ -945,6 +970,8 @@ class CalibrationService:
             return CalibrationService._compute_ec_1point(points, temperature=temperature)
         elif method == "ec_2point":
             return CalibrationService._compute_ec_2point(points, temperature=temperature)
+        elif method == "ec_linear_2point":
+            return CalibrationService._compute_ec_linear_2point(points, temperature=temperature)
         else:
             raise ValueError(f"Unknown calibration method: {method}")
 
@@ -1308,5 +1335,109 @@ class CalibrationService:
             "point_reference_ref": ref_ref,
             "calibration_temperature": round(temperature, 1),
             "actual_at_cal_temp": round(ref_ref_actual_at_T, 2),
+            "calibrated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @staticmethod
+    def _compute_ec_linear_2point(points: list[dict], temperature: float = 25.0) -> dict:
+        """
+        EC linear 2-point calibration using standard KCl reference solutions.
+
+        Uses two known reference solutions:
+        - reference_low:  1413 µS/cm (0.01 M KCl at 25°C)
+        - reference_high: 12880 µS/cm (0.1 M KCl at 25°C)
+
+        EC is a linear sensor (voltage increases with EC), unlike pH (inverted).
+        Mapping: ADC_low→ref_low, ADC_high→ref_high.
+
+        Converts raw ADC to voltage first, then computes:
+          EC = slope * voltage + offset
+
+        This matches ECSensorProcessor.process() which applies the same formula
+        in _voltage_to_ec_calibrated(). The stored calibration is temperature-
+        independent: AUT-299 temperature normalization aligns the reference EC
+        to 25°C so that ECSensorProcessor ATC (÷ (1 + coeff * (T - 25))) applies
+        uniformly regardless of calibration temperature.
+
+        Args:
+            points: List of calibration point dicts with point_role "reference_low"
+                    and "reference_high".
+            temperature: Solution temperature at calibration time in °C (default 25.0).
+
+        Raises:
+            ValueError: If required points are missing, voltages are too close,
+                        reference_high <= reference_low, or ADC_high <= ADC_low
+                        (monotonicity violation).
+        """
+        if len(points) < 2:
+            raise ValueError("Need at least 2 points for EC linear 2-point calibration")
+
+        # Find reference_low and reference_high points
+        low_point = None
+        high_point = None
+
+        for p in points:
+            role = str(p.get("point_role", "")).lower()
+            if role == "reference_low":
+                low_point = p
+            elif role == "reference_high":
+                high_point = p
+
+        if not low_point or not high_point:
+            raise ValueError(
+                "ec_linear_2point requires 'reference_low' and 'reference_high' points"
+            )
+
+        raw_low = float(low_point["raw"])
+        ref_low = float(low_point["reference"])
+        raw_high = float(high_point["raw"])
+        ref_high = float(high_point["reference"])
+
+        # Sanity check: reference_high must be greater than reference_low
+        if ref_high <= ref_low:
+            raise ValueError(
+                f"reference_high ({ref_high} µS/cm) must be greater than "
+                f"reference_low ({ref_low} µS/cm). Check that reference solutions are not swapped."
+            )
+
+        # Monotonicity check: higher EC solution must produce higher ADC reading
+        # (EC sensor: voltage increases with conductivity)
+        if raw_high <= raw_low:
+            raise ValueError(
+                f"ADC for reference_high ({raw_high:.0f}) must be greater than "
+                f"ADC for reference_low ({raw_low:.0f}). "
+                f"EC sensor output should increase with conductivity. "
+                f"Check probe connection or swap the reference points."
+            )
+
+        # AUT-299: Normalize reference EC values to 25°C so the stored calibration
+        # is temperature-independent (same convention as ec_1point / ec_2point).
+        _TEMP_COEFFICIENT = 0.02
+        temp_factor = 1.0 + _TEMP_COEFFICIENT * (temperature - 25.0)
+        ref_low_at_T = ref_low * temp_factor
+        ref_high_at_T = ref_high * temp_factor
+
+        # Convert raw ADC to voltage — matches ECSensorProcessor._adc_to_voltage (12-bit path)
+        voltage_low = (raw_low / _ADC_MAX) * _ADC_VOLTAGE
+        voltage_high = (raw_high / _ADC_MAX) * _ADC_VOLTAGE
+
+        if abs(voltage_high - voltage_low) < 1e-6:
+            raise ValueError("Voltage values too close — cannot compute slope")
+
+        # Linear regression in voltage space: EC = slope * voltage + offset
+        slope = (ref_high_at_T - ref_low_at_T) / (voltage_high - voltage_low)
+        offset = ref_low_at_T - slope * voltage_low
+
+        return {
+            "type": "ec_linear_2point",
+            "slope": round(slope, 4),
+            "offset": round(offset, 4),
+            "point_low_raw": raw_low,
+            "point_low_ref": ref_low,
+            "point_high_raw": raw_high,
+            "point_high_ref": ref_high,
+            "calibration_temperature": round(temperature, 1),
+            "ref_low_at_cal_temp": round(ref_low_at_T, 2),
+            "ref_high_at_cal_temp": round(ref_high_at_T, 2),
             "calibrated_at": datetime.now(timezone.utc).isoformat(),
         }

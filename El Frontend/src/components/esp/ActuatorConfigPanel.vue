@@ -78,6 +78,10 @@ const loading = ref(true)
 const saving = ref(false)
 const actuatorDbId = ref<string | null>(null)
 const commandLoading = ref(false)
+
+const commandInCooldown = computed(() =>
+  actuatorStore.isActuatorCommandInCooldown(props.espId, props.gpio)
+)
 const lastConfigSubjectId = ref<string | null>(null)
 const lastConfigCorrelationId = ref<string | null>(null)
 
@@ -564,10 +568,11 @@ function formatDuration(seconds: number): string {
               'actuator-config__toggle-btn--on': isOn,
               'actuator-config__toggle-btn--emergency': isEmergencyStopped,
             }"
-            :disabled="commandLoading || isEmergencyStopped"
+            :disabled="commandLoading || commandInCooldown || isEmergencyStopped"
+            :title="commandInCooldown ? 'Bitte kurz warten (min. 2s zwischen Befehlen)' : ''"
             @click="toggleActuator"
           >
-            {{ isEmergencyStopped ? 'Not-Stopp aktiv' : commandLoading ? '...' : isOn ? 'Ausschalten' : 'Einschalten' }}
+            {{ isEmergencyStopped ? 'Not-Stopp aktiv' : commandLoading ? '...' : commandInCooldown ? 'Kurz warten...' : isOn ? 'Ausschalten' : 'Einschalten' }}
           </button>
         </div>
 

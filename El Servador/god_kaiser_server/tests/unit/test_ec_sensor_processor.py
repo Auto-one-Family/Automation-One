@@ -327,3 +327,21 @@ class TestECSensorProcessor:
         expected_ec_compensated = result_25c.value / 1.1
 
         assert result_30c.value == pytest.approx(expected_ec_compensated, rel=0.01)
+
+    def test_process_unstable_reading_downgrades_quality(self, processor):
+        """Unstable ADC sampling should downgrade good quality to fair."""
+        calibration = {"slope": 3000, "offset": 0}
+        params = {"stable": False, "adc_stddev": 25.0, "sample_count": 30}
+        result = processor.process(raw_value=1800, calibration=calibration, params=params)
+        assert result.quality == "fair"
+        assert result.metadata["stable"] is False
+        assert result.metadata["sample_count"] == 30
+
+    def test_process_stable_reading_keeps_good_quality(self, processor):
+        """Stable sampling metadata should preserve good quality when calibrated."""
+        calibration = {"slope": 3000, "offset": 0}
+        params = {"stable": True, "adc_stddev": 5.0, "sample_count": 30}
+        result = processor.process(raw_value=1800, calibration=calibration, params=params)
+        assert result.quality == "good"
+        assert result.metadata["stable"] is True
+        assert "ec_stddev" in result.metadata

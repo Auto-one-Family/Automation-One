@@ -125,6 +125,7 @@ class Publisher:
         command: str = "measure",
         correlation_id: Optional[str] = None,
         retry: bool = True,
+        command_params: Optional[dict[str, Any]] = None,
     ) -> tuple[bool, str]:
         """
         Publish a command to a sensor (e.g., trigger manual measurement).
@@ -153,6 +154,8 @@ class Publisher:
             "intent_id": request_id,
             "timestamp": int(time.time()),
         }
+        if command_params:
+            payload.update(command_params)
 
         qos = constants.QOS_SENSOR_COMMAND
 

@@ -152,3 +152,106 @@ async def test_record_intent_publish_sent_parallel_same_intent_is_idempotent(tes
         )
         assert len(rows) == 1
         assert rows[0].intent_id == "intent-parallel-1"
+
+
+@pytest.mark.asyncio
+async def test_terminal_outcome_promotes_intent_state_to_terminal_failed(db_session):
+    repo = CommandContractRepository(db_session)
+    await repo.record_intent_publish_sent(
+        intent_id="intent-term-fail",
+        correlation_id="corr-term-fail",
+        esp_id="ESP_X",
+        flow="command",
+    )
+    await repo.upsert_outcome(
+        {
+            "intent_id": "intent-term-fail",
+            "correlation_id": "corr-term-fail",
+            "flow": "command",
+            "outcome": "failed",
+            "is_final": True,
+            "ts": 1735818000,
+        },
+        esp_id="ESP_X",
+    )
+    await db_session.commit()
+    loaded = (
+        await db_session.execute(
+            select(CommandIntent).where(CommandIntent.intent_id == "intent-term-fail")
+        )
+    ).scalar_one()
+    assert loaded.orchestration_state == "terminal_failed"
+
+
+@pytest.mark.asyncio
+async def test_terminal_state_is_not_downgraded_by_late_non_terminal_intent(db_session):
+    repo = CommandContractRepository(db_session)
+    await repo.record_intent_publish_sent(
+        intent_id="intent-no-downgrade",
+        correlation_id="corr-no-downgrade",
+        esp_id="ESP_X",
+        flow="command",
+    )
+    await repo.upsert_outcome(
+        {
+            "intent_id": "intent-no-downgrade",
+            "correlation_id": "corr-no-downgrade",
+            "flow": "command",
+            "outcome": "failed",
+            "is_final": True,
+            "ts": 1735818000,
+        },
+        esp_id="ESP_X",
+    )
+    await repo.upsert_intent(
+        {
+            "intent_id": "intent-no-downgrade",
+            "correlation_id": "corr-no-downgrade",
+            "flow": "command",
+            "outcome": "accepted",
+            "ts": 1735818001,
+        },
+        esp_id="ESP_X",
+    )
+    await db_session.commit()
+
+    loaded = (
+        await db_session.execute(
+            select(CommandIntent).where(CommandIntent.intent_id == "intent-no-downgrade")
+        )
+    ).scalar_one()
+    assert loaded.orchestration_state == "terminal_failed"
+
+
+@pytest.mark.asyncio
+async def test_terminal_outcome_replay_repairs_stale_non_terminal_intent_state(db_session):
+    repo = CommandContractRepository(db_session)
+    payload = {
+        "intent_id": "intent-heal-stale",
+        "correlation_id": "corr-heal-stale",
+        "flow": "command",
+        "outcome": "failed",
+        "is_final": True,
+        "ts": 1735818000,
+    }
+    await repo.record_intent_publish_sent(
+        intent_id="intent-heal-stale",
+        correlation_id="corr-heal-stale",
+        esp_id="ESP_X",
+        flow="command",
+    )
+    await repo.upsert_outcome(payload, esp_id="ESP_X")
+
+    broken_intent = (
+        await db_session.execute(select(CommandIntent).where(CommandIntent.intent_id == "intent-heal-stale"))
+    ).scalar_one()
+    broken_intent.orchestration_state = "ack_pending"
+    await db_session.flush()
+
+    await repo.upsert_outcome(payload, esp_id="ESP_X")
+    await db_session.commit()
+
+    loaded = (
+        await db_session.execute(select(CommandIntent).where(CommandIntent.intent_id == "intent-heal-stale"))
+    ).scalar_one()
+    assert loaded.orchestration_state == "terminal_failed"

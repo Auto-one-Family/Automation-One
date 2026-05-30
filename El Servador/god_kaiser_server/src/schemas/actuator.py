@@ -197,18 +197,12 @@ class ActuatorConfigCreate(ActuatorConfigBase):
         None,
         description="Custom metadata",
     )
-    # AUT-120: Fail-safe behaviour on MQTT disconnect.
-    # None = server has no opinion → ESP32 keeps its own default (true for
-    # critical actuators such as pumps/valves, false otherwise).
-    # Backward compatible: existing payloads without this field retain
-    # previous behaviour because the server omits the field from the
-    # config-push payload when it is None.
+    # AUT-482: Manual actuators without offline rule must turn OFF on disconnect.
     fail_safe_on_disconnect: Optional[bool] = Field(
-        None,
+        True,
         description=(
-            "AUT-120: Override ESP32 fail-safe-on-disconnect default. "
-            "None = ESP32 default applies, True = force OFF on disconnect, "
-            "False = keep last state."
+            "AUT-482: Force OFF on MQTT disconnect when true (product default). "
+            "False = keep last state (explicit opt-out)."
         ),
     )
     subzone_id: Optional[str] = Field(

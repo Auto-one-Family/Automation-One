@@ -74,6 +74,9 @@ vi.mock('@/composables/useToast', () => ({
 
 // Import store after mocks are set up
 import { useEspStore } from '@/stores/esp'
+import { useActuatorStore, ACTUATOR_UI_COMMAND_COOLDOWN_MS } from '@/shared/stores/actuator.store'
+import { actuatorsApi } from '@/api/actuators'
+import { websocketService } from '@/services/websocket'
 
 // =============================================================================
 // INITIAL STATE TESTS
@@ -157,6 +160,36 @@ describe('ESP Store - WebSocket Health Mapping', () => {
     const updated = store.devices.find((device) => (device.device_id || device.esp_id) === 'ESP_TEST_001')
     expect(updated?.runtime_health_view?.persistenceDegraded).toBe(true)
     expect(updated?.runtime_health_view?.persistenceDegradedReason).toBe('db_sync_delayed')
+  })
+})
+
+describe('ESP Store - WebSocket Reconnect Recovery', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    server.resetHandlers()
+  })
+
+  it('triggert intent-reconciliation zusaetzlich zum fetchAll bei onConnect', async () => {
+    const espStore = useEspStore()
+    const actuatorStore = useActuatorStore()
+    const reconcileSpy = vi
+      .spyOn(actuatorStore, 'reconcilePendingIntentsFromServer')
+      .mockResolvedValue(0)
+
+    const onConnectMock = websocketService.onConnect as unknown as {
+      mock: { calls: unknown[][] }
+    }
+    const onConnectCallback = onConnectMock.mock.calls[0]?.[0] as (() => void) | undefined
+    expect(onConnectCallback).toBeTypeOf('function')
+
+    onConnectCallback?.()
+    await vi.waitFor(() => {
+      expect(reconcileSpy).toHaveBeenCalledTimes(1)
+    }, { timeout: 5000 })
   })
 })
 
@@ -419,6 +452,114 @@ describe('ESP Store - updateDevice', () => {
     // Note: The actual update comes from API response
     const device = store.devices.find(d => d.device_id === 'ESP_TEST_001')
     expect(device).toBeDefined()
+  })
+
+  it('should preserve sensors when PATCH response omits sensors array (real ESP path)', async () => {
+    const existingSensor = { ...mockSensor, gpio: 34, sensor_type: 'moisture' }
+    server.use(
+      http.patch('/api/v1/esp/devices/:espId', async ({ params, request }) => {
+        const body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({
+          ...mockESPDevice,
+          device_id: params.espId,
+          esp_id: params.espId,
+          name: body.name ?? 'Zimmerbewässerung',
+          sensor_count: 1,
+          sensors: undefined,
+          actuators: undefined,
+        })
+      }),
+      http.get('/api/v1/debug/mock-esp/:espId', () => {
+        return HttpResponse.json(
+          { detail: 'Device not found' },
+          { status: 404 },
+        )
+      }),
+      http.get('/api/v1/esp/devices/:espId', () => {
+        return HttpResponse.json({
+          ...mockESPDevice,
+          device_id: 'ESP_REAL_001',
+          esp_id: 'ESP_REAL_001',
+          hardware_type: 'ESP32_WROOM',
+          name: 'Zimmerbewässerung',
+          sensor_count: 1,
+        })
+      }),
+      http.get('/api/v1/sensors/', () => {
+        return HttpResponse.json({
+          data: [{
+            id: 'cfg-1',
+            esp_device_id: 'ESP_REAL_001',
+            gpio: 34,
+            sensor_type: 'moisture',
+            name: 'Boden',
+          }],
+          total: 1,
+          page: 1,
+          page_size: 100,
+          total_pages: 1,
+        })
+      }),
+    )
+
+    const store = useEspStore()
+    store.devices = [{
+      ...mockESPDevice,
+      device_id: 'ESP_REAL_001',
+      esp_id: 'ESP_REAL_001',
+      hardware_type: 'ESP32_WROOM',
+      name: 'Alt',
+      sensors: [existingSensor],
+      actuators: [{ ...mockActuator }],
+    } as typeof mockESPDevice]
+
+    await store.updateDevice('ESP_REAL_001', { name: 'Zimmerbewässerung' })
+
+    const device = store.devices.find((d) => (d.device_id || d.esp_id) === 'ESP_REAL_001')
+    expect(device?.name).toBe('Zimmerbewässerung')
+    expect(device?.sensors?.length).toBeGreaterThan(0)
+    expect(device?.actuators?.length).toBe(1)
+  })
+
+  it('should clear device name when null is sent', async () => {
+    server.use(
+      http.patch('/api/v1/esp/devices/:espId', async ({ request }) => {
+        const body = (await request.json()) as { name?: string | null }
+        return HttpResponse.json({
+          ...mockESPDevice,
+          device_id: 'ESP_TEST_001',
+          esp_id: 'ESP_TEST_001',
+          name: body.name ?? null,
+        })
+      }),
+      http.get('/api/v1/esp/devices/:espId', () => {
+        return HttpResponse.json({
+          ...mockESPDevice,
+          device_id: 'ESP_TEST_001',
+          esp_id: 'ESP_TEST_001',
+          name: null,
+        })
+      }),
+      http.get('/api/v1/debug/mock-esp/:espId', () => {
+        return HttpResponse.json(
+          { detail: 'Device not found' },
+          { status: 404 },
+        )
+      }),
+    )
+
+    const store = useEspStore()
+    store.devices = [{
+      ...mockESPDevice,
+      device_id: 'ESP_TEST_001',
+      esp_id: 'ESP_TEST_001',
+      name: 'Zimmerbewässerung',
+    }]
+
+    await store.updateDevice('ESP_TEST_001', { name: null })
+
+    const device = store.devices.find((d) => d.device_id === 'ESP_TEST_001')
+    expect(device?.name).toBeNull()
   })
 
   it('should handle 404 for orphaned mock ESPs', async () => {
@@ -931,13 +1072,42 @@ describe('ESP Store - Actuator Commands', () => {
   })
 
   describe('sendActuatorCommand', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
     it('should call actuatorsApi for real ESP', async () => {
       const store = useEspStore()
-      store.devices = [{ ...mockESPDevice, device_id: 'ESP_12345678', esp_id: 'ESP_12345678' }]
+      store.devices = [{ ...mockESPDevice, device_id: 'ESP_12345678', esp_id: 'ESP_12345678', status: 'online' }]
 
       await store.sendActuatorCommand('ESP_12345678', 16, 'ON')
 
       // Should not throw
+    })
+
+    it('should block second command within UI cooldown (AUT-481)', async () => {
+      const sendSpy = vi.spyOn(actuatorsApi, 'sendCommand')
+      const store = useEspStore()
+      store.devices = [{ ...mockESPDevice, device_id: 'ESP_12345678', esp_id: 'ESP_12345678', status: 'online' }]
+
+      await store.sendActuatorCommand('ESP_12345678', 16, 'ON')
+      await store.sendActuatorCommand('ESP_12345678', 16, 'OFF')
+
+      expect(sendSpy).toHaveBeenCalledTimes(1)
+      expect(mockToastFunctions.warning).toHaveBeenCalledWith(
+        expect.stringContaining('warten'),
+        expect.objectContaining({ dedupeKey: 'actuator-cooldown:ESP_12345678:16' }),
+      )
+
+      vi.advanceTimersByTime(ACTUATOR_UI_COMMAND_COOLDOWN_MS)
+      await store.sendActuatorCommand('ESP_12345678', 16, 'OFF')
+
+      expect(sendSpy).toHaveBeenCalledTimes(2)
+      sendSpy.mockRestore()
     })
 
     it('should call debugApi for mock ESP', async () => {

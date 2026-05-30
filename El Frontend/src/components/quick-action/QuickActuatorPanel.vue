@@ -91,11 +91,16 @@ function isPending(actuator: FlatActuator): boolean {
   return actuatorStore.isActuatorCommandPending(actuator.esp_id, actuator.gpio)
 }
 
+function isInCooldown(actuator: FlatActuator): boolean {
+  return actuatorStore.isActuatorCommandInCooldown(actuator.esp_id, actuator.gpio)
+}
+
 function isDisabled(actuator: FlatActuator): boolean {
   return (
     !actuator.is_online ||
     actuator.emergency_stopped === true ||
     isPending(actuator) ||
+    isInCooldown(actuator) ||
     togglingKey.value === getActuatorKey(actuator)
   )
 }

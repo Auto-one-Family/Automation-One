@@ -79,6 +79,12 @@ const commandIsPending = computed(() =>
   espId.value ? actuatorStore.isActuatorCommandPending(espId.value, gpio.value) : false
 )
 
+const commandInCooldown = computed(() =>
+  espId.value ? actuatorStore.isActuatorCommandInCooldown(espId.value, gpio.value) : false
+)
+
+const commandToggleBlocked = computed(() => commandIsPending.value || commandInCooldown.value)
+
 const showWarnBadge = ref(false)
 let pendingTimeoutHandle: ReturnType<typeof setTimeout> | null = null
 
@@ -104,7 +110,7 @@ onUnmounted(() => {
 })
 
 async function toggle() {
-  if (!currentActuator.value || isEspOffline.value || isStale.value || commandIsPending.value) return
+  if (!currentActuator.value || isEspOffline.value || isStale.value || commandToggleBlocked.value) return
   const command = currentActuator.value.state ? 'OFF' : 'ON'
   await espStore.sendActuatorCommand(espId.value, gpio.value, command)
 }
@@ -137,9 +143,9 @@ function selectActuator(id: string) {
         <button
           v-if="!readOnly"
           class="actuator-card-widget__toggle"
-          :class="{ 'actuator-card-widget__toggle--on': currentActuator.state, 'actuator-card-widget__toggle--pending': commandIsPending }"
-          :disabled="isEspOffline || isStale || commandIsPending"
-          :title="commandIsPending ? 'Befehl wird ausgeführt...' : isEspOffline ? 'ESP ist offline' : isStale ? 'Status veraltet' : ''"
+          :class="{ 'actuator-card-widget__toggle--on': currentActuator.state, 'actuator-card-widget__toggle--pending': commandToggleBlocked }"
+          :disabled="isEspOffline || isStale || commandToggleBlocked"
+          :title="commandIsPending ? 'Befehl wird ausgeführt...' : commandInCooldown ? 'Bitte kurz warten (min. 2s zwischen Befehlen)' : isEspOffline ? 'ESP ist offline' : isStale ? 'Status veraltet' : ''"
           @click.stop="toggle"
         >
           <Loader2 v-if="commandIsPending" class="w-4 h-4 actuator-card-widget__spinner" />

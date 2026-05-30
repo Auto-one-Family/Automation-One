@@ -387,9 +387,26 @@ class TestRateLimiting:
 
         assert mock_websocket.send_json.call_count == 20
 
+    @pytest.mark.asyncio
+    async def test_sensor_data_bypasses_rate_limit_under_burst(self, manager, mock_websocket):
+        """AUT-481 P2: sensor_data must not be dropped during actuator intent bursts."""
+        await manager.connect(mock_websocket, "client_1")
+        await manager.subscribe("client_1", {})
+
+        assert "sensor_data" in manager._rate_limit_bypass_types
+
+        for i in range(20):
+            await manager.broadcast(
+                "sensor_data",
+                {"esp_id": "ESP_1", "gpio": 34, "value": 20.0 + i, "sensor_type": "moisture"},
+            )
+
+        assert mock_websocket.send_json.call_count == 20
+
     def test_rate_limit_bypass_contains_all_critical_realtime_events(self, manager):
-        """Catalogue check: bypass set covers all critical realtime event types (AUT-68, PKG-04a)."""
+        """Catalogue check: bypass set covers all critical realtime event types (AUT-68, PKG-04a, AUT-481)."""
         expected = {
+            "sensor_data",
             "actuator_status",
             "config_response_guard_replay",
             "device_discovered",

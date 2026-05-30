@@ -1,7 +1,8 @@
 # Log-System - AutomationOne
 
 > **Version:** 4.17 | **Aktualisiert:** 2026-05-29
-> **Änderungen 4.17:** Merge-Konflikt §2.3a bereinigt; `event_class`-Werte an Code angeglichen (`RULE_ARBITRATION`, `QUEUE_PRESSURE`); `failure_class`-Hinweis beibehalten.
+> **Änderungen 4.17 (HEAD):** Merge-Konflikt §2.3a bereinigt; `event_class`-Werte an Code angeglichen (`RULE_ARBITRATION`, `QUEUE_PRESSURE`); `failure_class`-Hinweis beibehalten.
+> **Änderungen 4.17 (AUT-539):** §5.0 Pi/Linux: kanonischer PIO-Pfad `El Trabajante/.venv-pio/bin/pio`, Monitor nach `logs/device-monitor-*.log`, Upload-Port `/dev/ttyUSB0`.
 > **Änderungen 4.16:** Pi-5 Ist-Check ergänzt: Hardware-Serial-Container kann `Exited` sein; in diesem Fall ESP-Liveness über MQTT-Heartbeats + DB `esp_devices.last_seen` verifizieren, nicht nur über `automationone-esp32-serial` Logs.
 > **Änderungen 4.15:** OUTBOX-Trace Tags in ESP32-Serial erweitert (siehe §5.9, Changelog unten)
 > **Änderungen 4.14:** Docker-Dev Ground Truth: Zwei Handler (`setup_logging`) — Datei (`logs/server/god_kaiser.log`) JSON, Docker-stdout lesbarer Text; Host-Datei und `docker logs` sind nicht byte-identisch.
@@ -169,13 +170,21 @@ cd "El Trabajante" && wokwi-cli . --timeout 90000 --serial-log-file wokwi.log   
 cd "El Trabajante" && wokwi-cli . --timeout 90000 2>&1 | tee wokwi.log          # Pipe Alternative        # Mit Capture
 
 # ============================================
-# ESP32 SERIAL (NUR PowerShell - Git Bash kann COM-Port nicht oeffnen, && geht nicht in PS 5.x)
+# ESP32 SERIAL — Linux/Pi (kanonisch, Repo-Host)
 # ============================================
-# PowerShell (voller Pfad, Befehle einzeln statt &&):
+# PIO="/home/robin/autoone/El Trabajante/.venv-pio/bin/pio"
+# cd "/home/robin/autoone/El Trabajante"
+# docker stop automationone-esp32-serial 2>/dev/null || true
+# $PIO run -e esp32_dev -t upload --upload-port /dev/ttyUSB0
+# $PIO device monitor -e esp32_dev --port /dev/ttyUSB0
+# Log: logs/device-monitor-*.log (PIO log2file)
+
+# ============================================
+# ESP32 SERIAL — Windows (PowerShell; Git Bash: kein COM-Port)
+# ============================================
 # cd "C:\Users\PCUser\Documents\PlatformIO\Projects\Auto-one\El Trabajante"
 # C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -e esp32_dev
-# C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -e esp32_dev 2>&1 | Tee-Object serial.log
-# Git Bash (NUR Build, kein Monitor): cd "El Trabajante" && ~/.platformio/penv/Scripts/pio.exe run -e esp32_dev
+# Git Bash (NUR Build): ~/.platformio/penv/Scripts/pio.exe run -e esp32_dev
 
 # ============================================
 # MQTT
@@ -526,6 +535,23 @@ wait $WOKWI_PID
 ---
 
 ## 5. ESP32 Serial (Echte Hardware)
+
+### 5.0 Linux / Raspberry Pi (Repo-Host)
+
+| Was | Pfad |
+|-----|------|
+| PlatformIO CLI | `/home/robin/autoone/El Trabajante/.venv-pio/bin/pio` |
+| Projekt | `/home/robin/autoone/El Trabajante` |
+| USB-Serial | `/dev/ttyUSB0` (mit `$PIO device list` prüfen) |
+| Monitor-Log | `El Trabajante/logs/device-monitor-*.log` |
+
+```bash
+PIO="/home/robin/autoone/El Trabajante/.venv-pio/bin/pio"
+cd "/home/robin/autoone/El Trabajante"
+docker stop automationone-esp32-serial 2>/dev/null || true
+$PIO run -e esp32_dev -t upload --upload-port /dev/ttyUSB0
+$PIO device monitor -e esp32_dev --port /dev/ttyUSB0
+```
 
 ### 5.1 Konfiguration
 

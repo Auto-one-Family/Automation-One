@@ -7,6 +7,7 @@
 
 #include "communication_task.h"
 #include "publish_queue.h"
+#include "publish_queue_policy.h"
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -29,6 +30,7 @@
 #include "../models/error_codes.h"
 #include "../error_handling/circuit_breaker.h"
 #include "../error_handling/error_tracker.h"
+#include "intent_contract.h"
 
 static const char* COMM_TAG = "COMM";
 
@@ -234,9 +236,9 @@ static void handleActuatorStatusPublish() {
 // Core 1 → Core 0 publish queue. ENTER when fill crosses the shed watermark upwards,
 // RECOVERED when it falls back into the dead band.
 //
-//   Dead band: fill < PRESSURE_RECOVERED_THRESHOLD (=4)   → RECOVERED region
-//   Shed zone: fill >= PUBLISH_QUEUE_SHED_WATERMARK (=6)  → ENTER region
-//   Saturated: fill == PUBLISH_QUEUE_SIZE (=8)            → skip (defensive, avoid
+//   Dead band: fill < publishQueuePressureRecoveredThreshold()  → RECOVERED region
+//   Shed zone: fill >= PUBLISH_QUEUE_SHED_WATERMARK            → ENTER region
+//   Saturated: fill == PUBLISH_QUEUE_SIZE                      → skip (defensive, avoid
 //              adding recursive load when ESP-IDF outbox is likely also strained)
 //
 // The queue_pressure publish itself runs on Core 0 and goes directly through
@@ -245,7 +247,6 @@ static void handleActuatorStatusPublish() {
 // Implemented only on the ESP-IDF MQTT path — PubSubClient builds have no
 // Core 1 → Core 0 publish queue. Runs at 50 ms cadence (Comm-Task loop).
 #ifndef MQTT_USE_PUBSUBCLIENT
-static const uint8_t PRESSURE_RECOVERED_THRESHOLD = 4;  // Dead band upper bound (exclusive)
 
 static void handleQueuePressureHysteresis() {
     static bool     s_queue_pressure_entered = false;
@@ -277,7 +278,8 @@ static void handleQueuePressureHysteresis() {
     if (!s_queue_pressure_entered && stats.fill_level >= PUBLISH_QUEUE_SHED_WATERMARK) {
         s_queue_pressure_entered = true;
         event = "entered_pressure";
-    } else if (s_queue_pressure_entered && stats.fill_level < PRESSURE_RECOVERED_THRESHOLD) {
+    } else if (s_queue_pressure_entered &&
+               stats.fill_level < publishQueuePressureRecoveredThreshold()) {
         s_queue_pressure_entered = false;
         event = "recovered";
     }
@@ -466,6 +468,7 @@ void communicationTaskFunction(void* param) {
             }
         }
         processDeferredPostReconnectActuatorStatusSync();
+        processDeferredOutboxStatsPersist();
 #endif
 
         handleBootCounterReset();
@@ -536,9 +539,11 @@ bool createCommunicationTask() {
         );
         if (created == pdPASS && s_comm_task_handle != NULL) {
             LOG_I(COMM_TAG,
-                  "[COMM] Communication task created (stack_depth=" +
+                  "[COMM] CommTask created (stack_depth=" +
                   String((uint32_t)stack_depth) + ", stack_bytes=" +
-                  String((uint32_t)(stack_depth * sizeof(StackType_t))) + ")");
+                  String((uint32_t)(stack_depth * sizeof(StackType_t))) +
+                  ", free_heap=" + String(ESP.getFreeHeap()) +
+                  ", min_free_heap=" + String(ESP.getMinFreeHeap()) + ")");
             return true;
         }
 

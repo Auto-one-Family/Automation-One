@@ -38,6 +38,8 @@ void initIntentMetadata(IntentMetadata* metadata);
 IntentMetadata extractIntentMetadataFromPayload(const char* payload, const char* fallback_prefix);
 IntentMetadata extractIntentMetadataFromPayloadNoCorrelationFallback(const char* payload,
                                                                      const char* fallback_prefix);
+/** Config-only: strstr wire copy when filter-parse missed correlation (no heap). */
+void tryWireFillIntentCorrelation(IntentMetadata* metadata, const char* payload);
 bool isIntentExpired(const IntentMetadata& metadata, uint32_t current_epoch);
 IntentInvalidationReason getIntentInvalidationReason(const IntentMetadata& metadata, uint32_t current_epoch);
 bool isRecoveryIntentAllowed(const char* topic, const char* payload);
@@ -54,6 +56,7 @@ bool publishIntentOutcome(const char* flow,
                           const String& reason,
                           bool retryable);
 void processIntentOutcomeOutbox();
+void processDeferredOutboxStatsPersist();
 
 uint32_t getSafetyEpoch();
 uint32_t bumpSafetyEpoch(const char* reason);

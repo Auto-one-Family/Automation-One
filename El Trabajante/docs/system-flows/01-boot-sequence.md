@@ -1044,8 +1044,8 @@ LOG_I(TAG, "[SAFETY-RTOS M3] Communication task created on Core 0");
 - `g_actuator_cmd_queue` / `g_sensor_cmd_queue` — size 10 each
 - MQTT command routing uses these queues (Core 0 → Core 1)
 
-**Publish Queue (`src/tasks/publish_queue.h`, M3, ESP-IDF path):**
-- `g_publish_queue` — Core 1 (Safety-Task) → Core 0; `MQTTClient::publish()` on Core 1 enqueues; Communication-Task calls `processPublishQueue()`
+**Publish Queue (`publish_queue_constants.h` / `publish_queue.h`, M3, ESP-IDF path):**
+- `g_publish_queue` — **10** slots (Shed watermark **5**); Core 1 (Safety-Task) → Core 0; `MQTTClient::publish()` on Core 1 enqueues; Communication-Task calls `processPublishQueue()` (adaptive drain 1–2/Tick, AUT-481 P3)
 
 **Communication Task (`src/tasks/communication_task.cpp`, M3):**
 - Pinned to Core 0 (PRO_CPU), Priority 3, 6144 B stack

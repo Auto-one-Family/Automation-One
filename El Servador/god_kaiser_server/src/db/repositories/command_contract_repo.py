@@ -27,6 +27,14 @@ _TERMINAL_OUTCOMES = frozenset({"persisted", "rejected", "failed", "expired", "a
 
 # Inbound intent_outcome already advanced orchestration — never overwrite with "sent".
 _INTENT_ORCH_ADVANCED_FROM_DEVICE = frozenset({"accepted", "ack_pending"})
+_INTENT_ORCH_TERMINAL = frozenset({"terminal_success", "terminal_failed"})
+_INTENT_ORCH_STATE_RANK = {
+    "sent": 0,
+    "accepted": 1,
+    "ack_pending": 2,
+    "terminal_success": 3,
+    "terminal_failed": 3,
+}
 
 
 class CommandContractRepository:
@@ -79,7 +87,8 @@ class CommandContractRepository:
         intent.correlation_id = str(payload["correlation_id"])
         intent.esp_id = esp_id
         intent.flow = str(payload["flow"]).lower()
-        intent.orchestration_state = next_state
+        if self._can_advance_orchestration_state(intent.orchestration_state, next_state):
+            intent.orchestration_state = next_state
         intent.last_seen_at = now
         await self.session.flush()
         await self.session.refresh(intent)
@@ -111,6 +120,8 @@ class CommandContractRepository:
         if intent is not None:
             if intent.orchestration_state in _INTENT_ORCH_ADVANCED_FROM_DEVICE:
                 return intent
+            if intent.orchestration_state in _INTENT_ORCH_TERMINAL:
+                return intent
             intent.correlation_id = str(correlation_id)
             intent.esp_id = esp_id
             intent.flow = flow_norm
@@ -139,6 +150,8 @@ class CommandContractRepository:
         if existing is None:
             raise RuntimeError(f"CommandIntent insert/select anomaly for intent_id={iid}")
         if existing.orchestration_state in _INTENT_ORCH_ADVANCED_FROM_DEVICE:
+            return existing
+        if existing.orchestration_state in _INTENT_ORCH_TERMINAL:
             return existing
         existing.correlation_id = str(correlation_id)
         existing.esp_id = esp_id
@@ -201,6 +214,12 @@ class CommandContractRepository:
                     self.session.add(created)
                     await self.session.flush()
                 await self.session.refresh(created)
+                await self._set_terminal_intent_state_if_needed(
+                    intent_id=intent_id,
+                    outcome=created.outcome,
+                    is_terminal=incoming_is_terminal,
+                    observed_at=now,
+                )
                 self._log_t6_terminal_stage_if_applicable(created)
                 return created, False
             except IntegrityError:
@@ -224,6 +243,12 @@ class CommandContractRepository:
             existing_outcome_str in _TERMINAL_OUTCOMES
             and canonical_outcome_str not in _TERMINAL_OUTCOMES
         ):
+            await self._set_terminal_intent_state_if_needed(
+                intent_id=intent_id,
+                outcome=existing.outcome,
+                is_terminal=True,
+                observed_at=existing.terminal_at or now,
+            )
             logger.debug(
                 "[AUT-329] Skipping non-terminal '%s' delivery after terminal '%s': intent_id=%s",
                 canonical_outcome_str,
@@ -236,16 +261,41 @@ class CommandContractRepository:
         if (incoming_generation < existing_generation) or (
             incoming_generation == existing_generation and incoming_seq < existing_seq
         ):
+            if bool(existing.is_final) or existing_outcome_str in _TERMINAL_OUTCOMES:
+                await self._set_terminal_intent_state_if_needed(
+                    intent_id=intent_id,
+                    outcome=existing.outcome,
+                    is_terminal=True,
+                    observed_at=existing.terminal_at or now,
+                )
             return existing, True
 
         # Monotonic finality guard: a final outcome remains final.
         if bool(existing.is_final):
             incoming_is_final = bool(normalized["is_final"])
             if not incoming_is_final:
+                await self._set_terminal_intent_state_if_needed(
+                    intent_id=intent_id,
+                    outcome=existing.outcome,
+                    is_terminal=True,
+                    observed_at=existing.terminal_at or now,
+                )
                 return existing, True
             if str(existing.outcome).lower() != str(normalized["outcome"]).lower():
+                await self._set_terminal_intent_state_if_needed(
+                    intent_id=intent_id,
+                    outcome=existing.outcome,
+                    is_terminal=True,
+                    observed_at=existing.terminal_at or now,
+                )
                 return existing, True
             # Same final state replay -> idempotent duplicate.
+            await self._set_terminal_intent_state_if_needed(
+                intent_id=intent_id,
+                outcome=existing.outcome,
+                is_terminal=True,
+                observed_at=existing.terminal_at or now,
+            )
             return existing, True
 
         existing.correlation_id = str(payload["correlation_id"])
@@ -267,10 +317,30 @@ class CommandContractRepository:
         existing.ts = self._to_opt_int(payload.get("ts"))
         if incoming_is_terminal and existing.terminal_at is None:
             existing.terminal_at = now
+        await self._set_terminal_intent_state_if_needed(
+            intent_id=intent_id,
+            outcome=existing.outcome,
+            is_terminal=incoming_is_terminal,
+            observed_at=now,
+        )
         await self.session.flush()
         await self.session.refresh(existing)
         self._log_t6_terminal_stage_if_applicable(existing)
         return existing, False
+
+    async def list_open_intents_for_esp(
+        self,
+        *,
+        esp_id: str,
+        states: tuple[str, ...] = ("sent", "accepted", "ack_pending"),
+    ) -> list[CommandIntent]:
+        stmt = (
+            select(CommandIntent)
+            .where(CommandIntent.esp_id == esp_id)
+            .where(CommandIntent.orchestration_state.in_(states))
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
 
     async def upsert_terminal_event_authority(
         self,
@@ -482,3 +552,42 @@ class CommandContractRepository:
     def _to_opt_int(cls, value: Any) -> Optional[int]:
         parsed = cls._to_int(value, default=-1)
         return None if parsed == -1 else parsed
+
+    @classmethod
+    def _can_advance_orchestration_state(cls, current: str, target: str) -> bool:
+        current_norm = str(current or "").strip().lower()
+        target_norm = str(target or "").strip().lower()
+        if not current_norm:
+            return True
+        if current_norm in _INTENT_ORCH_TERMINAL and target_norm not in _INTENT_ORCH_TERMINAL:
+            return False
+        current_rank = _INTENT_ORCH_STATE_RANK.get(current_norm, -1)
+        target_rank = _INTENT_ORCH_STATE_RANK.get(target_norm, -1)
+        return target_rank >= current_rank
+
+    @staticmethod
+    def _terminal_state_for_outcome(outcome: str) -> str:
+        normalized = str(outcome or "").strip().lower()
+        if normalized in {"persisted", "applied"}:
+            return "terminal_success"
+        return "terminal_failed"
+
+    async def _set_terminal_intent_state_if_needed(
+        self,
+        *,
+        intent_id: str,
+        outcome: str,
+        is_terminal: bool,
+        observed_at: datetime,
+    ) -> None:
+        if not is_terminal:
+            return
+        stmt = select(CommandIntent).where(CommandIntent.intent_id == intent_id).limit(1)
+        intent = (await self.session.execute(stmt)).scalar_one_or_none()
+        if intent is None:
+            return
+        target_state = self._terminal_state_for_outcome(outcome)
+        if not self._can_advance_orchestration_state(intent.orchestration_state, target_state):
+            return
+        intent.orchestration_state = target_state
+        intent.last_seen_at = observed_at

@@ -1,7 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import type { ESPDevice } from '@/api/esp'
-import { useActuatorStore } from '@/shared/stores/actuator.store'
+import {
+  useActuatorStore,
+  ACTUATOR_UI_COMMAND_COOLDOWN_MS,
+} from '@/shared/stores/actuator.store'
+
+const mockListIntentOutcomes = vi.fn()
+
+vi.mock('@/api/intentOutcomes', () => ({
+  listIntentOutcomes: (...args: unknown[]) => mockListIntentOutcomes(...args),
+}))
 
 const mockToast = {
   success: vi.fn(),
@@ -32,6 +41,7 @@ describe('actuator.store', () => {
     setActivePinia(createPinia())
     vi.useFakeTimers()
     vi.clearAllMocks()
+    mockListIntentOutcomes.mockReset()
   })
 
   afterEach(() => {
@@ -301,5 +311,111 @@ describe('actuator.store', () => {
 
     const rolledBackState = (device.actuators as Array<{ gpio: number; state: boolean }>).find((a) => a.gpio === 25)?.state
     expect(rolledBackState).toBe(false)
+  })
+
+  it('reconciliert pending actuator-intents nach reconnect mit terminalem server-outcome', async () => {
+    const store = useActuatorStore()
+    store.registerCommandIntent('ESP_1', 5, 'ON', 'corr-reconcile-1', 'req-reconcile-1')
+    mockListIntentOutcomes.mockResolvedValue([
+      {
+        intent_id: 'corr-reconcile-1',
+        correlation_id: 'corr-reconcile-1',
+        esp_id: 'ESP_1',
+        flow: 'command',
+        outcome: 'failed',
+        is_final: true,
+        code: 'ESP_DISCONNECTED_BEFORE_OUTCOME',
+      },
+    ])
+
+    const reconciledCount = await store.reconcilePendingIntentsFromServer({ espIds: ['ESP_1'] })
+
+    expect(reconciledCount).toBe(1)
+    const intent = store.getActuatorIntent('ESP_1', 5)
+    expect(intent?.state).toBe('terminal_failed')
+  })
+
+  it('blockiert zweiten UI-Befehl innerhalb ACTUATOR_UI_COMMAND_COOLDOWN_MS', () => {
+    const store = useActuatorStore()
+
+    expect(store.isActuatorCommandInCooldown('ESP_1', 14)).toBe(false)
+    store.recordActuatorCommandSent('ESP_1', 14)
+    expect(store.isActuatorCommandInCooldown('ESP_1', 14)).toBe(true)
+    expect(store.getActuatorCooldownRemainingMs('ESP_1', 14)).toBeGreaterThan(0)
+
+    vi.advanceTimersByTime(ACTUATOR_UI_COMMAND_COOLDOWN_MS)
+
+    expect(store.isActuatorCommandInCooldown('ESP_1', 14)).toBe(false)
+    expect(store.getActuatorCooldownRemainingMs('ESP_1', 14)).toBe(0)
+  })
+
+  it('cooldown ist pro esp:gpio isoliert', () => {
+    const store = useActuatorStore()
+    store.recordActuatorCommandSent('ESP_1', 14)
+
+    expect(store.isActuatorCommandInCooldown('ESP_1', 14)).toBe(true)
+    expect(store.isActuatorCommandInCooldown('ESP_1', 15)).toBe(false)
+    expect(store.isActuatorCommandInCooldown('ESP_2', 14)).toBe(false)
+  })
+
+  it('mappt fw_* config_response auf einziges pending Config-Intent pro ESP', () => {
+    const store = useActuatorStore()
+    const subjectId = store.registerConfigIntentFromRest({
+      espId: 'ESP_698EB4',
+      scope: 'offline_rules',
+      correlationId: '3f0735f0-ab11-4fbf-aa7b-6eafcf15fa92',
+      requestId: '3f0735f0-ab11-4fbf-aa7b-6eafcf15fa92',
+    })
+
+    store.handleConfigResponse({
+      data: {
+        esp_id: 'ESP_698EB4',
+        status: 'failed',
+        correlation_id: 'fw_ESP_698EB4_65170_1',
+        message: 'Config contract violation: required correlation_id missing',
+        error_code: 'CONTRACT_UNKNOWN_CODE',
+      },
+    })
+
+    const intent = store.findConfigIntentBySubject(
+      subjectId,
+      '3f0735f0-ab11-4fbf-aa7b-6eafcf15fa92',
+    )
+    expect(intent?.state).toBe('terminal_failed')
+    expect(mockToast.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Integrationsstoerung (config_response)'),
+      expect.anything(),
+    )
+  })
+
+  it('reconciliert pending config-intents nach reconnect ohne timeout-toast', async () => {
+    const store = useActuatorStore()
+    const subjectId = store.registerConfigIntentFromRest({
+      espId: 'ESP_2',
+      scope: 'sensor:4:ds18b20',
+      correlationId: 'corr-config-reconcile-1',
+      requestId: 'req-config-reconcile-1',
+    })
+    mockListIntentOutcomes.mockResolvedValue([
+      {
+        intent_id: 'req-config-reconcile-1',
+        correlation_id: 'corr-config-reconcile-1',
+        esp_id: 'ESP_2',
+        flow: 'config',
+        outcome: 'persisted',
+        is_final: true,
+      },
+    ])
+
+    const reconciledCount = await store.reconcilePendingIntentsFromServer({ espIds: ['ESP_2'] })
+    vi.advanceTimersByTime(90_000)
+
+    expect(reconciledCount).toBe(1)
+    const intent = store.findConfigIntentBySubject(subjectId, 'corr-config-reconcile-1')
+    expect(intent?.state).toBe('terminal_success')
+    expect(mockToast.warning).not.toHaveBeenCalledWith(
+      expect.stringContaining('Konfigurationsauftrag ausstehend'),
+      expect.anything(),
+    )
   })
 })

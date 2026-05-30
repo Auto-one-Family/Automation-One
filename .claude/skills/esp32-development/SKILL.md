@@ -47,7 +47,8 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 | Subscribe-/Publish-QoS in der Firmware | `El Trabajante/src/main.cpp` (z. B. `mqttClient.subscribe(..., qos)`), `mqtt_client.cpp` — kann von der Markdown-Tabelle in `MQTT_TOPICS.md` abweichen; **immer Code prüfen** |
 | Sensor-/Aktor-Rohdaten | `raw_mode: true` (Skill + `.cursor/rules/firmware.mdc`); Verarbeitung auf dem Server |
 | Error-Codes | `El Trabajante/src/models/error_codes.h`, `.claude/reference/errors/ERROR_CODES.md` |
-| Pins / ADC2 vs. WiFi | `El Trabajante/src/config/hardware/esp32_dev.h`, `esp32_s3_devkit.h` (N8R8: Octal Flash+PSRAM GPIO 26–37), `xiao_esp32c3.h` (u. a. `RESERVED_GPIO_PINS`, `ADC2_GPIO_PINS`) |
+| Pins / ADC2 vs. WiFi | `El Trabajante/src/config/hardware/esp32_dev.h`, `esp32_s3_devkit.h` (N8R8: Octal Flash+PSRAM GPIO 26–37), `xiao_esp32c3.h` (u. a. `RESERVED_GPIO_PINS`, `ADC2_GPIO_PINS`, Kommentar ADC2+WiFi) |
+| Publish-Queue Größe / Pacing (AUT-481 P3) | `El Trabajante/src/tasks/publish_queue_constants.h` (SIZE=10, SHED=5), `publish_queue_policy.h` (adaptive Drain, status-defer), `publish_queue.h` (S3-Override: 16×2048 B, Shed=8), `mqtt_client.cpp` (`processPublishQueue`) |
 
 **Hinweis QoS:** `.cursor/rules/firmware.mdc` nennt für Aktor-Befehle QoS 2; `MQTT_TOPICS.md` listet Server→ESP teils als QoS 2; die Firmware subscribed in `main.cpp` u. a. mit **QoS 1**. Keine Annahme treffen — drei Stellen oder gezielter `Grep` nach `subscribe(` / `publish(`.
 
@@ -123,9 +124,27 @@ El Trabajante/
 
 **Wichtig:** PlatformIO-Befehle müssen aus `El Trabajante/` ausgeführt werden (dort liegt `platformio.ini`).
 
-- **Umgebungsnamen exakt:** In `platformio.ini` heißen die Envs u. a. `esp32_dev` (ESP32 DevKit / WROOM-32), `esp32-s3-devkitc-1` (S3 N8R8, Alias `esp32_s3_dev`), `seeed_xiao_esp32c3` (Seeed XIAO ESP32-C3), `wokwi_simulation`, `wokwi_esp01` … `wokwi_esp03`, `native`. Der Kurzname `seeed` als `-e`-Ziel existiert **nicht** — siehe `.claude/CLAUDE.md` Verifikationstabelle.
-- **Git Bash (Agent):** `pio` oft nicht im PATH → typisch `~/.platformio/penv/Scripts/pio.exe` (Windows) bzw. `pio` nach PATH-Setup.
+- **Umgebungsnamen exakt:** In `platformio.ini` heißen die Envs u. a. `esp32_dev` (ESP32 DevKit / WROOM-32), `esp32-s3-devkitc-1` (S3 N8R8, Alias `esp32_s3_dev`), `seeed_xiao_esp32c3` (Seeed XIAO ESP32-C3), `wokwi_simulation`, `wokwi_esp01` … `wokwi_esp03`, `native`. Der Kurzname `seeed` als `-e`-Ziel existiert **nicht** — siehe `.claude/CLAUDE.md` / `AGENTS.md` Verifikationstabelle.
+- **Linux / Pi (Repo-Host, kanonisch):** `pio` nicht im PATH → **`El Trabajante/.venv-pio/bin/pio`** (absolut: `/home/robin/autoone/El Trabajante/.venv-pio/bin/pio`). USB typisch **`/dev/ttyUSB0`**. Vor Flash: `docker stop automationone-esp32-serial` falls der Serial-Logger den Port hält.
+- **Git Bash (Windows):** `pio` oft nicht im PATH → `~/.platformio/penv/Scripts/pio.exe`.
 - **PowerShell:** `&&` in PS 5.x unzuverlässig → Befehle mit `;` trennen oder Zeilenweise.
+
+### Linux / Raspberry Pi (Build, Flash, Monitor)
+
+```bash
+PIO="/home/robin/autoone/El Trabajante/.venv-pio/bin/pio"
+FW="/home/robin/autoone/El Trabajante"
+PORT="/dev/ttyUSB0"
+
+cd "$FW"
+$PIO run -e esp32_dev
+$PIO run -e esp32_dev -t upload --upload-port "$PORT"
+$PIO device monitor -e esp32_dev --port "$PORT"
+$PIO run -e seeed_xiao_esp32c3 -t upload --upload-port /dev/ttyACM0   # XIAO C3 falls anderes Board
+$PIO test -e native -vvv
+```
+
+Monitor schreibt optional nach `El Trabajante/logs/device-monitor-YYMMDD-HHMMSS.log` (PIO `log2file`).
 
 ### Git Bash / Shell (Build, Flash, kurzer Monitor)
 
@@ -457,7 +476,7 @@ ON mit `duration` > 0 im MQTT-Payload → `command_duration_end_ms` gesetzt. `pr
 
 **Backends (SAFETY-RTOS M2):** `esp32_dev` nutzt standardmässig ESP-IDF `esp_mqtt_client` (eigener Task, Outbox). **`MQTT_USE_PUBSUBCLIENT=1`** (Seeed XIAO, Wokwi): PubSubClient, manueller Offline-Buffer. SDK-Header ESP-IDF: `#include <mqtt_client.h>` (Arduino-ESP32 SDK), nicht mit lokalem `services/communication/mqtt_client.h` verwechseln.
 
-**M3 (ESP-IDF):** Publishes vom Safety-Task (Core 1) gehen über `queuePublish()` → `MQTTClient::processPublishQueue()` im Communication-Task. `processPublishQueue()` existiert nur ohne `MQTT_USE_PUBSUBCLIENT`.
+**M3 (ESP-IDF):** Publishes vom Safety-Task (Core 1) gehen über `queuePublish()` → `MQTTClient::processPublishQueue()` im Communication-Task (50 ms). Queue: **10** Slots, Shed ab fill≥**5** (`publish_queue_constants.h`). Drain: default **1**/Tick, Boost **2**/Tick bei fill≥3 + gesundem Transport (`computeAdaptivePublishDrainBudget` in `publish_queue_policy.h`). `actuator/status` wird bei fill≥WATERMARK−1 deferred. `processPublishQueue()` existiert nur ohne `MQTT_USE_PUBSUBCLIENT`.
 
 ### Topic-Builder
 ```cpp

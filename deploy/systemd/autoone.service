@@ -10,8 +10,8 @@ Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/home/robin/autoone
 # Profile wie in .env (COMPOSE_PROFILES); bei Bedarf anpassen.
-ExecStart=/usr/bin/docker compose --profile monitoring up -d
-ExecStop=/usr/bin/docker compose --profile monitoring stop
+ExecStart=/usr/bin/docker compose -f docker-compose.yml -f docker-compose.pi.yml --profile monitoring up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.yml -f docker-compose.pi.yml --profile monitoring stop
 TimeoutStartSec=0
 
 [Install]
