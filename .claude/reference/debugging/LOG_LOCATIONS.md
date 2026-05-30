@@ -1,6 +1,7 @@
 # Log-System - AutomationOne
 
-> **Version:** 4.17 | **Aktualisiert:** 2026-05-29
+> **Version:** 4.18 | **Aktualisiert:** 2026-05-30
+> **Änderungen 4.18:** §5.0 Erase-Pflicht nach Partition-Table-Änderung dokumentiert; Boot-Log-Reader (python3/serial, kein interaktives TTY); Wann-erase-Hinweis mit Datum letzter PT-Änderung (2026-05-30 AUT-539/AUT-484, app0/app1 0x180000→0x190000).
 > **Änderungen 4.17 (HEAD):** Merge-Konflikt §2.3a bereinigt; `event_class`-Werte an Code angeglichen (`RULE_ARBITRATION`, `QUEUE_PRESSURE`); `failure_class`-Hinweis beibehalten.
 > **Änderungen 4.17 (AUT-539):** §5.0 Pi/Linux: kanonischer PIO-Pfad `El Trabajante/.venv-pio/bin/pio`, Monitor nach `logs/device-monitor-*.log`, Upload-Port `/dev/ttyUSB0`.
 > **Änderungen 4.16:** Pi-5 Ist-Check ergänzt: Hardware-Serial-Container kann `Exited` sein; in diesem Fall ESP-Liveness über MQTT-Heartbeats + DB `esp_devices.last_seen` verifizieren, nicht nur über `automationone-esp32-serial` Logs.
@@ -549,9 +550,34 @@ wait $WOKWI_PID
 PIO="/home/robin/autoone/El Trabajante/.venv-pio/bin/pio"
 cd "/home/robin/autoone/El Trabajante"
 docker stop automationone-esp32-serial 2>/dev/null || true
+
+# Normaler Flash (kein Partition-Table-Wechsel):
 $PIO run -e esp32_dev -t upload --upload-port /dev/ttyUSB0
+
+# PFLICHT nach Partition-Table-Änderung (partitions_custom.csv geändert):
+# 1. Erst vollständig löschen (NVS wird dabei GELÖSCHT → ESP startet in Provisioning-Mode)
+$PIO run -e esp32_dev -t erase --upload-port /dev/ttyUSB0
+# 2. Dann normaler Upload — neue Partition-Tabelle + Firmware
+$PIO run -e esp32_dev -t upload --upload-port /dev/ttyUSB0
+
+# Boot-Log lesen (nach Reset, kein interaktives TTY verfügbar auf Pi):
+python3 -c "
+import serial, time
+s = serial.Serial('/dev/ttyUSB0', 115200, timeout=0.5)
+s.setRTS(True); s.setDTR(False); time.sleep(0.1); s.setRTS(False); time.sleep(0.05)
+t = time.time()
+while time.time()-t < 15:
+    l = s.readline()
+    if l: print(l.decode('utf-8', errors='replace').rstrip())
+s.close()"
+
 $PIO device monitor -e esp32_dev --port /dev/ttyUSB0
 ```
+
+> **Wann erase_flash nötig?**  
+> Immer wenn `partitions_custom.csv` geändert wurde. Ohne Erase liest der Bootloader  
+> die alte (physisch im Flash stehende) Partition-Tabelle und verwirft das neue Image.  
+> Letzter Partition-Change: **2026-05-30** (AUT-539/AUT-484) — app0/app1 `0x180000→0x190000`, spiffs `0xD0000→0xB0000`.
 
 ### 5.1 Konfiguration
 

@@ -28,7 +28,7 @@ ESP32 != Business-Logic, Datenverarbeitung, Entscheidungen
 |----------|-------|-------|
 | **Heap** | ~160KB | Keine dynamischen Allokationen in Loops |
 | **Stack** | 8KB/Task | Keine grossen lokalen Arrays, keine Rekursion |
-| **Flash** | ~1.5MB Code | PROGMEM fuer konstante Strings (partitions_custom.csv: 0x180000) |
+| **Flash** | ~1.5625MB Code | `partitions_custom.csv` app0/app1: `0x190000` (1,638,400 B) — nach AUT-539/AUT-484 post-merge Overflow-Fix 2026-05-30 |
 
 ---
 

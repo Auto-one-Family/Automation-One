@@ -137,12 +137,19 @@ FW="/home/robin/autoone/El Trabajante"
 PORT="/dev/ttyUSB0"
 
 cd "$FW"
-$PIO run -e esp32_dev
-$PIO run -e esp32_dev -t upload --upload-port "$PORT"
+$PIO run -e esp32_dev                                                    # Build only
+$PIO run -e esp32_dev -t upload --upload-port "$PORT"                    # Normaler Flash
+
+# PFLICHT nach partitions_custom.csv-Änderung (ohne Erase: Boot-Loop wegen alter PT im Flash):
+$PIO run -e esp32_dev -t erase --upload-port "$PORT"                     # Vollständig löschen (NVS weg!)
+$PIO run -e esp32_dev -t upload --upload-port "$PORT"                    # Danach neu flashen
+
 $PIO device monitor -e esp32_dev --port "$PORT"
-$PIO run -e seeed_xiao_esp32c3 -t upload --upload-port /dev/ttyACM0   # XIAO C3 falls anderes Board
+$PIO run -e seeed_xiao_esp32c3 -t upload --upload-port /dev/ttyACM0     # XIAO C3 falls anderes Board
 $PIO test -e native -vvv
 ```
+
+> **Partition-Table aktuell (2026-05-30):** `app0`/`app1` je `0x190000` (1,638,400 B), spiffs `0xB0000` (720 KB), coredump `0x10000`. Headroom: ~67 KB. Datei: `El Trabajante/partitions_custom.csv`.
 
 Monitor schreibt optional nach `El Trabajante/logs/device-monitor-YYMMDD-HHMMSS.log` (PIO `log2file`).
 
