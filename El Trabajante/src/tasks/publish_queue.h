@@ -94,7 +94,8 @@ PublishQueueEnqueueResult tryQueuePublish(const char* topic,
                                           uint8_t qos,
                                           bool retain = false,
                                           bool critical = false,
-                                          const IntentMetadata* metadata = nullptr);
+                                          const IntentMetadata* metadata = nullptr,
+                                          unsigned long defer_ms = 0);
 
 inline bool queuePublish(const char* topic,
                          const char* payload,

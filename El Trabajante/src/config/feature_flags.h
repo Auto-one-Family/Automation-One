@@ -24,7 +24,9 @@
 // Kanonische Schaltstelle: nur hier toggeln (auskommentieren = aus, AUT-293).
 // Repo-Default: an (#define unten); Doku-SSOT fuer Verhalten: Mqtt_Protocoll.md §3a + MQTT_TOPICS.md (AUT-361).
 // Pi-/Legacy-Builds: bei Bedarf auskommentieren (voller Legacy-Heartbeat ohne heartbeat_metrics).
+#ifndef ENABLE_METRICS_SPLIT
 #define ENABLE_METRICS_SPLIT
+#endif
 
 // ============================================
 // CORE-QUEUE SAFETY CONTRACT (R0-R4)
