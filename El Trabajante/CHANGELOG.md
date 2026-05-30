@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Compile-Fix (`publish_queue.h/.cpp`):** `tryQueuePublish()` akzeptiert jetzt optionales
   7. Argument `unsigned long defer_ms = 0` (Placeholder für zukünftige deferred-publish-
   Unterstützung, aktuell ignoriert). Behebt Build-Fehler durch AUT-484-Call-Site.
+- **Partition-Fix (`partitions_custom.csv`):** `app0`/`app1` von `0x180000` (1,572,864 B) auf
+  `0x190000` (1,638,400 B) erweitert (+64 KB je Slot); `spiffs` von `0xD0000` auf `0xB0000`
+  (-128 KB). Behebt Boot-Loop nach AUT-539/AUT-484-Merge: merged Binary überschritt alte
+  Partition um 4,768 B (Bootloader SHA256-Fehler, keine App-Output). Flash jetzt 95.9%.
+  **Flash-Pflicht:** Vor diesem Binary einmalig `erase_flash` ausführen — NVS wird gelöscht,
+  ESP startet in Provisioning-Mode (AP `AutoOne-<ESP_ID>`).
 
 ---
 

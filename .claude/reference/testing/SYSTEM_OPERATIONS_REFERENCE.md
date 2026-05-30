@@ -1187,7 +1187,9 @@ pio run -e wokwi_esp03  # ESP_00000003
 $PIO run -e esp32_dev -t upload --upload-port /dev/ttyUSB0
 
 # Flash komplett löschen (NVS + Firmware)
-$PIO run -e esp32_dev -t erase
+# PFLICHT nach Änderung von partitions_custom.csv — ohne Erase liest Bootloader alte PT → Boot-Loop
+# Letzter PT-Change: 2026-05-30 (app0/app1 0x180000→0x190000)
+$PIO run -e esp32_dev -t erase --upload-port /dev/ttyUSB0
 
 # Build + Upload in einem
 $PIO run -e esp32_dev -t upload --upload-port /dev/ttyUSB0
@@ -1208,6 +1210,7 @@ C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -b 115200 -e esp
 C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -b 115200 -e esp32_dev --filter time
 
 # Alle in einem: Erase + Flash + Monitor (PowerShell, Befehle einzeln)
+# Erase nur nach partitions_custom.csv-Änderung nötig (letzter PT-Change: 2026-05-30)
 C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev -t erase
 C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev -t upload
 C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -b 115200 -e esp32_dev
