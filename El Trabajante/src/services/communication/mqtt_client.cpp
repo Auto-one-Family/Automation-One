@@ -317,6 +317,7 @@ MQTTClient::MQTTClient()
       last_disconnect_ms_(0),
       manual_reconnect_suspended_(false),
       pending_session_announce_msg_id_(-1),
+      last_runtime_critical_publish_ms_(0UL),
 #endif
       publish_seq_(0),
       safe_publish_retry_count_(0),
@@ -699,6 +700,66 @@ const char* MQTTClient::getLastPublishFailureReasonClassName() const {
 // ============================================
 // PUBLISHING (WITH CIRCUIT BREAKER)
 // ============================================
+#ifndef MQTT_USE_PUBSUBCLIENT
+bool MQTTClient::shouldApplyRuntimeCriticalPublishPace_(const String& topic) const {
+    if (topic.indexOf("/system/intent_outcome/lifecycle") >= 0) {
+        return false;
+    }
+    return isRealtimeResponsePublishTopic(topic) || isIntentOutcomePublishTopic(topic);
+}
+
+bool MQTTClient::deferRuntimeCriticalPublishPace_(const String& topic,
+                                                const String& payload,
+                                                uint8_t qos,
+                                                bool critical,
+                                                PublishFailureReasonClass* set_reason) {
+    if (!shouldApplyRuntimeCriticalPublishPace_(topic)) {
+        return false;
+    }
+
+    const unsigned long now_ms = millis();
+    if (last_runtime_critical_publish_ms_ == 0UL) {
+        return false;
+    }
+
+    const unsigned long next_allowed_ms =
+        last_runtime_critical_publish_ms_ + RUNTIME_CRITICAL_PUBLISH_INTER_PACE_MS;
+    if (now_ms >= next_allowed_ms) {
+        return false;
+    }
+
+    const unsigned long defer_ms = next_allowed_ms - now_ms;
+    IntentMetadata metadata =
+        extractIntentMetadataFromPayload(payload.c_str(), critical ? "critical_pub_pace" : "pub_pace");
+    const PublishQueueEnqueueResult pq =
+        tryQueuePublish(topic.c_str(), payload.c_str(), qos, false, critical, &metadata, defer_ms);
+    if (pq == PublishQueueEnqueueResult::Enqueued) {
+        if (set_reason != nullptr) {
+            *set_reason = PublishFailureReasonClass::None;
+        }
+        static unsigned long s_last_runtime_pace_log_ms = 0UL;
+        if (s_last_runtime_pace_log_ms == 0UL ||
+            (now_ms - s_last_runtime_pace_log_ms) >= 2000UL) {
+            s_last_runtime_pace_log_ms = now_ms;
+            LOG_D(TAG, String("[AUT-484] Runtime publish paced defer_ms=") + String(defer_ms) +
+                           " topic=" + topic);
+        }
+        return true;
+    }
+
+    if (set_reason != nullptr) {
+        *set_reason = mapQueueEnqueueResultToFailureReason(pq);
+    }
+    return false;
+}
+
+void MQTTClient::markRuntimeCriticalPublishCompleted_(const String& topic) {
+    if (shouldApplyRuntimeCriticalPublishPace_(topic)) {
+        last_runtime_critical_publish_ms_ = millis();
+    }
+}
+#endif
+
 bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos) {
     auto set_reason = [this](PublishFailureReasonClass reason) {
         last_publish_failure_reason_ = reason;
@@ -760,6 +821,14 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
         set_reason(PublishFailureReasonClass::TransportError);
         return false;
     }
+
+#ifndef MQTT_USE_PUBSUBCLIENT
+    const bool critical_for_pace = isCriticalPublishTopic(topic);
+    if (deferRuntimeCriticalPublishPace_(topic, payload, qos, critical_for_pace, nullptr)) {
+        set_reason(PublishFailureReasonClass::None);
+        return true;
+    }
+#endif
 
 #ifndef MQTT_USE_PUBSUBCLIENT
     if (mqtt_client_ == nullptr) {
@@ -897,6 +966,7 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
         } else {
             LOG_D(TAG, "Published [msg_id=" + String(msg_id) + "]: " + topic);
         }
+        markRuntimeCriticalPublishCompleted_(topic);
         return true;
     } else if (msg_id == -2) {
         uint32_t full_count = g_publish_outbox_full_count.fetch_add(1) + 1;
@@ -1390,6 +1460,10 @@ void MQTTClient::processSubscriptionQueue() {
             pending_bootstrap_config_subscribe_msg_id_ = msg_id;
             LOG_I(TAG, "[SYNC] Bootstrap heartbeat waiting for config SUBSCRIBED (msg_id=" + String(msg_id) + ")");
         }
+        // AUT-484 F1: Pace remaining bootstrap subscriptions to protect keepalive/TCP.
+        if (pending_subscription_count_ > 0) {
+            pending_subscriptions_[0].next_attempt_ms = millis() + SUBSCRIPTION_INTER_PACE_MS;
+        }
         return;
     }
 
@@ -1593,6 +1667,20 @@ void MQTTClient::processPublishQueue() {
                            " defer_count=" + String(req.pressure_defer_count));
         }
 
+        const String req_topic = String(req.topic);
+        if (shouldApplyRuntimeCriticalPublishPace_(req_topic)) {
+            const unsigned long next_allowed_ms =
+                last_runtime_critical_publish_ms_ + RUNTIME_CRITICAL_PUBLISH_INTER_PACE_MS;
+            if (last_runtime_critical_publish_ms_ > 0UL && now_ms < next_allowed_ms) {
+                req.next_retry_ms = next_allowed_ms;
+                if (xQueueSend(g_publish_queue, &req, 0) != pdTRUE) {
+                    LOG_W(TAG, "Runtime publish pace requeue failed, dropping: " + req_topic);
+                    g_publish_outbox_noncritical_drops.fetch_add(1);
+                }
+                break;
+            }
+        }
+
         const bool mqtt_connected_before_call = g_mqtt_connected.load();
         const bool wifi_connected_before_call = WiFi.isConnected();
         if (!mqtt_connected_before_call || !wifi_connected_before_call) {
@@ -1654,6 +1742,7 @@ void MQTTClient::processPublishQueue() {
             // Drain-Erfolge wurden vom CB nicht registriert.
             circuit_breaker_.recordSuccess();
             req.pressure_defer_count = 0;
+            markRuntimeCriticalPublishCompleted_(req_topic);
             continue;
         }
 
@@ -2221,6 +2310,7 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             self->next_managed_reconnect_ms_ = 0;
             self->managed_reconnect_attempts_ = 0;
             self->manual_reconnect_suspended_ = false;
+            self->last_runtime_critical_publish_ms_ = 0UL;
 
             // PKG-18: Capture write-timeout history before counter reset.
             // Used below to decide post-reconnect queue stabilization duration.

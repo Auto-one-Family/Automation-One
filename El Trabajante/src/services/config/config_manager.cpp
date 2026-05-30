@@ -126,6 +126,50 @@ bool ConfigManager::loadWiFiConfig(WiFiConfig& config) {
   #endif
 
   // ============================================
+  // FUNKTURM MQTT-ONLY (esp32_dev + FUNKTURM_MQTT_HOST_ONLY=1): SSID/Pass aus NVS, nur Broker-IP
+  // ============================================
+  #ifdef FUNKTURM_UPDATE_MQTT_ONLY
+    if (!storageManager.beginNamespace("wifi_config", true)) {
+      LOG_E(TAG, "ConfigManager: FUNKTURM_UPDATE_MQTT_ONLY — wifi_config namespace failed");
+      return false;
+    }
+
+    config.ssid = storageManager.getStringObj("ssid", "");
+    config.password = storageManager.getStringObj("password", "");
+    config.server_address = storageManager.getStringObj("server_address", "");
+    config.mqtt_port = storageManager.getUInt16("mqtt_port", 1883);
+    config.mqtt_username = storageManager.getStringObj("mqtt_username", "");
+    config.mqtt_password = storageManager.getStringObj("mqtt_password", "");
+    config.configured = storageManager.getBool("configured", false);
+    storageManager.endNamespace();
+
+    if (!config.configured || config.ssid.length() == 0) {
+      LOG_E(TAG, "ConfigManager: FUNKTURM_UPDATE_MQTT_ONLY — kein provisioniertes WiFi in NVS");
+      return false;
+    }
+
+    const String old_server = config.server_address;
+    const uint16_t old_port = config.mqtt_port;
+    config.server_address = FUNKTURM_MQTT_HOST;
+    config.mqtt_port = FUNKTURM_MQTT_PORT;
+
+    sanitizeMqttBrokerHostAndPort(config.server_address, &config.mqtt_port);
+
+    wifi_config_loaded_ = true;
+
+    if (!saveWiFiConfig(config)) {
+      LOG_W(TAG, "ConfigManager: FUNKTURM_UPDATE_MQTT_ONLY — NVS persist fehlgeschlagen");
+      return false;
+    }
+
+    LOG_I(TAG, "ConfigManager: FUNKTURM_UPDATE_MQTT_ONLY — SSID unveraendert: " + config.ssid);
+    LOG_I(TAG, "ConfigManager: FUNKTURM_UPDATE_MQTT_ONLY — Broker: " + old_server + ":" +
+             String(old_port) + " -> " + config.server_address + ":" + String(config.mqtt_port));
+
+    return true;
+  #endif
+
+  // ============================================
   // FUNKTURM ONE-SHOT FLASH (esp32_funkturm): Build-time WiFi + MQTT, then NVS persist
   // ============================================
   #ifdef FUNKTURM_COMPILE_WIFI
