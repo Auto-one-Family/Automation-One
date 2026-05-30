@@ -107,7 +107,7 @@ docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c \
 
 ## 3. Schema-Übersicht
 
-### Alle 41 Tabellen (Stand: Alembic HEAD `aut299_cal_session_metadata`, verifiziert 2026-05-08)
+### Alle 38 Tabellen (Stand: verifiziert 2026-05-29 via `grep __tablename__` in `src/db/models/`)
 
 | Tabelle | Funktion | Wichtige Constraints |
 |---------|----------|---------------------|
@@ -146,12 +146,10 @@ docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c \
 | `plugin_executions` | Plugin-Ausführungslog | FK `plugin_id` → `plugin_configs.plugin_id` CASCADE |
 | `diagnostic_reports` | Diagnose-Reports | FK `triggered_by_user` → `user_accounts.id` SET NULL |
 | `ai_predictions` | KI-Vorhersagen | FK `target_esp_id` → `esp_devices.id` SET NULL |
-| `entity_backups` | Entity-Backup-Store | `expires_at_user`/`expires_at_admin`/`purge_at`; mehrere Indizes |
-| `entity_lifecycle_commands` | MQTT-Command-Queue | Retry-Mechanismus; `next_retry_at` |
 | `system_config` | System-Konfiguration | `config_key` UNIQUE |
 | `sensor_type_defaults` | Sensor-Typ-Defaults | `sensor_type` UNIQUE |
 | `library_metadata` | Sensor-Library-Registry | `library_name` UNIQUE |
-| `alembic_version` | Migration-Tracking | (intern, nicht in Summe 41 enthalten) |
+| `alembic_version` | Migration-Tracking | (intern, nicht in Summe 38 enthalten) |
 
 ### Sensor Unique Constraint
 

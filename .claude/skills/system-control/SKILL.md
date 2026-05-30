@@ -452,6 +452,7 @@ make db-restore FILE=backups/latest.sql # 3. Bei Problemen wiederherstellen
 | ESP32 nicht sichtbar | `make mqtt-sub` → kein Heartbeat? | esp32-debug |
 | DB-Fehler | `make shell-db` → Queries | db-inspector |
 | Frontend Build-Error | `make logs-frontend` | frontend-debug |
+| Vite „Blocked request“ (fremder Host) | `curl -sI -H "Host: <name>" http://localhost:5173`; `El Frontend/vite.config.ts` → `allowedHosts` | frontend-debug |
 
 ---
 

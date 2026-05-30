@@ -937,7 +937,7 @@ L5: P4 State Machine (30s)      → koordinierter Offline-Mode    [bestehend]
 | Offline publizieren | `main.py:lifespan()` | Shutdown-Phase, vor `disconnect()` |
 | Topic builden (Server) | `topics.py:build_server_status_topic()` | `constants.MQTT_TOPIC_SERVER_STATUS` |
 | Topic builden (ESP32) | `topic_builder.cpp:buildServerStatusTopic()` | `kaiser/%s/server/status` |
-| Subscription | `main.cpp:subscribeToAllTopics()` | Topic #12, QoS 1 |
+| Subscription | `main.cpp:subscribeToAllTopics()` (ab Zeile 661, 12 Topics) | Topic #12 `server/status`, QoS 1 |
 | Handler | `main.cpp:routeIncomingMessage()` | `indexOf("/server/status") >= 0` |
 
 ---

@@ -1796,6 +1796,7 @@ docker logs automationone-esp32-serial --tail=100 -f
 | **Server Logs** | `logs/server/god_kaiser.log` (Docker Bind-Mount) |
 | **MQTT Logs** | `docker compose logs mqtt-broker` oder Loki `compose_service=mqtt-broker` (kein Bind-Mount) |
 | **Frontend Logs** | Loki `compose_service=el-frontend` / `docker compose logs el-frontend` (stdout only, kein Bind-Mount) |
+| **Frontend Vite Config** | `El Frontend/vite.config.ts` (Compose-Mount in `el-frontend`; `server.allowedHosts` für LAN/Tailscale-Hostnamen) |
 | **PostgreSQL Logs** | `docker compose logs postgres` oder Loki `compose_service=postgres` (kein Bind-Mount; logging_collector=off) |
 | **ESP32 Logs** | `logs/esp32/` (manuell) |
 | **Session Logs** | `logs/current/` (via session.sh) |
@@ -1830,4 +1831,4 @@ Wenn Cursor den Playwright MCP-Server nutzt (z. B. cursor-ide-browser), kann der
 
 ---
 
-*Erstellt: 2026-02-02 | Aktualisiert: 2026-04-10 | AutomationOne Debug-Operations-Reference*
+*Erstellt: 2026-02-02 | Aktualisiert: 2026-05-27 | AutomationOne Debug-Operations-Reference*

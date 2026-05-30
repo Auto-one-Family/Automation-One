@@ -85,7 +85,8 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 
 **vite.config.ts:**
 ```typescript
-// Port: 5173 (Dev)
+// Port: 5173 (Dev), host: 0.0.0.0
+// allowedHosts: localhost, LAN/Tailscale-Hostnamen (pi-home, pi-elbherb, phyta, .ts.net, growy2, AutoOne44, …) — Vite 6 blockiert sonst fremde Host-Header
 // Proxy: /api → process.env.VITE_API_TARGET || 'http://localhost:8000' (ws: true)
 // Proxy: /ws → process.env.VITE_WS_TARGET || 'ws://localhost:8000'
 // Proxy: /grafana → process.env.VITE_GRAFANA_TARGET || 'http://localhost:3000'

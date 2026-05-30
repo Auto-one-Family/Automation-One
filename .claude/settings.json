@@ -10,7 +10,10 @@
       "Bash(*)",
       "Agent(*)",
       "Skill(*)",
-      "Skill(*:*)"
+      "Skill(*:*)",
+      "mcp__slack__*",
+      "mcp__claude_ai_Slack__*",
+      "mcp__claude_ai_Linear__*"
     ],
     "deny": [
       "Bash(rm -rf *)",

@@ -1,0 +1,453 @@
+From f5f1c08ea5efa0845135b20da78adce49f8ddfb0 Mon Sep 17 00:00:00 2001
+From: Robin <robin@phyta.org>
+Date: Sun, 24 May 2026 18:44:51 +0200
+Subject: [PATCH] feat(firmware): add structured 3012 publish-failure context
+
+Classify MQTT publish failures into cb_open/queue_shed/outbox_full/transport_error and attach topic, gpio, and sensor_type context to 3012 error payloads so AUT-456 can persist and correlate them.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ .../src/error_handling/error_tracker.cpp      | 48 ++++++++++++++-
+ .../src/error_handling/error_tracker.h        | 17 +++++-
+ .../services/communication/mqtt_client.cpp    | 60 ++++++++++++++++++-
+ .../src/services/communication/mqtt_client.h  | 11 ++++
+ .../src/services/sensor/sensor_manager.cpp    | 18 +++++-
+ El Trabajante/src/tasks/publish_queue.cpp     | 12 ++++
+ El Trabajante/src/tasks/publish_queue.h       |  4 ++
+ 7 files changed, 162 insertions(+), 8 deletions(-)
+
+diff --git a/El Trabajante/src/error_handling/error_tracker.cpp b/El Trabajante/src/error_handling/error_tracker.cpp
+index 6acb7c6c..1df079cb 100644
+--- a/El Trabajante/src/error_handling/error_tracker.cpp	
++++ b/El Trabajante/src/error_handling/error_tracker.cpp	
+@@ -104,13 +104,22 @@ void ErrorTracker::trackError(uint16_t error_code, ErrorSeverity severity, const
+   addToBuffer(error_code, severity, message);
+   
+   // Publish to MQTT (if enabled and not recursing)
+-  publishErrorToMqtt(error_code, severity, message);
++  publishErrorToMqtt(error_code, severity, message, nullptr);
+ }
+ 
+ void ErrorTracker::trackError(uint16_t error_code, const char* message) {
+   trackError(error_code, ERROR_SEVERITY_ERROR, message);
+ }
+ 
++void ErrorTracker::trackErrorWithContext(uint16_t error_code,
++                                         ErrorSeverity severity,
++                                         const char* message,
++                                         const ErrorMqttContext& context) {
++  logErrorToLogger(error_code, severity, message);
++  addToBuffer(error_code, severity, message);
++  publishErrorToMqtt(error_code, severity, message, &context);
++}
++
+ // ============================================
+ // CONVENIENCE METHODS
+ // ============================================
+@@ -359,7 +368,10 @@ void ErrorTracker::clearMqttPublishCallback() {
+   LOG_D(TAG, "ErrorTracker: MQTT error publishing disabled");
+ }
+ 
+-void ErrorTracker::publishErrorToMqtt(uint16_t error_code, ErrorSeverity severity, const char* message) {
++void ErrorTracker::publishErrorToMqtt(uint16_t error_code,
++                                      ErrorSeverity severity,
++                                      const char* message,
++                                      const ErrorMqttContext* context) {
+   // Guard: Skip if disabled or already publishing (recursion prevention)
+   if (!mqtt_publishing_enabled_ || mqtt_publish_in_progress_) {
+     return;
+@@ -407,12 +419,42 @@ void ErrorTracker::publishErrorToMqtt(uint16_t error_code, ErrorSeverity severit
+   escaped_msg.replace("\"", "\\\"");
+   escaped_msg.replace("\n", "\\n");
+   payload += escaped_msg;
+-  // ✅ Phase 0 Fix: Add context field (empty object for now, extensible)
++  // ✅ Phase 0 Fix: Add context field (extensible for per-error diagnostics)
+   payload += "\",\"context\":{";
+   payload += "\"esp_id\":\"";
+   payload += mqtt_esp_id_;
+   payload += "\",\"uptime_ms\":";
+   payload += String(millis());
++  if (context != nullptr) {
++    if (context->topic != nullptr && context->topic[0] != '\0') {
++      String escaped_topic = String(context->topic);
++      escaped_topic.replace("\"", "\\\"");
++      escaped_topic.replace("\n", "\\n");
++      payload += ",\"topic\":\"";
++      payload += escaped_topic;
++      payload += "\"";
++    }
++    if (context->has_gpio) {
++      payload += ",\"gpio\":";
++      payload += String(context->gpio);
++    }
++    if (context->sensor_type != nullptr && context->sensor_type[0] != '\0') {
++      String escaped_sensor_type = String(context->sensor_type);
++      escaped_sensor_type.replace("\"", "\\\"");
++      escaped_sensor_type.replace("\n", "\\n");
++      payload += ",\"sensor_type\":\"";
++      payload += escaped_sensor_type;
++      payload += "\"";
++    }
++    if (context->reason_class != nullptr && context->reason_class[0] != '\0') {
++      String escaped_reason = String(context->reason_class);
++      escaped_reason.replace("\"", "\\\"");
++      escaped_reason.replace("\n", "\\n");
++      payload += ",\"reason_class\":\"";
++      payload += escaped_reason;
++      payload += "\"";
++    }
++  }
+   payload += "}";
+   payload += ",\"ts\":";
+   payload += String((unsigned long)unix_ts);
+diff --git a/El Trabajante/src/error_handling/error_tracker.h b/El Trabajante/src/error_handling/error_tracker.h
+index 9e86be4b..84d4f49f 100644
+--- a/El Trabajante/src/error_handling/error_tracker.h	
++++ b/El Trabajante/src/error_handling/error_tracker.h	
+@@ -40,6 +40,14 @@ struct ErrorEntry {
+   }
+ };
+ 
++struct ErrorMqttContext {
++  const char* topic = nullptr;
++  const char* sensor_type = nullptr;
++  const char* reason_class = nullptr;
++  int32_t gpio = -1;
++  bool has_gpio = false;
++};
++
+ // ============================================
+ // MQTT PUBLISH CALLBACK TYPE
+ // ============================================
+@@ -62,6 +70,10 @@ public:
+   // Primary API: const char* (Guide-konform)
+   void trackError(uint16_t error_code, ErrorSeverity severity, const char* message);
+   void trackError(uint16_t error_code, const char* message);  // Default severity: ERROR
++  void trackErrorWithContext(uint16_t error_code,
++                             ErrorSeverity severity,
++                             const char* message,
++                             const ErrorMqttContext& context);
+   
+   // Convenience Methods — pass full codes from models/error_codes.h when available; small
+   // numeric offsets still map via category base + code when outside the band (bands use
+@@ -141,7 +153,10 @@ private:
+   // Helper methods
+   void addToBuffer(uint16_t error_code, ErrorSeverity severity, const char* message);
+   void logErrorToLogger(uint16_t error_code, ErrorSeverity severity, const char* message);
+-  void publishErrorToMqtt(uint16_t error_code, ErrorSeverity severity, const char* message);
++  void publishErrorToMqtt(uint16_t error_code,
++                          ErrorSeverity severity,
++                          const char* message,
++                          const ErrorMqttContext* context = nullptr);
+ };
+ 
+ // ============================================
+diff --git a/El Trabajante/src/services/communication/mqtt_client.cpp b/El Trabajante/src/services/communication/mqtt_client.cpp
+index 33d13513..2954fc96 100644
+--- a/El Trabajante/src/services/communication/mqtt_client.cpp	
++++ b/El Trabajante/src/services/communication/mqtt_client.cpp	
+@@ -13,6 +13,7 @@
+ #include <sdkconfig.h>
+ #include <esp_system.h>
+ #include <atomic>
++#include <cstring>
+ #include <errno.h>
+ 
+ #include "../../tasks/intent_contract.h"
+@@ -58,6 +59,32 @@ static bool isIntentOutcomePublishTopic(const String& topic) {
+     return topic.indexOf("/system/intent_outcome") != -1;
+ }
+ 
++static const char* publishFailureReasonClassToString(PublishFailureReasonClass reason) {
++    switch (reason) {
++        case PublishFailureReasonClass::CircuitBreakerOpen:
++            return "cb_open";
++        case PublishFailureReasonClass::QueueShed:
++            return "queue_shed";
++        case PublishFailureReasonClass::OutboxFull:
++            return "outbox_full";
++        case PublishFailureReasonClass::TransportError:
++            return "transport_error";
++        case PublishFailureReasonClass::None:
++        default:
++            return "transport_error";
++    }
++}
++
++#ifndef MQTT_USE_PUBSUBCLIENT
++static PublishFailureReasonClass mapQueueEnqueueResultToFailureReason(PublishQueueEnqueueResult result) {
++    const char* reason = publishQueueEnqueueReasonClass(result);
++    if (reason != nullptr && strcmp(reason, "queue_shed") == 0) {
++        return PublishFailureReasonClass::QueueShed;
++    }
++    return PublishFailureReasonClass::TransportError;
++}
++#endif
++
+ #ifndef MQTT_USE_PUBSUBCLIENT
+ static std::atomic<uint32_t> g_publish_outbox_noncritical_drops{0};
+ // [FIX5-VERIFY] Total MQTT outbox-full events (msg_id == -2), all topic classes.
+@@ -291,7 +318,8 @@ MQTTClient::MQTTClient()
+       pending_session_announce_msg_id_(-1),
+ #endif
+       publish_seq_(0),
+-      safe_publish_retry_count_(0)
++      safe_publish_retry_count_(0),
++      last_publish_failure_reason_(PublishFailureReasonClass::None)
+ #ifdef ENABLE_METRICS_SPLIT
+       , last_metrics_{}
+       , metrics_skip_count_(METRICS_MAX_SKIP_COUNT)
+@@ -643,18 +671,32 @@ uint32_t MQTTClient::getSafePublishRetryCount() const {
+     return safe_publish_retry_count_;
+ }
+ 
++PublishFailureReasonClass MQTTClient::getLastPublishFailureReasonClass() const {
++    return last_publish_failure_reason_;
++}
++
++const char* MQTTClient::getLastPublishFailureReasonClassName() const {
++    return publishFailureReasonClassToString(last_publish_failure_reason_);
++}
++
+ // ============================================
+ // PUBLISHING (WITH CIRCUIT BREAKER)
+ // ============================================
+ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos) {
++    auto set_reason = [this](PublishFailureReasonClass reason) {
++        last_publish_failure_reason_ = reason;
++    };
++
+     if (test_publish_hook_) {
+         test_publish_hook_(topic, payload);
++        set_reason(PublishFailureReasonClass::None);
+         return true;
+     }
+ 
+     // Circuit Breaker: block publishes when broker is persistently down
+     if (!circuit_breaker_.allowRequest()) {
+         LOG_W(TAG, "MQTT publish blocked by Circuit Breaker (Service DOWN)");
++        set_reason(PublishFailureReasonClass::CircuitBreakerOpen);
+         return false;
+     }
+ 
+@@ -684,10 +726,12 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
+             }
+             logAdmissionCorrelationBlockedPublish(topic, payload, "REGISTRATION_TIMEOUT");
+             LOG_D(TAG, "Publish blocked (registration timeout, no ACK yet): " + topic);
++            set_reason(PublishFailureReasonClass::TransportError);
+             return false;
+         } else {
+             logAdmissionCorrelationBlockedPublish(topic, payload, "REGISTRATION_PENDING");
+             LOG_D(TAG, "Publish blocked (awaiting registration): " + topic);
++            set_reason(PublishFailureReasonClass::TransportError);
+             return false;
+         }
+     }
+@@ -696,12 +740,14 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
+         LOG_E(TAG, "Empty payload blocked for topic: " + topic);
+         errorTracker.logCommunicationError(ERROR_MQTT_PAYLOAD_INVALID,
+                                            ("Empty payload for: " + topic).c_str());
++        set_reason(PublishFailureReasonClass::TransportError);
+         return false;
+     }
+ 
+ #ifndef MQTT_USE_PUBSUBCLIENT
+     if (mqtt_client_ == nullptr) {
+         LOG_W(TAG, "MQTT client not initialized, dropping message: " + topic);
++        set_reason(PublishFailureReasonClass::TransportError);
+         return false;
+     }
+ 
+@@ -722,20 +768,24 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
+                                                        &metadata);
+         if (pq == PublishQueueEnqueueResult::Enqueued) {
+             circuit_breaker_.recordSuccess();
++            set_reason(PublishFailureReasonClass::None);
+             return true;
+         }
+         if (pq == PublishQueueEnqueueResult::ShedBackpressure) {
+             LOG_D(TAG, "[AUT-344] Publish shed (COMM backpressure), not a CB failure: " + topic);
++            set_reason(mapQueueEnqueueResultToFailureReason(pq));
+             return false;
+         }
+         // Failed: queue full, oversize, null, or queue not initialised
+         if (!critical) {
+             LOG_W(TAG, "Publish queue enqueue failed (non-critical): " + topic);
++            set_reason(mapQueueEnqueueResultToFailureReason(pq));
+             return false;
+         }
+         // Queue enqueue failures are local backpressure (Core handoff), not transport proof.
+         // Do not open MQTT circuit breaker here; reserve CB failures for real MQTT transport errors.
+         LOG_W(TAG, "Publish queue enqueue failed (critical, no CB failure): " + topic);
++        set_reason(mapQueueEnqueueResultToFailureReason(pq));
+         return false;
+     }
+ 
+@@ -774,12 +824,14 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
+                                 " watermark=" + String(PUBLISH_QUEUE_SHED_WATERMARK) +
+                                 " topic=" + topic);
+                 // #endregion
++                set_reason(PublishFailureReasonClass::None);
+                 return true;
+             }
+             if (pq == PublishQueueEnqueueResult::ShedBackpressure) {
+                 // Explicit shed under pressure: prefer dropping lower-value traffic over
+                 // risking long blocking calls that hurt control responsiveness.
+                 LOG_D(TAG, "[DBG5126ae] direct critical shed by queue pressure: " + topic);
++                set_reason(mapQueueEnqueueResultToFailureReason(pq));
+                 return false;
+             }
+             LOG_W(TAG, "Direct critical defer enqueue failed, fallback to direct publish: " + topic);
+@@ -815,6 +867,7 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
+ 
+     if (msg_id >= 0) {
+         circuit_breaker_.recordSuccess();
++        set_reason(PublishFailureReasonClass::None);
+         if (qos > 0) {
+             g_qos1_enqueue_count.fetch_add(1);
+             // [OUTBOX+1]: QoS-1 message entered IDF OUTBOX — stays there until PUBACK.
+@@ -870,6 +923,7 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
+                      (unsigned)drop_cnt, topic.c_str(), (unsigned)ESP.getFreeHeap());
+             LOG_D(TAG, drop_log);
+         }
++        set_reason(PublishFailureReasonClass::OutboxFull);
+         return false;
+     } else {
+         // msg_id == -1: error (not connected or internal failure)
+@@ -882,6 +936,7 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
+         } else {
+             LOG_W(TAG, "Publish before MQTT connected, dropping: " + topic);
+         }
++        set_reason(PublishFailureReasonClass::TransportError);
+         return false;
+     }
+ 
+@@ -890,6 +945,7 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
+     if (!isConnected()) {
+         LOG_W(TAG, "MQTT not connected, adding to offline buffer");
+         circuit_breaker_.recordFailure();
++        set_reason(PublishFailureReasonClass::TransportError);
+         return addToOfflineBuffer(topic, payload, qos);
+     }
+ 
+@@ -897,12 +953,14 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
+ 
+     if (success) {
+         circuit_breaker_.recordSuccess();
++        set_reason(PublishFailureReasonClass::None);
+         LOG_D(TAG, "Published: " + topic);
+     } else {
+         circuit_breaker_.recordFailure();
+         LOG_E(TAG, "Publish failed: " + topic);
+         errorTracker.logCommunicationError(ERROR_MQTT_PUBLISH_FAILED,
+                                            ("Publish failed: " + topic).c_str());
++        set_reason(PublishFailureReasonClass::TransportError);
+         if (circuit_breaker_.isOpen()) {
+             LOG_W(TAG, "Circuit Breaker OPENED after failure threshold");
+         }
+diff --git a/El Trabajante/src/services/communication/mqtt_client.h b/El Trabajante/src/services/communication/mqtt_client.h
+index dfc081ca..b1bbd269 100644
+--- a/El Trabajante/src/services/communication/mqtt_client.h	
++++ b/El Trabajante/src/services/communication/mqtt_client.h	
+@@ -48,6 +48,14 @@ struct MQTTConfig {
+     int timeout;
+ };
+ 
++enum class PublishFailureReasonClass : uint8_t {
++    None = 0,
++    CircuitBreakerOpen = 1,
++    QueueShed = 2,
++    OutboxFull = 3,
++    TransportError = 4,
++};
++
+ // ============================================
+ // MQTT MESSAGE (offline buffer — PubSubClient path only)
+ // ============================================
+@@ -96,6 +104,8 @@ public:
+ 
+     // Publishing
+     bool publish(const String& topic, const String& payload, uint8_t qos = 1);
++    PublishFailureReasonClass getLastPublishFailureReasonClass() const;
++    const char* getLastPublishFailureReasonClassName() const;
+     bool safePublish(const String& topic, const String& payload, uint8_t qos = 1, uint8_t retries = 3);
+     void setTestPublishHook(std::function<void(const String&, const String&)> hook);
+     void clearTestPublishHook();
+@@ -258,6 +268,7 @@ private:
+ 
+     // AUT-57: cumulative retry count across all safePublish calls (telemetry only)
+     uint32_t safe_publish_retry_count_;
++    PublishFailureReasonClass last_publish_failure_reason_;
+ 
+     // ============================================
+     // AUT-121: HEARTBEAT METRICS SPLIT
+diff --git a/El Trabajante/src/services/sensor/sensor_manager.cpp b/El Trabajante/src/services/sensor/sensor_manager.cpp
+index 276be467..bd2bcda3 100644
+--- a/El Trabajante/src/services/sensor/sensor_manager.cpp	
++++ b/El Trabajante/src/services/sensor/sensor_manager.cpp	
+@@ -1842,9 +1842,21 @@ bool SensorManager::publishSensorReading(const SensorReading& reading) {
+     // AUT-54: QoS 0 — raw sensor stream is high-frequency telemetry; QoS-1 filled the IDF
+     // OUTBOX alongside other traffic and contributed to write-timeout disconnects.
+     if (!mqtt_client_->publish(topic, payload, 0)) {
+-        LOG_E(TAG, "Sensor Manager: Failed to publish sensor data for GPIO " + String(reading.gpio));
+-        errorTracker.trackError(ERROR_MQTT_PUBLISH_FAILED, ERROR_SEVERITY_ERROR,
+-                               "Failed to publish sensor data");
++        const char* reason_class = mqtt_client_->getLastPublishFailureReasonClassName();
++        LOG_E(TAG, "Sensor Manager: Failed to publish sensor data for GPIO " +
++                   String(reading.gpio) + " reason=" + String(reason_class));
++
++        ErrorMqttContext context;
++        context.topic = topic.c_str();
++        context.gpio = static_cast<int32_t>(reading.gpio);
++        context.has_gpio = true;
++        context.sensor_type = reading.sensor_type.c_str();
++        context.reason_class = reason_class;
++
++        errorTracker.trackErrorWithContext(ERROR_MQTT_PUBLISH_FAILED,
++                                           ERROR_SEVERITY_ERROR,
++                                           "Failed to publish sensor data",
++                                           context);
+         return false;
+     }
+     return true;
+diff --git a/El Trabajante/src/tasks/publish_queue.cpp b/El Trabajante/src/tasks/publish_queue.cpp
+index 29197fa2..ec87f950 100644
+--- a/El Trabajante/src/tasks/publish_queue.cpp	
++++ b/El Trabajante/src/tasks/publish_queue.cpp	
+@@ -176,6 +176,18 @@ static void updateHighWatermark(uint8_t current_fill) {
+     }
+ }
+ 
++const char* publishQueueEnqueueReasonClass(PublishQueueEnqueueResult result) {
++    switch (result) {
++        case PublishQueueEnqueueResult::ShedBackpressure:
++            return "queue_shed";
++        case PublishQueueEnqueueResult::Failed:
++            return "transport_error";
++        case PublishQueueEnqueueResult::Enqueued:
++        default:
++            return nullptr;
++    }
++}
++
+ // ============================================
+ // tryQueuePublish
+ // ============================================
+diff --git a/El Trabajante/src/tasks/publish_queue.h b/El Trabajante/src/tasks/publish_queue.h
+index 1898396b..b662f7dd 100644
+--- a/El Trabajante/src/tasks/publish_queue.h	
++++ b/El Trabajante/src/tasks/publish_queue.h	
+@@ -65,6 +65,10 @@ enum class PublishQueueEnqueueResult : uint8_t {
+     Failed = 2,
+ };
+ 
++// AUT-454: Canonical reason classes for queue enqueue outcomes.
++// Returns nullptr for successful enqueue.
++const char* publishQueueEnqueueReasonClass(PublishQueueEnqueueResult result);
++
+ // Create the publish queue — call in setup() BEFORE createSafetyTask().
+ void initPublishQueue();
+ 
+-- 
+2.47.3
+

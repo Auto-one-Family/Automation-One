@@ -34,13 +34,11 @@
 | `LibraryMetadata` (`library.py`) | `library_metadata` | |
 | `CalibrationSession` (`calibration_session.py`) | `calibration_sessions` | FK `sensor_config_id` → `sensor_configs.id` ON DELETE SET NULL; `session_metadata` JSON (AUT-299) |
 | `ApiKey` (`api_key.py`) | `api_keys` | `key_hash` UNIQUE; `owner_type`/`owner_id`; `scopes` JSON; `revoked_at` nullable |
-| `EntityBackup` (`entity_backup.py`) | `entity_backups` | Soft-Delete Backup-Store; `restore_status`; `expires_at_user` / `expires_at_admin` / `purge_at` |
-| `EntityLifecycleCommand` (`entity_lifecycle.py`) | `entity_lifecycle_commands` | MQTT-Command-Queue mit Retry; `status`, `retry_count`, `next_retry_at` |
 | `Plant` (`plant.py`) | `plants` | FK `subzone_id` → `subzone_configs.id` SET NULL; `qr_code` UNIQUE; Soft-Delete `deleted_at`; `phase` |
 | `PlantCannabisExtension` (`plant.py`) | `plants_cannabis_extension` | FK `plant_id` → `plants.plant_id` RESTRICT; UNIQUE `plant_id`; Erntedaten, Laboranalyse |
 | `PlantLifecycleEvent` (`plant.py`) | `plant_lifecycle_events` | FK `plant_id` → `plants.plant_id` RESTRICT; FK `created_by_user` → `user_accounts.id` RESTRICT |
 
 ### Alembic HEAD (Repo-Datei, immer live verifizieren)
 
-Aktueller HEAD (verifiziert 2026-05-08): `aut299_cal_session_metadata`  
+Aktueller HEAD (verifiziert 2026-05-29): `aut299_cal_session_metadata` — **38** Tabellen (`grep __tablename__ src/db/models/`)  
 **Immer** lokal verifizieren: `docker exec automationone-server python -m alembic heads` und abgleichen mit `SELECT version_num FROM alembic_version`.

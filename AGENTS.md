@@ -26,7 +26,7 @@ AutomationOne ist ein IoT-Framework mit 3 Schichten:
 
 - 9 Sensortypen: pH, EC, Temp, Humidity, Soil, Pressure, CO2, Light, Flow
 - 4 Aktortypen: Pump, Valve, PWM, Relay
-- PostgreSQL (32 Tabellen), MQTT (Mosquitto), Grafana+Prometheus Monitoring
+- PostgreSQL (38 Tabellen), MQTT (Mosquitto), Grafana+Prometheus Monitoring
 - HardwareView: 3-Level-Zoom (L1 Uebersicht → L2 Orbital/Device → L3 Modals), Route-basiert
 - Sensor-Konfiguration NUR in HardwareView (SensorConfigPanel). Komponenten-Tab (/sensors) = Wissensdatenbank
 - Mock vs. Real ESP klar trennen. Zone auf Geraetebene, Subzone pro Sensor
@@ -90,6 +90,7 @@ AutomationOne ist ein IoT-Framework mit 3 Schichten:
 - The `Makefile` provides Docker Compose shortcuts; see `make help` for targets.
 - ESP32 firmware (`El Trabajante/`) is optional for dev — Mock ESPs can be created via the Debug API.
 - `vue-tsc --noEmit` may show a few pre-existing type issues (unused imports, type cast) — verify whether your change introduced new errors before treating as regressions.
+- **Pi / Tailscale Frontend (Vite 6):** Zugriff über Hostnamen wie `pi-home` erfordert Eintrag in `El Frontend/vite.config.ts` → `server.allowedHosts` (zusätzlich zu CORS). Nach Änderung: `docker compose restart el-frontend`. Test: `curl -sI -H "Host: pi-home" http://localhost:5173`.
 
 ### ESP32 Build, Flash & Monitor (Linux / Raspberry Pi Host)
 

@@ -1,6 +1,6 @@
 # Pi-Deployment-Konfiguration — Grundeinstellungen & Anpassungsbericht
 
-**Stand:** 2026-05-11  
+**Stand:** 2026-05-29  
 **Ziel:** AutomationOne auf Raspberry Pi (Linux, aarch64, Docker) reproduzierbar deployen.  
 **Kontext:** Entwicklung unter Windows, Produktion auf Pi (z.B. Host `growy.local`).  
 **Doku-Pfad:** `docs/pi-deployment-config.md` (Block A–D: allgemeine Pi-Konfiguration; **Block E:** referenziert NVMe-Migration und Agent-Lauf auf Host **growy2**, Projektverzeichnis **`/home/robin/autoone`**).
@@ -21,6 +21,7 @@
 | 8 | **Zeilenenden** | `.gitattributes` erzwingt LF für Shell-Skripte — bei CRLF unter Windows: `git config core.autocrlf input` |
 | 9 | **Makefile** | E2E/Wokwi-Ziele nutzen Windows-Pfade (`.venv/Scripts/pytest.exe`) — auf Pi: `python -m pytest` bzw. `poetry run pytest` |
 | 10 | **Grafana-URL** | `useGrafana.ts` baut URL aus `window.location.hostname:3000` — funktioniert, wenn Frontend vom Pi aus erreichbar ist |
+| 11 | **Vite allowedHosts** | `El Frontend/vite.config.ts` → `server.allowedHosts` um genutzte Hostnamen/IPs erweitern (Tailscale `*.ts.net`, `pi-home`, LAN-IPs) — sonst Vite 6 „Blocked request“; nach Änderung `docker compose restart el-frontend` |
 
 ---
 
@@ -110,6 +111,8 @@ Wichtige Backend-Variablen (Auswahl):
 | pgadmin | 5050 | pgAdmin (Profile: devtools) |
 
 **CORS / Bind:** Server bindet auf `0.0.0.0:8000` — Zugriff vom LAN auf den Pi möglich. CORS muss alle genutzten Origins enthalten (z.B. `http://growy.local:5173`, `http://growy.local`, `http://<pi-ip>:5173`).
+
+**Vite Dev (Port 5173):** Zusätzlich zu CORS prüft Vite 6 den HTTP-`Host`-Header. Fremde Hostnamen (Tailscale, MagicDNS, LAN-Name) müssen in `El Frontend/vite.config.ts` unter `server.allowedHosts` stehen (Referenz auf pi-home: `localhost`, `pi-home`, `pi-elbherb`, `phyta`, `.ts.net`, `growy2`, `AutoOne44`, feste IPs). Datei ist per Compose nach `/app/vite.config.ts` gemountet (`:ro`); Änderung → `docker compose restart el-frontend`. Verifikation: `curl -sI -H "Host: <hostname>" http://localhost:5173 | head -3` → `200 OK`.
 
 ---
 
@@ -324,6 +327,7 @@ PGADMIN_DEFAULT_PASSWORD=<STARKES_PASSWORT>
 | **Grafana-URL** | `useGrafana.ts` nutzt `window.location.hostname:3000` | Wenn Frontend auf Port 5173: Grafana auf 3000 muss vom Client erreichbar sein |
 | **Frontend Production** | Nginx-Dockerfile nutzt keine Custom-Config | API/WS-Proxy fehlt — entweder Custom-Config ins Image oder Reverse-Proxy vor dem Stack |
 | **Zeilenenden** | CRLF in Shell-Skripten | `git config core.autocrlf input` vor Clone; `.gitattributes` erzwingt LF |
+| **Vite „Blocked request“** | Zugriff über Tailscale/LAN-Host, nicht `localhost` | Host in `El Frontend/vite.config.ts` → `allowedHosts` eintragen; `docker compose restart el-frontend`; CORS-Origin separat in `CORS_ALLOWED_ORIGINS` |
 | **Firewall** | Ports von außen blockiert | 5173, 8000, 1883, 9001 ggf. freigeben |
 | **ESP32 MQTT** | ESPs müssen Broker erreichen | MQTT auf 1883 (und ggf. 9001) vom LAN aus erreichbar machen |
 | **postgres-exporter pg_up=0** | Password authentication failed | DB-Passwort wurde bei Volume-Init gesetzt; `.env`-Änderung wirkt nicht nachträglich. Fix: `ALTER USER god_kaiser WITH PASSWORD '<Wert aus .env>';` via `docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c "..."`, danach `docker compose restart postgres-exporter` |
@@ -371,7 +375,7 @@ echo "Setup admin: curl -X POST http://localhost:8000/api/v1/auth/setup -H 'Cont
 
 ## Block E: Pi 5 SSD (NVMe) — Migrationsablauf und Betrieb (Referenz aus Agent-Lauf, 2026-05-11)
 
-Dieser Block fasst einen **durchgeführten** Migrationslauf auf einem **Raspberry Pi 5** mit NVMe-HAT zusammen (Host **`growy2`**, Stack-Pfad **`/home/robin/autoone`**, Compose **`docker-compose.yml`**). Dient als Ergänzung zu Block A–D; **keine** Passwörter oder Geheimnisse dokumentieren.
+Dieser Block fasst einen **durchgeführten** Migrationslauf auf einem **Raspberry Pi 5** mit NVMe-HAT zusammen (Host **`growy2`**, LAN-IP **`192.168.178.67`** Stand 2026-05-29, Stack-Pfad **`/home/robin/autoone`**, Compose **`docker-compose.yml`**). Dient als Ergänzung zu Block A–D; **keine** Passwörter oder Geheimnisse dokumentieren.
 
 ### E.1 Ausgangslage und Ziel
 

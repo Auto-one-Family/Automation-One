@@ -38,6 +38,8 @@ npm run dev
 # 4. Browser öffnen: http://localhost:5173
 ```
 
+**Pi / Docker / Tailscale:** Vite Dev lauscht auf `0.0.0.0:5173`. Zugriff über LAN- oder Tailscale-Hostnamen (z. B. `pi-home`) nur, wenn der Name in `vite.config.ts` → `server.allowedHosts` steht; im Stack die Datei ist gemountet — nach Änderung `docker compose restart el-frontend` im Repo-Root.
+
 ## Server Requirements
 
 Der God-Kaiser Server muss laufen:

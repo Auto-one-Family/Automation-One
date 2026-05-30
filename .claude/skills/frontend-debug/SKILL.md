@@ -237,7 +237,8 @@ Skip Interceptor fuer: `/auth/refresh`, `/auth/login`, `/auth/setup`, `/auth/sta
 ```
 Vite 6.2.4 + Vue 3 + TypeScript strict + Tailwind 3.4.17
 Build = 2 Steps: vue-tsc -b (Type-Check) + vite build (Bundle)
-Dev: Port 5173, Proxy /api → el-servador:8000, Proxy /ws → ws://el-servador:8000
+Dev: Port 5173, host 0.0.0.0, `allowedHosts` in `vite.config.ts` (LAN/Tailscale-Hostnamen; Vite 6 sonst „Blocked request“)
+Proxy /api → el-servador:8000, Proxy /ws → ws://el-servador:8000
 Alias: @ → ./src (tsconfig.json + vite.config.ts)
 ```
 
@@ -332,6 +333,7 @@ Loki-Labels: `compose_service="el-frontend"`, `container="automationone-frontend
 | 422 | Validation | Request-Body + Pydantic-Schema |
 | 500 | Server Error | → server-debug |
 | ECONNREFUSED | No Connection | Server-Container + Port |
+| Blocked request (host not allowed) | Vite Dev | `Host`-Header nicht in `server.allowedHosts` | Host in `El Frontend/vite.config.ts` ergänzen, `docker compose restart el-frontend` |
 
 ---
 
