@@ -17,7 +17,8 @@ import { espApi } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
 import { useUiStore } from '@/shared/stores/ui.store'
 import { useToast } from '@/composables/useToast'
-import { inferInterfaceType } from '@/utils/sensorDefaults'
+import { inferInterfaceType, getDefaultUartConfig } from '@/utils/sensorDefaults'
+import type { InterfaceType } from '@/utils/sensorDefaults'
 import { roundToDecimals } from '@/utils/formatters'
 import { SENSOR_TYPE_CONFIG, getSensorUnit } from '@/utils/sensorDefaults'
 import { AccordionSection } from '@/shared/design/primitives'
@@ -168,9 +169,15 @@ const CRON_PRESETS = [
   { label: 'Wochentags 9:00', value: '0 9 * * 1-5', description: 'Mo-Fr um 9:00' },
 ]
 
-// Interface-specific
-const interfaceType = computed(() => inferInterfaceType(props.sensorType))
+// Interface-specific (persisted interface_type overrides inference)
+const loadedInterfaceType = ref<InterfaceType | null>(null)
+const interfaceType = computed(
+  () => loadedInterfaceType.value ?? inferInterfaceType(props.sensorType),
+)
 const gpioPin = ref(props.gpio)
+const uartRxPin = ref(18)
+const uartTxPin = ref(17)
+const uartBaud = ref(9600)
 const i2cAddress = ref('0x44')
 const i2cBus = ref(0)
 const measureRangeMin = ref(0)
@@ -347,6 +354,7 @@ async function applyPlantThresholds(): Promise<void> {
 const isI2C = computed(() => interfaceType.value === 'I2C')
 const isOneWire = computed(() => interfaceType.value === 'ONEWIRE')
 const isAnalog = computed(() => interfaceType.value === 'ANALOG')
+const isUart = computed(() => interfaceType.value === 'UART')
 const isDigital = computed(() => props.sensorType.toLowerCase().includes('flow'))
 const contextDevice = computed(() =>
   espStore.devices.find((device) => espStore.getDeviceId(device) === props.espId),
@@ -482,6 +490,22 @@ onMounted(async () => {
       description.value = (configExt.description as string) || ''
       unitValue.value = (configExt.unit as string) || defaultUnit.value
       enabled.value = config.enabled !== false
+      loadedInterfaceType.value =
+        (configExt.interface_type as InterfaceType | undefined)
+        ?? inferInterfaceType(props.sensorType)
+
+      const uartDefaults = getDefaultUartConfig(props.sensorType)
+      const meta = (config.metadata ?? {}) as Record<string, unknown>
+      uartRxPin.value = Number(
+        configExt.uart_rx_pin ?? meta.uart_rx_pin ?? uartDefaults?.rx ?? props.gpio,
+      )
+      uartTxPin.value = Number(
+        configExt.uart_tx_pin ?? meta.uart_tx_pin ?? uartDefaults?.tx ?? 17,
+      )
+      uartBaud.value = Number(
+        configExt.uart_baud ?? meta.uart_baud ?? uartDefaults?.baud ?? 9600,
+      )
+
       const i2cVal = config.i2c_address
       i2cAddress.value = i2cVal != null ? `0x${Number(i2cVal).toString(16)}` : '0x44'
       i2cBus.value = (configExt.i2c_bus as number) ?? 0
@@ -690,6 +714,14 @@ async function handleSave() {
     if (isAnalog.value) {
       config.measure_range_min = measureRangeMin.value
       config.measure_range_max = measureRangeMax.value
+    }
+
+    if (isUart.value) {
+      config.interface_type = 'UART'
+      config.uart_rx_pin = uartRxPin.value
+      config.uart_tx_pin = uartTxPin.value
+      config.uart_baud = uartBaud.value
+      config.i2c_address = null
     }
 
     // Block B1: Normalize "Keine Subzone" — never send "__none__" to API
@@ -1233,6 +1265,50 @@ async function handleSave() {
               <option :value="0">Bus 0 &mdash; Wire (GPIO 21/22)</option>
               <option :value="1">Bus 1 &mdash; Wire1 (konfigurierbar)</option>
             </select>
+          </div>
+        </template>
+
+        <!-- UART: SEN0220 / MH-Z19 (CO₂) -->
+        <template v-else-if="isUart">
+          <div class="sensor-config__info-box">
+            UART-Sensor — kein ADC. GPIO {{ gpio }} = logischer Sensor-Slot (Sensor-ID).
+          </div>
+          <div class="sensor-config__field">
+            <label class="sensor-config__label">RX Pin (ESP empfängt)</label>
+            <input
+              v-model.number="uartRxPin"
+              type="number"
+              min="0"
+              max="48"
+              class="sensor-config__input"
+              aria-label="UART RX Pin"
+            />
+            <span class="sensor-config__helper">Sensor TX → ESP RX (Standard: 18)</span>
+          </div>
+          <div class="sensor-config__field">
+            <label class="sensor-config__label">TX Pin (ESP sendet)</label>
+            <input
+              v-model.number="uartTxPin"
+              type="number"
+              min="0"
+              max="48"
+              class="sensor-config__input"
+              aria-label="UART TX Pin"
+            />
+            <span class="sensor-config__helper">ESP TX → Sensor RX (Standard: 17, Kreuzverdrahtung)</span>
+          </div>
+          <div class="sensor-config__field">
+            <label class="sensor-config__label">Baudrate</label>
+            <input
+              v-model.number="uartBaud"
+              type="number"
+              class="sensor-config__input"
+              readonly
+              aria-label="UART Baudrate"
+            />
+            <span class="sensor-config__helper">
+              SEN0220/MH-Z19: 9600. ~3 Min Aufwärmen nach Power-On.
+            </span>
           </div>
         </template>
 

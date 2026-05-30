@@ -539,6 +539,10 @@ describe('inferInterfaceType', () => {
     expect(inferInterfaceType('bme280')).toBe('I2C')
   })
 
+  it('returns UART for co2', () => {
+    expect(inferInterfaceType('co2')).toBe('UART')
+  })
+
   it('returns ANALOG for pH', () => {
     expect(inferInterfaceType('pH')).toBe('ANALOG')
   })

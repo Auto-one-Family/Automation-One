@@ -26,6 +26,7 @@ import {
   getDefaultInterval,
   getSensorTypeOptions,
   inferInterfaceType,
+  getDefaultUartConfig,
   getI2CAddressOptions,
 } from '@/utils/sensorDefaults'
 import { getRecommendedGpios } from '@/utils/gpioConfig'
@@ -92,6 +93,10 @@ watch(() => newSensor.value.sensor_type, (newType) => {
     newSensor.value.gpio = 0 // I2C uses SDA/SCL, GPIO not used for data
     const options = getI2CAddressOptions(newType)
     selectedI2CAddress.value = options.length > 0 ? options[0].value : null
+  } else if (inferInterfaceType(newType) === 'UART') {
+    const uart = getDefaultUartConfig(newType)
+    newSensor.value.gpio = uart?.rx ?? 18
+    selectedI2CAddress.value = null
   } else {
     // BUG-1: Default to first recommended GPIO (avoid invalid GPIO 0)
     const rec = getRecommendedGpios(newType, 'sensor')
@@ -145,6 +150,7 @@ watch(() => props.initialSensorType, (newType) => {
 
 const isOneWireSensor = computed(() => newSensor.value.sensor_type.toLowerCase().includes('ds18b20'))
 const isI2CSensor = computed(() => inferInterfaceType(newSensor.value.sensor_type) === 'I2C')
+const isUartSensor = computed(() => inferInterfaceType(newSensor.value.sensor_type) === 'UART')
 const i2cAddressOptions = computed(() => getI2CAddressOptions(newSensor.value.sensor_type))
 const selectedI2CAddress = ref<number | null>(null)
 const oneWireScanState = computed(() => espStore.getOneWireScanState(props.espId))
@@ -186,6 +192,11 @@ const sensorTypeInfo = computed((): string => {
     return `DS18B20, auf OneWire (GPIO ${oneWireScanPin.value}), misst Temperatur`
   }
 
+  if (lower.includes('co2') || lower.includes('mhz19') || lower.includes('sen0220')) {
+    const uart = getDefaultUartConfig(sType)
+    return `UART CO₂ (SEN0220/MH-Z19): logischer Slot GPIO ${newSensor.value.gpio}, RX/TX im SensorConfigPanel (Standard RX=${uart?.rx ?? 18}, TX=${uart?.tx ?? 17})`
+  }
+
   // Fallback: generic sensor
   const label = getSensorLabel(sType)
   return label ? `${sType}, misst ${label}` : ''
@@ -207,6 +218,7 @@ const oneWireScanPins = computed(() => getRecommendedGpios('ds18b20', 'sensor'))
 const effectiveGpio = computed(() => {
   if (isOneWireSensor.value) return oneWireScanPin.value
   if (isI2CSensor.value) return 0
+  if (isUartSensor.value) return newSensor.value.gpio
   return newSensor.value.gpio
 })
 
@@ -255,7 +267,9 @@ function resetForm() {
     ? oneWireScanPin.value
     : inferInterfaceType(st) === 'I2C'
       ? 0
-      : (getRecommendedGpios(st, 'sensor')[0] ?? 32)
+      : inferInterfaceType(st) === 'UART'
+        ? (getDefaultUartConfig(st)?.rx ?? 18)
+        : (getRecommendedGpios(st, 'sensor')[0] ?? 32)
   newSensor.value = {
     gpio: defaultGpio,
     sensor_type: defaultSensorType,
@@ -294,6 +308,19 @@ async function addSensor() {
     emit('added')
   } catch (err) {
     logger.error('Failed to add sensor', err)
+    const axiosErr = err as { response?: { status?: number; data?: { detail?: unknown } } }
+    if (axiosErr.response?.status === 422) {
+      const detail = axiosErr.response.data?.detail
+      const hint =
+        typeof detail === 'string'
+          ? detail
+          : Array.isArray(detail)
+            ? detail.map((d: { msg?: string; loc?: unknown[] }) => d.msg ?? JSON.stringify(d)).join('; ')
+            : 'Validierung fehlgeschlagen (interface_type UART?). Backend neu starten: docker restart automationone-server'
+      toast.error(`Sensor konnte nicht angelegt werden: ${hint}`)
+    } else {
+      toast.error('Sensor konnte nicht angelegt werden')
+    }
   }
 }
 
@@ -470,10 +497,13 @@ function onSensorGpioValidation(valid: boolean, _message: string | null): void {
         </p>
       </div>
 
-      <!-- GPIO (non-OneWire, non-I2C only) -->
+      <!-- GPIO (non-OneWire, non-I2C) -->
       <div v-if="!isOneWireSensor && !isI2CSensor" class="form-group">
         <label class="form-label">GPIO</label>
         <GpioPicker v-model="newSensor.gpio" :esp-id="espId" :sensor-type="newSensor.sensor_type" variant="dropdown" @validation-change="onSensorGpioValidation" />
+        <p v-if="isUartSensor" class="form-hint">
+          Logischer Sensor-Slot. UART RX/TX (Standard 18/17) im SensorConfigPanel einstellbar.
+        </p>
       </div>
 
       <!-- Operating Mode -->

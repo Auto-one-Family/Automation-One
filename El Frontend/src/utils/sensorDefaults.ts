@@ -590,12 +590,12 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedMode: 'continuous',
     recommendedTimeout: 180,
     supportsOnDemand: false,
-    // Datasheet (AUT-252)
-    manufacturer: 'NDIR CO₂-Sensor (z.B. MH-Z19B)',
+    // Datasheet (AUT-252 / AUT-527 SEN0220 UART)
+    manufacturer: 'DFRobot SEN0220 (UART NDIR)',
     accuracy: '±50 ppm + 5 % Messwert',
     calibrationRequired: true,
     calibrationNote: 'ABC-Autokalibrierung aktiv; manuelle Basiskalibrierung an Frischluft (~400 ppm).',
-    datasheetUrl: 'https://www.winsen-sensor.com/d/files/MH-Z19B.pdf',
+    datasheetUrl: 'https://wiki.dfrobot.com/SEN0220',
     maintenanceYears: 5,
   },
 
@@ -1262,7 +1262,10 @@ export function getSensorDisplayName(sensor: { sensor_type: string; name?: strin
 // INTERFACE TYPE INFERENCE
 // =============================================================================
 
-export type InterfaceType = 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL'
+export type InterfaceType = 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'UART'
+
+/** CO₂ UART family — must match server _UART_SENSOR_TYPE_FRAGMENTS */
+const UART_SENSOR_TYPE_FRAGMENTS = ['co2', 'mhz19', 'mhz19_co2', 'sen0220', 'sen0220_co2'] as const
 
 /**
  * Infer interface type from sensor_type.
@@ -1272,12 +1275,14 @@ export type InterfaceType = 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL'
  * Rules:
  * - sht31*, bmp280*, bme280*, bh1750*, veml7700* → I2C
  * - ds18b20* → ONEWIRE
+ * - co2, mhz19*, sen0220* → UART
  * - Everything else → ANALOG (default)
  *
  * @example
  * inferInterfaceType('ds18b20') // 'ONEWIRE'
  * inferInterfaceType('sht31_temp') // 'I2C'
  * inferInterfaceType('ph') // 'ANALOG'
+ * inferInterfaceType('co2') // 'UART'
  */
 export function inferInterfaceType(sensorType: string): InterfaceType {
   const lower = sensorType.toLowerCase()
@@ -1298,8 +1303,25 @@ export function inferInterfaceType(sensorType: string): InterfaceType {
     return 'ONEWIRE'
   }
 
+  if (UART_SENSOR_TYPE_FRAGMENTS.some((t) => lower.includes(t))) {
+    return 'UART'
+  }
+
   // Default to ANALOG
   return 'ANALOG'
+}
+
+/**
+ * Default UART pins/baud for SEN0220 / MH-Z19 (Robin hardware: RX=18, TX=17, 9600).
+ */
+export function getDefaultUartConfig(
+  sensorType: string,
+): { rx: number; tx: number; baud: number } | null {
+  const lower = sensorType.toLowerCase()
+  if (!UART_SENSOR_TYPE_FRAGMENTS.some((t) => lower.includes(t))) {
+    return null
+  }
+  return { rx: 18, tx: 17, baud: 9600 }
 }
 
 /**

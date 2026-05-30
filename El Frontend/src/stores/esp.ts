@@ -39,6 +39,7 @@ import { normalizeEspHealthPayload } from '@/domain/esp/espHealth'
 import { useConfigStore } from '@/shared/stores/config.store'
 import {
   inferInterfaceType,
+  getDefaultUartConfig,
   getDefaultI2CAddress
 } from '@/utils/sensorDefaults'
 import {
@@ -773,8 +774,9 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         // REAL-ESP: Sensor-API verwenden (NEU in Phase 2B)
         // =========================================================================
         // Infer interface type from sensor_type
-        const interfaceType = inferInterfaceType(config.sensor_type)
+        const interfaceType = config.interface_type || inferInterfaceType(config.sensor_type)
         const defaultI2CAddress = getDefaultI2CAddress(config.sensor_type)
+        const uartDefaults = getDefaultUartConfig(config.sensor_type)
 
         const realConfig: SensorConfigCreate = {
           esp_id: deviceId,
@@ -785,13 +787,16 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
           // Subzone: top-level für Backend SubzoneService; normalize "__none__" → null (Defense-in-Depth)
           subzone_id: normalizeSubzoneId(config.subzone_id),
           // =========================================================================
-          // MULTI-VALUE SENSOR SUPPORT (I2C/OneWire)
+          // MULTI-VALUE SENSOR SUPPORT (I2C/OneWire/UART)
           // =========================================================================
-          interface_type: config.interface_type || interfaceType,
+          interface_type: interfaceType,
           // I2C: Use address from config (user selection), fallback to registry default
           i2c_address: interfaceType === 'I2C' ? (config.i2c_address ?? defaultI2CAddress) : null,
           // OneWire: Use provided ROM address (from scan) or null (server auto-generates)
-          onewire_address: config.onewire_address || null,
+          onewire_address: interfaceType === 'ONEWIRE' ? (config.onewire_address || null) : null,
+          uart_rx_pin: interfaceType === 'UART' ? (uartDefaults?.rx ?? config.gpio) : null,
+          uart_tx_pin: interfaceType === 'UART' ? (uartDefaults?.tx ?? 17) : null,
+          uart_baud: interfaceType === 'UART' ? (uartDefaults?.baud ?? 9600) : null,
           // =========================================================================
           // Operating Mode Felder (Phase 2B)
           // =========================================================================
@@ -803,8 +808,16 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
           threshold_min: null,
           threshold_max: null,
           metadata: {
-            created_via: 'dashboard_drag_drop'
-          }
+            created_via: 'dashboard_drag_drop',
+            ...(interfaceType === 'UART' && uartDefaults
+              ? {
+                  uart_rx_pin: uartDefaults.rx,
+                  uart_tx_pin: uartDefaults.tx,
+                  uart_baud: uartDefaults.baud,
+                  sensor_model: 'SEN0220',
+                }
+              : {}),
+          },
         }
 
         await sensorsApi.createOrUpdate(deviceId, config.gpio, realConfig)

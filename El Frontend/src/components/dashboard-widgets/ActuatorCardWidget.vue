@@ -61,7 +61,12 @@ const currentActuator = computed(() => {
 })
 
 const espId = computed(() => localActuatorId.value?.split(':')[0] || '')
-const gpio = computed(() => parseInt(localActuatorId.value?.split(':')[1] || '0'))
+const gpio = computed(() => {
+  const gpioPart = localActuatorId.value?.split(':')[1]
+  if (!gpioPart) return null
+  const parsed = parseInt(gpioPart, 10)
+  return Number.isFinite(parsed) ? parsed : null
+})
 
 // Fix-U: Store-based offline/stale detection
 const espDevice = computed(() =>
@@ -76,11 +81,15 @@ const isStale = computed(() => {
 })
 
 const commandIsPending = computed(() =>
-  espId.value ? actuatorStore.isActuatorCommandPending(espId.value, gpio.value) : false
+  espId.value && gpio.value !== null
+    ? actuatorStore.isActuatorCommandPending(espId.value, gpio.value)
+    : false
 )
 
 const commandInCooldown = computed(() =>
-  espId.value ? actuatorStore.isActuatorCommandInCooldown(espId.value, gpio.value) : false
+  espId.value && gpio.value !== null
+    ? actuatorStore.isActuatorCommandInCooldown(espId.value, gpio.value)
+    : false
 )
 
 const commandToggleBlocked = computed(() => commandIsPending.value || commandInCooldown.value)
@@ -110,7 +119,7 @@ onUnmounted(() => {
 })
 
 async function toggle() {
-  if (!currentActuator.value || isEspOffline.value || isStale.value || commandToggleBlocked.value) return
+  if (!currentActuator.value || gpio.value === null || isEspOffline.value || isStale.value || commandToggleBlocked.value) return
   const command = currentActuator.value.state ? 'OFF' : 'ON'
   await espStore.sendActuatorCommand(espId.value, gpio.value, command)
 }
