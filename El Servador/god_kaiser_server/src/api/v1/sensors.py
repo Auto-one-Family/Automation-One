@@ -841,7 +841,7 @@ async def create_or_update_sensor(
         mqtt_correlation_id: Optional[str] = None
         try:
             config_builder: ConfigPayloadBuilder = get_config_builder(db)
-            combined_config = await config_builder.build_combined_config(esp_id, db)
+            await config_builder.build_combined_config(esp_id, db)
             esp_service: ESPService = get_esp_service(db)
             schedule_result = await esp_service.trigger_config_push_debounced(
                 esp_id,
@@ -1212,7 +1212,7 @@ async def create_or_update_sensor(
     mqtt_correlation_id: Optional[str] = None
     try:
         config_builder: ConfigPayloadBuilder = get_config_builder(db)
-        combined_config = await config_builder.build_combined_config(esp_id, db)
+        await config_builder.build_combined_config(esp_id, db)
 
         esp_service: ESPService = get_esp_service(db)
         schedule_result = await esp_service.trigger_config_push_debounced(
@@ -1364,7 +1364,7 @@ async def delete_sensor(
     mqtt_correlation_id: Optional[str] = None
     try:
         config_builder: ConfigPayloadBuilder = get_config_builder(db)
-        combined_config = await config_builder.build_combined_config(esp_id, db)
+        await config_builder.build_combined_config(esp_id, db)
 
         esp_service: ESPService = get_esp_service(db)
         schedule_result = await esp_service.trigger_config_push_debounced(

@@ -37,7 +37,6 @@ from .core.task_registry import cancel_all_background_tasks
 from .db.repositories import ActuatorRepository, LogicRepository
 from .db.session import dispose_engine, get_engine, get_session, init_db, init_db_circuit_breaker
 from .mqtt.client import MQTTClient
-from .mqtt.topics import TopicBuilder
 from .mqtt.handlers import (
     actuator_handler,
     actuator_latched_offline_handler,
