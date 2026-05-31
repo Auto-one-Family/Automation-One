@@ -2141,11 +2141,23 @@ bool SensorManager::publishSensorReading(const SensorReading& reading) {
     // Build payload
     String payload = buildMQTTPayload(reading);
 
-    // AUT-555: QoS-adaptive publish — rule-active sensors use QoS-1 to ensure
-    // trigger-relevant readings survive WiFi jitter without PUBACK loss.
-    // sensor_type disambiguates I2C multi-value sensors (e.g. sht31_temp vs sht31_humidity
-    // share the same GPIO but hold independent SensorConfig entries with own publish_qos).
-    // Falls back to QoS-0 (AUT-54 default) if no config entry is found for this GPIO.
+    // AUT-555: QoS-adaptive publish.
+    //
+    // publish_qos is set per sensor in SensorConfig by the server at config-push time.
+    // The server marks a sensor QoS-1 if it appears as a trigger in any enabled
+    // cross_esp_logic rule. All other sensors stay QoS-0 (AUT-54: fire-and-forget,
+    // tolerates loss because the next reading arrives within measurement_interval_ms).
+    //
+    // Why sensor_type in the lookup (not just gpio):
+    //   I2C multi-value sensors like SHT31 produce two distinct readings on the same
+    //   GPIO — sht31_temp and sht31_humidity — each stored as a separate SensorConfig
+    //   entry. A rule might use humidity but not temperature. Passing sensor_type ensures
+    //   we pick the correct SensorConfig and therefore the correct publish_qos.
+    //   (findSensorConfig with sensor_type="" would return whichever entry was stored
+    //    first, which may have a different publish_qos than the one we're publishing.)
+    //
+    // Fallback: if no SensorConfig is found for this GPIO+sensor_type (shouldn't happen
+    //   in normal operation), we default to QoS-0 to avoid unexpected OUTBOX growth.
     const SensorConfig* sensor_cfg = findSensorConfig(reading.gpio, "", 0, reading.sensor_type);
     const uint8_t qos = (sensor_cfg != nullptr && sensor_cfg->publish_qos > 0) ? 1 : 0;
     if (!mqtt_client_->publish(topic, payload, qos)) {

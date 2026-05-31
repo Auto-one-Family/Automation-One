@@ -153,42 +153,74 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
         """
         Return all GPIO pins referenced as trigger-sensors in enabled rules for esp_id.
 
-        Used by QoS-adaptive publish: sensors with a GPIO in this set get publish_qos=1
-        in the config payload so the ESP32 uses QoS-1 for rule-relevant readings.
+        Used by QoS-adaptive publish (AUT-555): the server calls this during
+        build_combined_config() and annotates each sensor's config payload with
+        ``publish_qos = 1`` if its GPIO is in the returned set, else ``0``.
+        The ESP32 then uses that value when calling mqtt_client_->publish(), so
+        rule-relevant readings use QoS-1 (PUBACK required) while pure telemetry
+        sensors keep QoS-0 (fire-and-forget, reduces OUTBOX pressure under WiFi jitter).
 
-        Pattern-ref: get_rules_by_trigger_sensor() above — same condition-traversal logic.
+        Implementation note: trigger_conditions is stored as raw JSON (not JSONB) and
+        can arrive in three distinct shapes from different API paths:
+          1. A JSON array of condition objects (standard API write path).
+          2. A single condition dict with a "type" key directly at the top level
+             (legacy or simplified rule formats).
+          3. A compound condition dict with a "logic": "AND"|"OR" key and a nested
+             "conditions" array of sub-condition dicts.
+        All three shapes are handled below with the same traversal used by
+        get_rules_by_trigger_sensor() — keep both methods in sync if the schema evolves.
+
+        Performance: cross_esp_logic is a small table (typically < 100 rows).
+        A full table load + Python-side filter is fast enough for the config-push path,
+        which runs at most once per ESP reconnect. No DB index change needed.
 
         Args:
-            esp_id: ESP device ID string (e.g., "ESP_12AB34CD") matching trigger_conditions.esp_id
+            esp_id: ESP device ID string, e.g. "ESP_12AB34CD".
+                    Must match the ``esp_id`` field inside trigger_conditions JSON —
+                    NOT the UUID primary key of esp_devices.
 
         Returns:
-            Set of GPIO integers referenced by sensor-type conditions in enabled rules
+            Set of GPIO integers that appear as trigger-sensor GPIOs for this ESP
+            in at least one enabled rule. Empty set if the ESP has no active rules.
         """
         all_rules = await self.get_enabled_rules()
+        # Only these condition types reference a physical sensor via esp_id+gpio.
+        # "time_window" conditions have no sensor GPIO and are intentionally excluded.
         SENSOR_CONDITION_TYPES = ("sensor_threshold", "sensor", "hysteresis")
         result: set[int] = set()
 
         for rule in all_rules:
             trigger = rule.trigger_conditions
 
+            # Normalise the three possible shapes into a flat list of condition dicts.
             conditions: list = []
             if isinstance(trigger, list):
+                # Shape 1: array of condition objects (most common, API write path)
                 conditions = trigger
             elif isinstance(trigger, dict):
                 if trigger.get("type") in SENSOR_CONDITION_TYPES:
+                    # Shape 2: single condition dict stored directly at the top level
                     conditions = [trigger]
                 elif trigger.get("logic") in ("AND", "OR"):
+                    # Shape 3: compound condition — unwrap the nested "conditions" array
                     conditions = trigger.get("conditions", [])
                 else:
+                    # Unknown dict shape — try it as a single condition anyway
                     conditions = [trigger]
 
             for cond in conditions:
                 if not isinstance(cond, dict):
                     continue
+                # Match only conditions that reference a sensor on this specific ESP.
+                # esp_id comparison is intentionally exact (no case-fold) because device
+                # IDs are always uppercase hex (e.g. "ESP_12AB34CD") from the firmware.
                 if cond.get("type") in SENSOR_CONDITION_TYPES and cond.get("esp_id") == esp_id:
                     try:
                         result.add(int(cond["gpio"]))
                     except (KeyError, ValueError, TypeError):
+                        # Malformed condition (missing gpio, non-numeric value, etc.)
+                        # — skip silently; broken rules are surfaced elsewhere in the
+                        # rule validation pipeline.
                         pass
 
         return result

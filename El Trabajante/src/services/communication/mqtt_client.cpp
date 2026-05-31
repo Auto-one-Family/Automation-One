@@ -1426,19 +1426,38 @@ void MQTTClient::processManagedReconnect_() {
     // #endregion
 
     if (managed_reconnect_attempts_ > 5) {
-        /* AUT-539 Fix 3: Hard-Reset via destroy+reinit after 5 failed soft-reconnects.
-         * stop()+start() reuses the existing handle and transport list, leaving TIME_WAIT
-         * lwIP PCBs from failed attempts unreleased. Once the PCB pool is exhausted
-         * (typ. ≥5 attempts, 60–120s TIME_WAIT window), lwip_socket() returns ENOMEM and
-         * esp_transport_connect() silently drops every SYN — no TCP traffic reaches the broker.
-         * Full destroy+reinit via connect(current_config_) forces a fresh
-         * esp_mqtt_client_handle_t, re-registers the event handler, and starts a clean
-         * lwIP socket context. connect() also resets all reconnect counters. */
+        /* AUT-539/AUT-555 — Hard-Reset: destroy+reinit instead of stop+start.
+         *
+         * Root cause of the 4+ hour post-disconnect silence on ESP_EA5484 (pi-elbherb):
+         *
+         *   The previous code called esp_mqtt_client_stop() + esp_mqtt_client_start()
+         *   after 5 failed soft-reconnects. This reused the existing MQTT client handle
+         *   and its internal transport list. Every failed TCP connect attempt leaves one
+         *   lwIP PCB in TIME_WAIT state for 60–120 seconds. With a default pool of ~16
+         *   PCBs, 5 failed attempts × 2 TIME_WAIT sockets each = pool exhausted.
+         *   Once the pool is full, lwip_socket() returns ENOMEM and
+         *   esp_transport_connect() silently fails — no TCP SYN packet ever leaves the
+         *   device, so the broker log shows no connection attempt at all.
+         *
+         * Fix: call connect(current_config_) instead.
+         *   connect() internally calls esp_mqtt_client_stop() + esp_mqtt_client_destroy()
+         *   + esp_mqtt_client_init() + esp_mqtt_client_start(). The destroy+init cycle
+         *   allocates a fresh esp_mqtt_client_handle_t, re-registers our event handler,
+         *   and starts with a clean lwIP socket context — all TIME_WAIT PCBs from the
+         *   previous handle are abandoned and the pool is effectively released.
+         *   connect() also resets managed_reconnect_attempts_ internally (we reset it
+         *   here before the call so the counter is 0 if connect() itself fails).
+         *
+         * Threshold > 5: conservative — at 5 attempts the PCB pool is typically still
+         *   half-free, so we trigger the hard-reset before it actually runs dry. */
         ESP_LOGW(TAG, "[AUT-539] Hard-Reset MQTT-Client nach %u Soft-Reconnect-Versuchen (destroy+reinit)",
                  (unsigned)managed_reconnect_attempts_);
         managed_reconnect_attempts_ = 0;
         bool ok = connect(current_config_);
         if (!ok) {
+            // connect() itself failed (e.g. OOM at esp_mqtt_client_init time).
+            // Schedule another managed reconnect with the write-timeout boost interval
+            // so we don't spin immediately but still retry.
             scheduleManagedReconnect_("hard_reset_connect_failed", MANAGED_RECONNECT_WRITE_TIMEOUT_BOOST_MS);
         }
         // On success: MQTT_EVENT_CONNECTED fires asynchronously and clears reconnect state.

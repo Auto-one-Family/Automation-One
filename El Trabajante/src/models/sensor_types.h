@@ -30,7 +30,28 @@ struct SensorConfig {
   String sensor_name = "";               // User-definierter Name
   String subzone_id = "";                // Subzone-Zuordnung
   bool active = false;                   // Sensor aktiv?
-  uint8_t publish_qos = 0;              // AUT-555: 0=QoS-0 (telemetry), 1=QoS-1 (rule-active sensor)
+
+  // AUT-555: QoS level used when publishing sensor readings to the MQTT broker.
+  //
+  // Background: AUT-54 switched ALL sensor publishes to QoS-0 because the IDF OUTBOX
+  // would fill up under WiFi jitter, causing write-timeout disconnects (esp. ESP_EA5484
+  // on pi-elbherb with simultaneous actuator traffic). QoS-0 = fire-and-forget, no PUBACK
+  // required, so stalled OUTBOX no longer blocks the send path.
+  //
+  // Problem: sensors referenced in a cross_esp_logic rule MUST deliver their reading for
+  // the rule to fire. A lost QoS-0 reading means a missed trigger for e.g. humidity control
+  // (rule sees no update → stays in last state even if threshold was crossed).
+  //
+  // Solution: per-sensor QoS decided server-side at config-push time.
+  //   publish_qos = 1 → sensor is used in at least one enabled rule → PUBACK required
+  //   publish_qos = 0 → pure monitoring sensor (no rule dependency) → fire-and-forget OK
+  //
+  // Set by: parseAndConfigureSensorWithTracking() in main.cpp, reading "publish_qos" from
+  //         the server config payload.
+  // Read by: SensorManager::publishSensorReading() in sensor_manager.cpp.
+  // Server source: ConfigPayloadBuilder.build_combined_config() via
+  //                LogicRepository.get_rule_gpio_set_for_esp().
+  uint8_t publish_qos = 0;  // 0 = QoS-0 (telemetry default), 1 = QoS-1 (rule-active)
 
   // Phase 2C: Operating Mode Support
   // Modes: "continuous" (auto-measure), "on_demand" (command only),
