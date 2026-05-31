@@ -231,6 +231,72 @@ class TestStripInconsistentOfflineRules:
         assert published_config.get("offline_rules", []) == []
 
     @pytest.mark.asyncio
+    async def test_trigger_config_push_debounced_appends_extra_sensor_entries(self) -> None:
+        """extra_sensor_entries are appended to the combined config before the push.
+
+        Regression: deleting a sensor from the DB must send a tombstone entry
+        (active=False) so the ESP removes it from NVS via its active=False path.
+        """
+        device = SimpleNamespace(status="online", hardware_type="ESP32_WROOM")
+        service, _publisher, _ = _build_service(device)
+
+        tombstone = {
+            "gpio": 5,
+            "sensor_type": "flow",
+            "sensor_name": "Flow GPIO 5",
+            "active": False,
+            "onewire_address": "",
+            "i2c_address": 0,
+        }
+        base_config = {
+            "sensors": [{"gpio": 4, "sensor_type": "ds18b20", "active": True}],
+            "actuators": [],
+            "offline_rules": [],
+        }
+
+        mock_session = MagicMock()
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mock_builder_instance = MagicMock()
+        mock_builder_instance.build_combined_config = AsyncMock(return_value=base_config)
+
+        mock_delegated = AsyncMock()
+        mock_delegated.send_config_coalesced = AsyncMock(
+            return_value={"success": True, "correlation_id": "corr-tombstone", "coalesced": False}
+        )
+
+        with (
+            patch(
+                "src.services.esp_service.get_session_maker",
+                return_value=MagicMock(return_value=mock_cm),
+            ),
+            patch("src.services.esp_service.ESPRepository"),
+            patch("src.services.esp_service.ESPService", return_value=mock_delegated),
+            patch("src.services.config_builder.ConfigPayloadBuilder", return_value=mock_builder_instance),
+            patch("src.db.repositories.SensorRepository"),
+            patch("src.db.repositories.ActuatorRepository"),
+        ):
+            result = await service.trigger_config_push_debounced(
+                "ESP_AEAE64",
+                reason_code="sensor_config_change",
+                extra_sensor_entries=[tombstone],
+            )
+
+        assert result["correlation_id"] == "corr-tombstone"
+
+        mock_delegated.send_config_coalesced.assert_called_once()
+        pushed_config = mock_delegated.send_config_coalesced.call_args.kwargs["config"]
+        pushed_sensors = pushed_config["sensors"]
+
+        assert any(s.get("gpio") == 4 for s in pushed_sensors), "base sensor must be present"
+        tombstone_entries = [s for s in pushed_sensors if s.get("active") is False]
+        assert len(tombstone_entries) == 1, "exactly one tombstone entry expected"
+        assert tombstone_entries[0]["gpio"] == 5
+        assert tombstone_entries[0]["sensor_type"] == "flow"
+
+    @pytest.mark.asyncio
     async def test_send_config_audit_log_for_stripped_rules(self):
         """When rules are stripped, an additional audit log entry is written."""
         device = SimpleNamespace(status="online", hardware_type="ESP32_WROOM")
