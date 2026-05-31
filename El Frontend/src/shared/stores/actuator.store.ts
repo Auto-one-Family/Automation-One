@@ -1835,6 +1835,30 @@ export const useActuatorStore = defineStore('actuator', () => {
         issuedBy: intent.issuedBy,
         allowTimeoutOverride: true,
       })
+
+      if (intent.intentType === 'actuator' && (correlationId || requestId)) {
+        const reconToast = useToast()
+        const parts = intent.subjectId.split(':')
+        const reconEspId = parts[0] ?? intent.subjectId
+        const gpioLabel = parts[1] ? ` GPIO ${parts[1]}` : ''
+        const cmdLabel = intent.command ?? '?'
+        const effectiveCorrId = correlationId || undefined
+        const effectiveReqId = requestId || undefined
+        if (canEmitTerminalToast(effectiveCorrId)) {
+          if (terminalOutcome === 'success') {
+            reconToast.success(
+              `${reconEspId}${gpioLabel}: ${cmdLabel} bestätigt (Sync nach Reconnect)`,
+              { dedupeKey: buildActuatorTerminalToastKey(intent.subjectId, effectiveCorrId, effectiveReqId) },
+            )
+          } else {
+            reconToast.error(
+              `${reconEspId}${gpioLabel}: ${cmdLabel} fehlgeschlagen (Sync nach Reconnect)`,
+              { dedupeKey: buildActuatorTerminalToastKey(intent.subjectId, effectiveCorrId, effectiveReqId) },
+            )
+          }
+        }
+      }
+
       reconciled += 1
     }
 
