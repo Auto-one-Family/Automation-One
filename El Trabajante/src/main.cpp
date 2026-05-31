@@ -1787,10 +1787,15 @@ void routeIncomingMessage(const char* t, const char* p) {
         DeserializationError error = deserializeJson(doc, payload);
 
         if (!error) {
+            // .as<String>() returns literal "null" when JSON field is null — sanitize early
             String zone_id = doc["zone_id"].as<String>();
+            if (zone_id == "null") zone_id = "";
             String master_zone_id = doc["master_zone_id"].as<String>();
+            if (master_zone_id == "null") master_zone_id = "";
             String zone_name = doc["zone_name"].as<String>();
+            if (zone_name == "null") zone_name = "";
             String kaiser_id = doc["kaiser_id"].as<String>();
+            if (kaiser_id == "null") kaiser_id = "";
 
             String correlationId = "";
             if (doc.containsKey("correlation_id")) {
@@ -1869,8 +1874,9 @@ void routeIncomingMessage(const char* t, const char* p) {
             }
 
             // Zone Assignment (zone_id not empty)
-            if (kaiser_id.length() == 0) {
-                LOG_W(TAG, "Kaiser_id empty, using default 'god'");
+            // ArduinoJSON parses JSON null as the string "null" via .as<String>()
+            if (kaiser_id.length() == 0 || kaiser_id == "null") {
+                LOG_W(TAG, "Kaiser_id invalid ('" + kaiser_id + "'), using default 'god'");
                 kaiser_id = "god";
             }
 
