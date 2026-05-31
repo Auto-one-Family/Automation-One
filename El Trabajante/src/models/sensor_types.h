@@ -30,6 +30,7 @@ struct SensorConfig {
   String sensor_name = "";               // User-definierter Name
   String subzone_id = "";                // Subzone-Zuordnung
   bool active = false;                   // Sensor aktiv?
+  uint8_t publish_qos = 0;              // AUT-555: 0=QoS-0 (telemetry), 1=QoS-1 (rule-active sensor)
 
   // Phase 2C: Operating Mode Support
   // Modes: "continuous" (auto-measure), "on_demand" (command only),

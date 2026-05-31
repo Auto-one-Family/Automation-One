@@ -2141,9 +2141,14 @@ bool SensorManager::publishSensorReading(const SensorReading& reading) {
     // Build payload
     String payload = buildMQTTPayload(reading);
 
-    // AUT-54: QoS 0 — raw sensor stream is high-frequency telemetry; QoS-1 filled the IDF
-    // OUTBOX alongside other traffic and contributed to write-timeout disconnects.
-    if (!mqtt_client_->publish(topic, payload, 0)) {
+    // AUT-555: QoS-adaptive publish — rule-active sensors use QoS-1 to ensure
+    // trigger-relevant readings survive WiFi jitter without PUBACK loss.
+    // sensor_type disambiguates I2C multi-value sensors (e.g. sht31_temp vs sht31_humidity
+    // share the same GPIO but hold independent SensorConfig entries with own publish_qos).
+    // Falls back to QoS-0 (AUT-54 default) if no config entry is found for this GPIO.
+    const SensorConfig* sensor_cfg = findSensorConfig(reading.gpio, "", 0, reading.sensor_type);
+    const uint8_t qos = (sensor_cfg != nullptr && sensor_cfg->publish_qos > 0) ? 1 : 0;
+    if (!mqtt_client_->publish(topic, payload, qos)) {
         const char* reason_class = mqtt_client_->getLastPublishFailureReasonClassName();
         LOG_E(TAG, "Sensor Manager: Failed to publish sensor data for GPIO " +
                    String(reading.gpio) + " reason=" + String(reason_class));

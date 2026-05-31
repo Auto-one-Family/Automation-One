@@ -415,6 +415,14 @@ class ConfigPayloadBuilder:
         sensor_payloads = [self.build_sensor_payload(s) for s in active_sensors]
         actuator_payloads = [self.build_actuator_payload(a) for a in active_actuators]
 
+        # AUT-555: QoS-adaptive publish — annotate each sensor payload with publish_qos.
+        # Sensors referenced in at least one enabled cross_esp_logic rule get QoS-1 so
+        # that trigger-relevant readings survive WiFi jitter without PUBACK loss.
+        # All other sensors keep QoS-0 (high-frequency telemetry, loss is acceptable).
+        rule_gpios: set[int] = await self.logic_repo.get_rule_gpio_set_for_esp(esp_device_id)
+        for sp in sensor_payloads:
+            sp["publish_qos"] = 1 if sp.get("gpio") in rule_gpios else 0
+
         # AUT-132: Collect per-rule skip diagnostics so the ESP32 (and operators
         # reading the config push) see *why* offline rules were stripped.
         stripped_rules: List[Dict[str, Any]] = []

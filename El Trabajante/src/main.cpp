@@ -4187,6 +4187,15 @@ bool parseAndConfigureSensorWithTracking(const JsonObjectConst& sensor_obj, Conf
     config.active = true;
   }
 
+  // AUT-555: QoS-adaptive publish — server sets 1 for rule-active sensors, 0 otherwise.
+  // Default 0 keeps the AUT-54 behaviour when server is older or field is absent.
+  int publish_qos_val = 0;
+  if (JsonHelpers::extractInt(sensor_obj, "publish_qos", publish_qos_val, 0)) {
+    config.publish_qos = (publish_qos_val > 0) ? 1 : 0;
+  } else {
+    config.publish_qos = 0;
+  }
+
   if (JsonHelpers::extractBool(sensor_obj, "raw_mode", bool_value, true)) {
     config.raw_mode = bool_value;
   } else {

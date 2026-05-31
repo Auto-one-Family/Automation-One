@@ -149,6 +149,50 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
 
         return matching_rules
 
+    async def get_rule_gpio_set_for_esp(self, esp_id: str) -> set[int]:
+        """
+        Return all GPIO pins referenced as trigger-sensors in enabled rules for esp_id.
+
+        Used by QoS-adaptive publish: sensors with a GPIO in this set get publish_qos=1
+        in the config payload so the ESP32 uses QoS-1 for rule-relevant readings.
+
+        Pattern-ref: get_rules_by_trigger_sensor() above — same condition-traversal logic.
+
+        Args:
+            esp_id: ESP device ID string (e.g., "ESP_12AB34CD") matching trigger_conditions.esp_id
+
+        Returns:
+            Set of GPIO integers referenced by sensor-type conditions in enabled rules
+        """
+        all_rules = await self.get_enabled_rules()
+        SENSOR_CONDITION_TYPES = ("sensor_threshold", "sensor", "hysteresis")
+        result: set[int] = set()
+
+        for rule in all_rules:
+            trigger = rule.trigger_conditions
+
+            conditions: list = []
+            if isinstance(trigger, list):
+                conditions = trigger
+            elif isinstance(trigger, dict):
+                if trigger.get("type") in SENSOR_CONDITION_TYPES:
+                    conditions = [trigger]
+                elif trigger.get("logic") in ("AND", "OR"):
+                    conditions = trigger.get("conditions", [])
+                else:
+                    conditions = [trigger]
+
+            for cond in conditions:
+                if not isinstance(cond, dict):
+                    continue
+                if cond.get("type") in SENSOR_CONDITION_TYPES and cond.get("esp_id") == esp_id:
+                    try:
+                        result.add(int(cond["gpio"]))
+                    except (KeyError, ValueError, TypeError):
+                        pass
+
+        return result
+
     async def get_last_execution(self, rule_id: uuid.UUID) -> Optional[LogicExecutionHistory]:
         """
         Get the last execution record for a rule.
