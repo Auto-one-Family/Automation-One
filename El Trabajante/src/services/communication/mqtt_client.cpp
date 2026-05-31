@@ -1425,22 +1425,27 @@ void MQTTClient::processManagedReconnect_() {
                    " last_errno=" + String(last_transport_errno_));
     // #endregion
 
-    esp_err_t err;
     if (managed_reconnect_attempts_ > 5) {
-        /* AUT-539 Fix 2: Hard-Reset after 5 failed soft-reconnects.
-         * esp_mqtt_client_reconnect() hangs on CLOSE_WAIT zombie socket in
-         * esp_transport_close() — recovery loop breaks. stop+start mirrors the
-         * initial connect path (Z.467-472) and forces full transport teardown
-         * including socket close. */
-        ESP_LOGW(TAG, "[AUT-539] Hard-Reset MQTT-Client nach %u Soft-Reconnect-Versuchen",
+        /* AUT-539 Fix 3: Hard-Reset via destroy+reinit after 5 failed soft-reconnects.
+         * stop()+start() reuses the existing handle and transport list, leaving TIME_WAIT
+         * lwIP PCBs from failed attempts unreleased. Once the PCB pool is exhausted
+         * (typ. ≥5 attempts, 60–120s TIME_WAIT window), lwip_socket() returns ENOMEM and
+         * esp_transport_connect() silently drops every SYN — no TCP traffic reaches the broker.
+         * Full destroy+reinit via connect(current_config_) forces a fresh
+         * esp_mqtt_client_handle_t, re-registers the event handler, and starts a clean
+         * lwIP socket context. connect() also resets all reconnect counters. */
+        ESP_LOGW(TAG, "[AUT-539] Hard-Reset MQTT-Client nach %u Soft-Reconnect-Versuchen (destroy+reinit)",
                  (unsigned)managed_reconnect_attempts_);
-        esp_mqtt_client_stop(mqtt_client_);
-        vTaskDelay(pdMS_TO_TICKS(200));
-        err = esp_mqtt_client_start(mqtt_client_);
         managed_reconnect_attempts_ = 0;
-    } else {
-        err = esp_mqtt_client_reconnect(mqtt_client_);
+        bool ok = connect(current_config_);
+        if (!ok) {
+            scheduleManagedReconnect_("hard_reset_connect_failed", MANAGED_RECONNECT_WRITE_TIMEOUT_BOOST_MS);
+        }
+        // On success: MQTT_EVENT_CONNECTED fires asynchronously and clears reconnect state.
+        return;
     }
+
+    esp_err_t err = esp_mqtt_client_reconnect(mqtt_client_);
     if (err != ESP_OK) {
         LOG_W(TAG, String("[INC-EA5484] managed reconnect request failed: ") + esp_err_to_name(err));
         // Keep managed reconnect active even after transient ESP_FAIL/INVALID_STATE.
