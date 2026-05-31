@@ -51,6 +51,11 @@ class WebSocketManager:
             "sensor_data",
             # Critical GPIO state changes (AUT-68) — must never be dropped under load
             "actuator_status",
+            # Actuator command lifecycle: pending + terminal events must always reach UI
+            # Under sensor burst load these were silently dropped → no terminal toast
+            "actuator_command",
+            "actuator_response",
+            "actuator_command_failed",
             # PKG-04a: guard-replay terminal event, never rate-limit
             "config_response_guard_replay",
             "device_discovered",
