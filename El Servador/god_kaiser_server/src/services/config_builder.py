@@ -415,6 +415,39 @@ class ConfigPayloadBuilder:
         sensor_payloads = [self.build_sensor_payload(s) for s in active_sensors]
         actuator_payloads = [self.build_actuator_payload(a) for a in active_actuators]
 
+        # AUT-555: QoS-adaptive publish.
+        #
+        # Problem context:
+        #   AUT-54 switched all sensor publishes to QoS-0 because simultaneous QoS-1
+        #   sensor + actuator traffic filled the IDF OUTBOX under WiFi jitter, causing
+        #   1500 ms write-timeouts and MQTT disconnects (root-cause on ESP_EA5484).
+        #   But sensors referenced in a cross_esp_logic rule MUST have their reading
+        #   delivered — a lost QoS-0 packet means the rule engine sees a stale value
+        #   and may miss or delay a trigger (e.g. humidity threshold not crossed).
+        #
+        # Solution:
+        #   Let the server decide per-sensor. It knows which GPIOs are rule trigger-
+        #   sensors (via cross_esp_logic.trigger_conditions). All others are pure
+        #   monitoring sensors whose loss is acceptable (next reading in ≤30 s).
+        #
+        # Data flow (end-to-end):
+        #   1. LogicRepository.get_rule_gpio_set_for_esp(esp_device_id)
+        #      → queries all enabled cross_esp_logic rules, extracts GPIOs that appear
+        #        as trigger-sensor GPIOs for this device.
+        #   2. Here: each sensor payload dict gets "publish_qos": 1 or 0 injected.
+        #   3. ESP32 main.cpp parseAndConfigureSensorWithTracking()
+        #      → reads "publish_qos" from the JSON payload into SensorConfig.publish_qos.
+        #   4. SensorManager::publishSensorReading() (sensor_manager.cpp)
+        #      → calls findSensorConfig(gpio, sensor_type) and uses publish_qos as the
+        #        QoS argument in mqtt_client_->publish(topic, payload, qos).
+        #
+        # Note: logic_repo is guaranteed initialised above (line ~357) before this point.
+        rule_gpios: set[int] = await self.logic_repo.get_rule_gpio_set_for_esp(esp_device_id)
+        for sp in sensor_payloads:
+            # QoS-1 only for sensors that are trigger-inputs for at least one active rule.
+            # All others stay QoS-0 to keep the OUTBOX lean under WiFi jitter.
+            sp["publish_qos"] = 1 if sp.get("gpio") in rule_gpios else 0
+
         # AUT-132: Collect per-rule skip diagnostics so the ESP32 (and operators
         # reading the config push) see *why* offline rules were stripped.
         stripped_rules: List[Dict[str, Any]] = []

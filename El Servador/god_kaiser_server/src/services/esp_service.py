@@ -169,12 +169,19 @@ class ESPService:
         self,
         device_id: str,
         reason_code: str = "crud_config_change",
+        extra_sensor_entries: list[dict] | None = None,
     ) -> dict[str, Any]:
         """
         Legacy entrypoint for CRUD-triggered config pushes.
 
         Delegates to send_config_coalesced() so all coalescing behavior has a
         single source of truth.
+
+        Args:
+            extra_sensor_entries: Additional sensor entries appended to the config
+                after build_combined_config(). Used to inject tombstone entries
+                (active=False) for sensors deleted from the DB so the ESP removes
+                them from NVS.
         """
         session_maker = get_session_maker()
         async with session_maker() as session:
@@ -188,6 +195,9 @@ class ESPService:
                 esp_repo=esp_repo,
             )
             combined_config = await config_builder.build_combined_config(device_id, session)
+            if extra_sensor_entries:
+                combined_config.setdefault("sensors", [])
+                combined_config["sensors"].extend(extra_sensor_entries)
             delegated_service = ESPService(esp_repo, self.publisher)
             return await delegated_service.send_config_coalesced(
                 device_id=device_id,

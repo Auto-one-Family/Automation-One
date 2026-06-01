@@ -21,6 +21,7 @@ context: inline
 
 | Problem | Sektion | Grep-Pattern |
 |---------|---------|--------------|
+| **Kein App-Output / SW_RESET-Loop** | [Flash-Overflow-Boot-Loop](#21-flash-overflow-boot-loop) | Nur `ets Jul 29`+`rst:0x3`+`load:` — kein `ESP32 Sensor Network` |
 | **Boot haengt** | [Boot-Sequenz](#2-boot-sequenz) | `grep -iE "STEP\|Phase\|ERROR"` |
 | **SafeMode** | [SafeMode-Trigger](#3-safemode-trigger) | `grep -i "safe.mode\|boot.loop"` |
 | **GPIO-Fehler** | [Error-Codes](#5-error-code-vollreferenz) | `grep -E "1001\|1002\|GPIO"` |
@@ -73,6 +74,25 @@ context: inline
 
 **KRITISCH:** Schritt 4 (GPIO Safe-Mode) kommt VOR Config-Load!
 Alle Pins starten in sicherem Zustand, egal was die Config sagt.
+
+### 2.1 Flash-Overflow-Boot-Loop (kein App-Output)
+
+Unterschied zu SafeMode-Loop: **Bootloader** crasht, nie App-Einstieg. Erkennungszeichen:
+```
+ets Jul 29 2019 12:21:46          ← Bootloader
+rst:0x3 (SW_RESET), boot:0x13    ← immer SW_RESET, kein POWERON_RESET
+load:0x3fff0030,...               ← Segmente laden
+entry 0x400805e4                  ← Spring-Adresse
+[sofort Neustart, kein "ESP32 Sensor Network"-Banner]
+```
+**Ursache:** Binary (`firmware.bin`) überschreitet Partition `app0` → letzten N Bytes fehlen physisch → Bootloader verwirft das Image (SHA256-Mismatch). `esptool` prüft die Partitionsgröße **nicht**.
+
+**Fix:**
+1. `partitions_custom.csv` anpassen (app0/app1 vergrößern, spiffs verkleinern — 4MB bleibt)
+2. **`pio run -e esp32_dev -t erase --upload-port /dev/ttyUSB0`** (NVS wird gelöscht!)
+3. **`pio run -e esp32_dev -t upload --upload-port /dev/ttyUSB0`**
+
+Aktuell (2026-05-30): app0/app1 `0x190000` (1,638,400 B), Headroom ~67 KB. Nächster Expand wenn Flash ≥ 99%.
 
 ---
 

@@ -77,14 +77,12 @@ from ...sensors.sensor_type_registry import (
     is_multi_value_sensor,
     normalize_sensor_type,
 )
-from ...services.config_builder import ConfigPayloadBuilder
 from ...services.esp_service import ESPService
 from ..deps import (
     ActiveUser,
     DBSession,
     MQTTPublisher,
     OperatorUser,
-    get_config_builder,
     get_esp_service,
     get_mqtt_publisher,
     get_sensor_service,
@@ -824,8 +822,6 @@ async def create_or_update_sensor(
         # Publish combined config to ESP32 via MQTT (once for all sub-types)
         mqtt_correlation_id: Optional[str] = None
         try:
-            config_builder: ConfigPayloadBuilder = get_config_builder(db)
-            combined_config = await config_builder.build_combined_config(esp_id, db)
             esp_service: ESPService = get_esp_service(db)
             schedule_result = await esp_service.trigger_config_push_debounced(
                 esp_id,
@@ -1159,9 +1155,6 @@ async def create_or_update_sensor(
     # Publish config to ESP32 via MQTT (using dependency-injected services)
     mqtt_correlation_id: Optional[str] = None
     try:
-        config_builder: ConfigPayloadBuilder = get_config_builder(db)
-        combined_config = await config_builder.build_combined_config(esp_id, db)
-
         esp_service: ESPService = get_esp_service(db)
         schedule_result = await esp_service.trigger_config_push_debounced(
             esp_id,
@@ -1241,10 +1234,13 @@ async def delete_sensor(
 
     gpio = sensor.gpio if sensor.gpio is not None else 0
 
-    # Save a detached response snapshot and sensor_type before delete.
+    # Save a detached response snapshot and tombstone fields before delete.
     # This avoids relying on deleted ORM state after commit.
     deleted_sensor_response = _model_to_response(sensor, esp_id)
     deleted_sensor_type = sensor.sensor_type
+    deleted_sensor_name = sensor.sensor_name
+    deleted_onewire_address = sensor.onewire_address or ""
+    deleted_i2c_address = sensor.i2c_address or 0
 
     # 1. Delete sensor config (sensor_data rows are NOT cascade-deleted)
     await sensor_repo.delete(sensor.id)
@@ -1308,16 +1304,24 @@ async def delete_sensor(
         except Exception as e:
             logger.debug(f"Simulation job removal for deleted sensor: {e}")
 
-    # 7. Publish updated config to ESP32 via MQTT (sensor removed from payload)
+    # 7. Publish updated config to ESP32 via MQTT.
+    #    A tombstone entry (active=False) is appended so the ESP removes the
+    #    deleted sensor from NVS via its active=False removal path.
     mqtt_correlation_id: Optional[str] = None
     try:
-        config_builder: ConfigPayloadBuilder = get_config_builder(db)
-        combined_config = await config_builder.build_combined_config(esp_id, db)
-
+        tombstone: dict = {
+            "gpio": gpio,
+            "sensor_type": deleted_sensor_type,
+            "sensor_name": deleted_sensor_name,
+            "active": False,
+            "onewire_address": deleted_onewire_address,
+            "i2c_address": deleted_i2c_address,
+        }
         esp_service: ESPService = get_esp_service(db)
         schedule_result = await esp_service.trigger_config_push_debounced(
             esp_id,
             reason_code="sensor_config_change",
+            extra_sensor_entries=[tombstone],
         )
         mqtt_correlation_id = schedule_result.get("correlation_id")
         logger.info("Config push coalesced for ESP %s after sensor delete", esp_id)

@@ -1787,10 +1787,15 @@ void routeIncomingMessage(const char* t, const char* p) {
         DeserializationError error = deserializeJson(doc, payload);
 
         if (!error) {
+            // .as<String>() returns literal "null" when JSON field is null — sanitize early
             String zone_id = doc["zone_id"].as<String>();
+            if (zone_id == "null") zone_id = "";
             String master_zone_id = doc["master_zone_id"].as<String>();
+            if (master_zone_id == "null") master_zone_id = "";
             String zone_name = doc["zone_name"].as<String>();
+            if (zone_name == "null") zone_name = "";
             String kaiser_id = doc["kaiser_id"].as<String>();
+            if (kaiser_id == "null") kaiser_id = "";
 
             String correlationId = "";
             if (doc.containsKey("correlation_id")) {
@@ -1869,8 +1874,9 @@ void routeIncomingMessage(const char* t, const char* p) {
             }
 
             // Zone Assignment (zone_id not empty)
-            if (kaiser_id.length() == 0) {
-                LOG_W(TAG, "Kaiser_id empty, using default 'god'");
+            // ArduinoJSON parses JSON null as the string "null" via .as<String>()
+            if (kaiser_id.length() == 0 || kaiser_id == "null") {
+                LOG_W(TAG, "Kaiser_id invalid ('" + kaiser_id + "'), using default 'god'");
                 kaiser_id = "god";
             }
 
@@ -4185,6 +4191,25 @@ bool parseAndConfigureSensorWithTracking(const JsonObjectConst& sensor_obj, Conf
     config.active = bool_value;
   } else {
     config.active = true;
+  }
+
+  // AUT-555: QoS-adaptive publish.
+  //
+  // The server injects "publish_qos" (0 or 1) into each sensor's config payload.
+  // It queries cross_esp_logic to find which GPIOs are trigger-sensors for enabled
+  // rules. Sensors in a rule get 1, pure telemetry sensors get 0.
+  //
+  // We clamp to 0/1 defensively (any value > 0 → 1) so a future server that sends
+  // higher QoS values doesn't accidentally use QoS-2 on a sensor-data topic.
+  //
+  // Default 0 ensures backward-compatibility: if the field is absent (older server
+  // firmware or initial boot before first config push) we stay on the AUT-54 default
+  // of QoS-0 for all sensors rather than accidentally enabling QoS-1 everywhere.
+  int publish_qos_val = 0;
+  if (JsonHelpers::extractInt(sensor_obj, "publish_qos", publish_qos_val, 0)) {
+    config.publish_qos = (publish_qos_val > 0) ? 1 : 0;
+  } else {
+    config.publish_qos = 0;
   }
 
   if (JsonHelpers::extractBool(sensor_obj, "raw_mode", bool_value, true)) {

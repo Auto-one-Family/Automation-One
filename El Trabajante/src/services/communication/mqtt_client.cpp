@@ -466,8 +466,13 @@ bool MQTTClient::connect(const MQTTConfig& config) {
         mqtt_cfg.password = config.password.c_str();
     }
 
-    mqtt_cfg.task_stack = 16384;  // increased from 10240: static data_buf saves 4096 B on stack,
-                                  // +6144 B headroom for future handlers and config payload growth
+    // [AUT-569] After 6+ failed TLS reconnects the heap is persistently fragmented:
+    // largest contiguous block stabilises at ~16372 B. xTaskCreate(stack=16384) fails
+    // with ESP_FAIL even when total free ~47 KB. Setting stack to 14336 keeps a 2 KB gap
+    // below the observed max_alloc floor and stays 4 KB above the original 10240 baseline
+    // (which was the measured stack usage; the 6144 B "headroom" added earlier was the
+    // margin that is now sacrificed here to survive post-hard-reset OOM).
+    mqtt_cfg.task_stack = 14336;
     mqtt_cfg.task_prio = 3;
 
     // AUT-54: Override IDF default network_timeout_ms (10s). Field logs showed write-path
@@ -505,6 +510,17 @@ bool MQTTClient::connect(const MQTTConfig& config) {
 
     // Start client — NON-BLOCKING. Connection happens in background MQTT task.
     esp_err_t err = esp_mqtt_client_start(mqtt_client_);
+    // [AUT-569] After hard-reset, heap can be persistently fragmented (max_alloc ~16372 B
+    // when stack was 16384 B). With stack now at 14336 B, xTaskCreate succeeds immediately
+    // in most cases. These retries guard against transient contiguous-block shortfalls that
+    // resolve within ~1 s after lwIP PCB GC runs.
+    for (int retry = 0; retry < 3 && err != ESP_OK; ++retry) {
+        LOG_W(TAG, String("[AUT-569] esp_mqtt_client_start retry ") + String(retry + 1) +
+                       " heap=" + String((int)heap_caps_get_free_size(MALLOC_CAP_DEFAULT)) +
+                       " max_alloc=" + String((int)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)));
+        vTaskDelay(pdMS_TO_TICKS(500));
+        err = esp_mqtt_client_start(mqtt_client_);
+    }
     if (err != ESP_OK) {
         LOG_E(TAG, String("esp_mqtt_client_start() failed: ") + esp_err_to_name(err));
         errorTracker.logCommunicationError(ERROR_MQTT_CONNECT_FAILED,
@@ -1386,11 +1402,25 @@ void MQTTClient::scheduleManagedReconnect_(const char* reason, unsigned long bas
 }
 
 void MQTTClient::processManagedReconnect_() {
-    if (mqtt_client_ == nullptr || g_mqtt_connected.load()) {
+    if (g_mqtt_connected.load()) {
         next_managed_reconnect_ms_ = 0;
         managed_reconnect_attempts_ = 0;
         last_disconnect_ms_ = 0;
         manual_reconnect_suspended_ = false;
+        return;
+    }
+    if (mqtt_client_ == nullptr) {
+        // [AUT-570] After hard_reset_connect_failed mqtt_client_ is nullptr but a
+        // scheduled reconnect timer may be active. Don't clear the timer — attempt
+        // connect() when it fires so recovery can proceed without a Hardware-Reboot.
+        if (next_managed_reconnect_ms_ > 0 && millis() >= next_managed_reconnect_ms_) {
+            next_managed_reconnect_ms_ = 0;
+            bool ok = connect(current_config_);
+            if (!ok) {
+                scheduleManagedReconnect_("nullptr_reconnect_retry",
+                                         MANAGED_RECONNECT_WRITE_TIMEOUT_BOOST_MS);
+            }
+        }
         return;
     }
     if (manual_reconnect_suspended_) {
@@ -1425,22 +1455,53 @@ void MQTTClient::processManagedReconnect_() {
                    " last_errno=" + String(last_transport_errno_));
     // #endregion
 
-    esp_err_t err;
     if (managed_reconnect_attempts_ > 5) {
-        /* AUT-539 Fix 2: Hard-Reset after 5 failed soft-reconnects.
-         * esp_mqtt_client_reconnect() hangs on CLOSE_WAIT zombie socket in
-         * esp_transport_close() — recovery loop breaks. stop+start mirrors the
-         * initial connect path (Z.467-472) and forces full transport teardown
-         * including socket close. */
-        ESP_LOGW(TAG, "[AUT-539] Hard-Reset MQTT-Client nach %u Soft-Reconnect-Versuchen",
-                 (unsigned)managed_reconnect_attempts_);
-        esp_mqtt_client_stop(mqtt_client_);
-        vTaskDelay(pdMS_TO_TICKS(200));
-        err = esp_mqtt_client_start(mqtt_client_);
+        /* AUT-539/AUT-555 — Hard-Reset: destroy+reinit instead of stop+start.
+         *
+         * Root cause of the 4+ hour post-disconnect silence on ESP_EA5484 (pi-elbherb):
+         *
+         *   The previous code called esp_mqtt_client_stop() + esp_mqtt_client_start()
+         *   after 5 failed soft-reconnects. This reused the existing MQTT client handle
+         *   and its internal transport list. Every failed TCP connect attempt leaves one
+         *   lwIP PCB in TIME_WAIT state for 60–120 seconds. With a default pool of ~16
+         *   PCBs, 5 failed attempts × 2 TIME_WAIT sockets each = pool exhausted.
+         *   Once the pool is full, lwip_socket() returns ENOMEM and
+         *   esp_transport_connect() silently fails — no TCP SYN packet ever leaves the
+         *   device, so the broker log shows no connection attempt at all.
+         *
+         * Fix: call connect(current_config_) instead.
+         *   connect() internally calls esp_mqtt_client_stop() + esp_mqtt_client_destroy()
+         *   + esp_mqtt_client_init() + esp_mqtt_client_start(). The destroy+init cycle
+         *   allocates a fresh esp_mqtt_client_handle_t, re-registers our event handler,
+         *   and starts with a clean lwIP socket context — all TIME_WAIT PCBs from the
+         *   previous handle are abandoned and the pool is effectively released.
+         *   connect() also resets managed_reconnect_attempts_ internally (we reset it
+         *   here before the call so the counter is 0 if connect() itself fails).
+         *
+         * Threshold > 5: conservative — at 5 attempts the PCB pool is typically still
+         *   half-free, so we trigger the hard-reset before it actually runs dry. */
+        LOG_W(TAG, String("[AUT-539] Hard-Reset MQTT-Client nach ") + String(managed_reconnect_attempts_) +
+                       " Soft-Reconnect-Versuchen (destroy+reinit)");
+        LOG_W(TAG, String("[AUT-555-D1] before connect heap=") +
+                       String((int)heap_caps_get_free_size(MALLOC_CAP_DEFAULT)) +
+                       " tasks=" + String((int)uxTaskGetNumberOfTasks()) +
+                       " attempt=" + String(managed_reconnect_attempts_));
         managed_reconnect_attempts_ = 0;
-    } else {
-        err = esp_mqtt_client_reconnect(mqtt_client_);
+        bool ok = connect(current_config_);
+        LOG_W(TAG, String("[AUT-555-D1] after connect ok=") + String(ok ? 1 : 0) +
+                       " heap=" + String((int)heap_caps_get_free_size(MALLOC_CAP_DEFAULT)) +
+                       " tasks=" + String((int)uxTaskGetNumberOfTasks()));
+        if (!ok) {
+            // connect() itself failed (e.g. OOM at esp_mqtt_client_init time).
+            // Schedule another managed reconnect with the write-timeout boost interval
+            // so we don't spin immediately but still retry.
+            scheduleManagedReconnect_("hard_reset_connect_failed", MANAGED_RECONNECT_WRITE_TIMEOUT_BOOST_MS);
+        }
+        // On success: MQTT_EVENT_CONNECTED fires asynchronously and clears reconnect state.
+        return;
     }
+
+    esp_err_t err = esp_mqtt_client_reconnect(mqtt_client_);
     if (err != ESP_OK) {
         LOG_W(TAG, String("[INC-EA5484] managed reconnect request failed: ") + esp_err_to_name(err));
         // Keep managed reconnect active even after transient ESP_FAIL/INVALID_STATE.
