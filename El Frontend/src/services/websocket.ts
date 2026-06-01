@@ -68,6 +68,9 @@ class WebSocketService {
   private rateLimitWindowStart: number = Date.now()
   private listeners: Map<string, Set<(message: WebSocketMessage) => void>> = new Map()
   private visibilityHandler: (() => void) | null = null
+  private onlineHandler: (() => void) | null = null
+  private lastStateResyncAt = 0
+  private static readonly STATE_RESYNC_DEBOUNCE_MS = 500
   private stageEmissionDedup: Map<string, number> = new Map()
   private static readonly STAGE_DEDUP_TTL_MS = 60_000
 
@@ -212,6 +215,7 @@ class WebSocketService {
           this.processMessageQueue()
 
           // Notify listeners that connection is established (for stores to refresh data)
+          this.markStateResync()
           this.notifyConnectCallbacks()
 
           resolve()
@@ -333,61 +337,74 @@ class WebSocketService {
   }
 
   /**
-   * Setup Page Visibility API handling for Tab-Wechsel
-   * Reconnects WebSocket when tab becomes visible again
+   * Setup Page Visibility API + network online handling for tab/network restore.
+   * Triggers the same onConnect resync path when the socket stays open but WS events were throttled.
    */
   private setupVisibilityHandling(): void {
-    // Nur einmal registrieren
     if (this.visibilityHandler) return
 
     this.visibilityHandler = async () => {
-      if (document.visibilityState === 'visible') {
-        logger.info('Tab visible, checking connection...')
+      if (document.visibilityState !== 'visible') return
 
-        // Check if already connected or connecting
-        if (this.isConnected()) {
-          logger.debug('Already connected')
-          return
-        }
+      logger.info('Tab visible, checking connection...')
+      await this.handlePageRestore('visibility')
+    }
 
-        if (this.status === 'connecting') {
-          logger.debug('Already connecting, waiting...')
-          return
-        }
-
-        logger.info('Reconnecting after tab became visible')
-
-        // Only reset attempts if significant time has passed (>30s)
-        // This prevents rapid reconnect attempts on quick tab switches
-        if (this.reconnectAttempts > 0) {
-          // Keep some backoff if we recently failed
-          this.reconnectAttempts = Math.max(0, this.reconnectAttempts - 2)
-        }
-
-        // Refresh token before reconnecting if needed
-        const tokenValid = await this.refreshTokenIfNeeded()
-        if (!tokenValid) {
-          logger.error('Cannot reconnect - token refresh failed')
-          this.setStatus('error')
-          return
-        }
-
-        this.connect().catch(e => logger.error('Visibility reconnect failed', e))
-      }
+    this.onlineHandler = async () => {
+      logger.info('Network online, checking connection...')
+      await this.handlePageRestore('online')
     }
 
     document.addEventListener('visibilitychange', this.visibilityHandler)
-    logger.debug('Visibility handling enabled')
+    window.addEventListener('online', this.onlineHandler)
+    logger.debug('Visibility and online resync handling enabled')
   }
 
   /**
-   * Cleanup Page Visibility API handler
+   * Shared restore path for visibilitychange and window online events.
+   */
+  private async handlePageRestore(source: 'visibility' | 'online'): Promise<void> {
+    if (this.isConnected()) {
+      logger.info(`${source}: socket open — triggering state resync`)
+      this.triggerStateResync()
+      return
+    }
+
+    if (this.status === 'connecting') {
+      logger.debug(`${source}: already connecting, waiting...`)
+      return
+    }
+
+    logger.info(`${source}: reconnecting after restore`)
+
+    if (this.reconnectAttempts > 0) {
+      this.reconnectAttempts = Math.max(0, this.reconnectAttempts - 2)
+    }
+
+    const tokenValid = await this.refreshTokenIfNeeded()
+    if (!tokenValid) {
+      logger.error(`${source}: cannot reconnect — token refresh failed`)
+      this.setStatus('error')
+      return
+    }
+
+    this.connect().catch(e => logger.error(`${source} reconnect failed`, e))
+  }
+
+  /**
+   * Cleanup Page Visibility API and online handlers
    */
   private cleanupVisibilityHandling(): void {
     if (this.visibilityHandler) {
       document.removeEventListener('visibilitychange', this.visibilityHandler)
       this.visibilityHandler = null
-      logger.debug('Visibility handling disabled')
+    }
+    if (this.onlineHandler) {
+      window.removeEventListener('online', this.onlineHandler)
+      this.onlineHandler = null
+    }
+    if (!this.visibilityHandler && !this.onlineHandler) {
+      logger.debug('Visibility and online resync handling disabled')
     }
   }
 
@@ -795,6 +812,24 @@ class WebSocketService {
     return () => {
       this.onConnectCallbacks.delete(callback)
     }
+  }
+
+  /**
+   * Trigger full state resync via registered onConnect callbacks (fetchAll etc.).
+   * Debounced to avoid duplicate fetches when reconnect + visibility fire together.
+   */
+  triggerStateResync(): void {
+    const now = Date.now()
+    if (now - this.lastStateResyncAt < WebSocketService.STATE_RESYNC_DEBOUNCE_MS) {
+      logger.debug('State resync debounced')
+      return
+    }
+    this.markStateResync()
+    this.notifyConnectCallbacks()
+  }
+
+  private markStateResync(): void {
+    this.lastStateResyncAt = Date.now()
   }
 
   /**

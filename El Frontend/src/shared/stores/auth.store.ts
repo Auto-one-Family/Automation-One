@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { authApi } from '@/api/auth'
 import { formatUiApiError, toUiApiError } from '@/api/uiApiError'
 import { useIntentSignalsStore } from '@/shared/stores/intentSignals.store'
+import { useEspStore } from '@/stores/esp'
 import { websocketService } from '@/services/websocket'
 import { createLogger } from '@/utils/logger'
 import type { User, LoginRequest, SetupRequest } from '@/types'
@@ -37,6 +38,14 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function ensureInitialStateLoaded(): Promise<void> {
+    try {
+      await useEspStore().fetchAll()
+    } catch (err) {
+      logger.error('Initial ESP state load after auth failed', err)
+    }
+  }
+
   // Actions
   async function checkAuthStatus(): Promise<void> {
     isLoading.value = true
@@ -58,12 +67,14 @@ export const useAuthStore = defineStore('auth', () => {
         try {
           user.value = await authApi.me()
           await ensureRealtimeConnected()
+          await ensureInitialStateLoaded()
         } catch {
           // Token might be expired, try refresh ONCE
           if (refreshToken.value) {
             try {
               await refreshTokens()
               await ensureRealtimeConnected()
+              await ensureInitialStateLoaded()
             } catch {
               // Refresh also failed - clear auth silently, don't throw
               clearAuth()
@@ -92,6 +103,7 @@ export const useAuthStore = defineStore('auth', () => {
       // User is included in login response
       user.value = response.user
       await ensureRealtimeConnected()
+      await ensureInitialStateLoaded()
     } catch (err: unknown) {
       error.value = formatUiApiError(toUiApiError(err, 'Login fehlgeschlagen'))
       throw err
@@ -112,6 +124,7 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = response.user
       setupRequired.value = false
       await ensureRealtimeConnected()
+      await ensureInitialStateLoaded()
     } catch (err: unknown) {
       error.value = formatUiApiError(toUiApiError(err, 'Setup fehlgeschlagen'))
       throw err
