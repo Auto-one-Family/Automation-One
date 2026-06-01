@@ -167,8 +167,8 @@ class SensorConfigCreate(SensorConfigBase):
     # =========================================================================
     interface_type: Optional[str] = Field(
         None,
-        pattern=r"^(I2C|ONEWIRE|ANALOG|DIGITAL)$",
-        description="Interface type: I2C, ONEWIRE, ANALOG, DIGITAL (auto-inferred if not provided)",
+        pattern=r"^(I2C|ONEWIRE|ANALOG|DIGITAL|UART)$",
+        description="Interface type: I2C, ONEWIRE, ANALOG, DIGITAL, UART (auto-inferred if not provided)",
     )
 
     i2c_address: Optional[int] = Field(
@@ -183,6 +183,27 @@ class SensorConfigCreate(SensorConfigBase):
         max_length=32,
         description="OneWire device address (required for OneWire sensors, e.g. 28FF82F110C78897 or SIM_ prefix)",
     )
+
+    # =========================================================================
+    # UART SENSOR SUPPORT (e.g. DFRobot SEN0220 / MH-Z16 CO2)
+    # =========================================================================
+    uart_rx_pin: Optional[int] = Field(
+        None,
+        ge=0,
+        le=48,
+        description="ESP32 RX pin (sensor TX connects here). Only required for UART sensors.",
+    )
+    uart_tx_pin: Optional[int] = Field(
+        None,
+        ge=0,
+        le=48,
+        description="ESP32 TX pin (sensor RX connects here). Only required for UART sensors.",
+    )
+    uart_baud: Optional[int] = Field(
+        None,
+        description="UART baud rate (default 9600). Only required for UART sensors.",
+    )
+    # =========================================================================
 
     provides_values: Optional[List[str]] = Field(
         None,
@@ -390,6 +411,27 @@ class SensorConfigUpdate(BaseModel):
         ),
     )
 
+    # =========================================================================
+    # UART SENSOR SUPPORT (e.g. DFRobot SEN0220 / MH-Z16 CO2)
+    # =========================================================================
+    uart_rx_pin: Optional[int] = Field(
+        None,
+        ge=0,
+        le=48,
+        description="ESP32 RX pin (sensor TX connects here). Only required for UART sensors.",
+    )
+    uart_tx_pin: Optional[int] = Field(
+        None,
+        ge=0,
+        le=48,
+        description="ESP32 TX pin (sensor RX connects here). Only required for UART sensors.",
+    )
+    uart_baud: Optional[int] = Field(
+        None,
+        description="UART baud rate (default 9600). Only required for UART sensors.",
+    )
+    # =========================================================================
+
 
 class SensorConfigResponse(SensorConfigBase, TimestampMixin):
     """
@@ -534,6 +576,16 @@ class SensorConfigResponse(SensorConfigBase, TimestampMixin):
         description=(
             "MQTT config push correlation_id from the last send_config in this request; "
             "matches ESP config_response and WS config_published/config_failed for UI contract tracking."
+        ),
+    )
+    push_status: Optional[str] = Field(
+        None,
+        pattern=r"^(queued|published|db_only)$",
+        description=(
+            "Config MQTT push disposition for this request: "
+            "'queued' = push scheduled/sent, ESP ack may follow; "
+            "'published' = broker publish confirmed synchronously; "
+            "'db_only' = DB committed but no MQTT path (broker down or schedule failed)."
         ),
     )
 

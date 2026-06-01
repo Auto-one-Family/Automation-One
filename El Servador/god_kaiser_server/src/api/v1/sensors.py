@@ -77,6 +77,7 @@ from ...sensors.sensor_type_registry import (
     is_multi_value_sensor,
     normalize_sensor_type,
 )
+from ...services.config_push_intent import schedule_config_push_intent
 from ...services.esp_service import ESPService
 from ..deps import (
     ActiveUser,
@@ -112,6 +113,7 @@ def _model_to_response(
     subzone_id: Optional[str] = None,
     subzone_warning: Optional[str] = None,
     correlation_id: Optional[str] = None,
+    push_status: Optional[str] = None,
 ) -> SensorConfigResponse:
     """
     Convert SensorConfig model to SensorConfigResponse schema.
@@ -196,6 +198,7 @@ def _model_to_response(
         updated_at=sensor.updated_at,
         subzone_warning=subzone_warning,
         correlation_id=correlation_id,
+        push_status=push_status,
     )
 
 
@@ -230,6 +233,17 @@ def _schema_to_model_fields(request: SensorConfigCreate) -> dict:
         sensor_metadata["unit"] = request.unit
     if request.measurement_role is not None:
         sensor_metadata["measurement_role"] = request.measurement_role
+
+    # Persist UART pin configuration in sensor_metadata so that config_mapping.py
+    # can read uart_rx_pin / uart_tx_pin / uart_baud from sensor_metadata and
+    # inject them into the ESP32 config payload (config_mapping.py line ~287-305).
+    # Only written when provided — None means "use firmware default / not set".
+    if request.uart_rx_pin is not None:
+        sensor_metadata["uart_rx_pin"] = request.uart_rx_pin
+    if request.uart_tx_pin is not None:
+        sensor_metadata["uart_tx_pin"] = request.uart_tx_pin
+    if request.uart_baud is not None:
+        sensor_metadata["uart_baud"] = request.uart_baud
 
     return {
         "sensor_type": normalize_sensor_type(request.sensor_type),
@@ -774,6 +788,34 @@ async def create_or_update_sensor(
         for sensor in created_sensors:
             await db.refresh(sensor)
 
+        # Eagerly create VPD SensorConfig when SHT31 is added.
+        # Without this, the VPD config is created lazily on first data which causes a
+        # race condition: the WS vpd event arrives before fetchDevice includes the VPD
+        # sensor, so the frontend's dynamic multi-value handler incorrectly merges VPD
+        # into the sht31_humidity satellite (both share gpio=0).
+        SHT31_BASE_TYPES = {"sht31", "sht31_temp", "sht31_humidity"}
+        if request.sensor_type.lower() in SHT31_BASE_TYPES:
+            try:
+                await sensor_repo.create_if_not_exists(
+                    esp_id=esp_device.id,
+                    gpio=0,
+                    sensor_type="vpd",
+                    sensor_name="VPD (berechnet)",
+                    interface_type="VIRTUAL",
+                    enabled=True,
+                    pi_enhanced=False,
+                    config_status="active",
+                )
+                await db.commit()
+                logger.info(
+                    f"Eagerly created VPD SensorConfig for ESP {esp_id} after SHT31 add"
+                )
+            except Exception as vpd_err:
+                await db.rollback()
+                logger.warning(
+                    f"Non-fatal: failed to eagerly create VPD config for {esp_id}: {vpd_err}"
+                )
+
         # Subzone assignment (same GPIO for all sub-types)
         # subzone_error: set when assignment fails — passed to response as warning.
         # Config-Push MUST always run after the primary DB commit regardless.
@@ -820,18 +862,12 @@ async def create_or_update_sensor(
         subzone_id_val = subzone.subzone_id if subzone else None
 
         # Publish combined config to ESP32 via MQTT (once for all sub-types)
-        mqtt_correlation_id: Optional[str] = None
-        try:
-            esp_service: ESPService = get_esp_service(db)
-            schedule_result = await esp_service.trigger_config_push_debounced(
-                esp_id,
-                reason_code="sensor_config_change",
-            )
-            mqtt_correlation_id = schedule_result.get("correlation_id")
-            logger.info("Config push coalesced for ESP %s after multi-value sensor create", esp_id)
-        except Exception as e:
-            # Log error but don't fail the request (DB save was successful)
-            logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
+        esp_service: ESPService = get_esp_service(db)
+        mqtt_correlation_id, push_status = await schedule_config_push_intent(
+            esp_service,
+            esp_id,
+            reason_code="sensor_config_change",
+        )
 
         return _model_to_response(
             created_sensors[0],
@@ -839,6 +875,7 @@ async def create_or_update_sensor(
             subzone_id=subzone_id_val,
             subzone_warning=subzone_error,
             correlation_id=mqtt_correlation_id,
+            push_status=push_status,
         )
 
     # =========================================================================
@@ -1153,18 +1190,12 @@ async def create_or_update_sensor(
         # Non-fatal: sensor was saved, subzone can be fixed manually
 
     # Publish config to ESP32 via MQTT (using dependency-injected services)
-    mqtt_correlation_id: Optional[str] = None
-    try:
-        esp_service: ESPService = get_esp_service(db)
-        schedule_result = await esp_service.trigger_config_push_debounced(
-            esp_id,
-            reason_code="sensor_config_change",
-        )
-        mqtt_correlation_id = schedule_result.get("correlation_id")
-        logger.info("Config push coalesced for ESP %s after sensor create/update", esp_id)
-    except Exception as e:
-        # Log error but don't fail the request (DB save was successful)
-        logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
+    esp_service: ESPService = get_esp_service(db)
+    mqtt_correlation_id, push_status = await schedule_config_push_intent(
+        esp_service,
+        esp_id,
+        reason_code="sensor_config_change",
+    )
 
     # Resolve subzone_id for response
     subzone_repo = SubzoneRepository(db)
@@ -1178,6 +1209,7 @@ async def create_or_update_sensor(
         subzone_id=subzone_id_val,
         subzone_warning=subzone_error,
         correlation_id=mqtt_correlation_id,
+        push_status=push_status,
     )
 
 
@@ -1307,26 +1339,20 @@ async def delete_sensor(
     # 7. Publish updated config to ESP32 via MQTT.
     #    A tombstone entry (active=False) is appended so the ESP removes the
     #    deleted sensor from NVS via its active=False removal path.
-    mqtt_correlation_id: Optional[str] = None
-    try:
-        tombstone: dict = {
-            "gpio": gpio,
-            "sensor_type": deleted_sensor_type,
-            "sensor_name": deleted_sensor_name,
-            "active": False,
-            "onewire_address": deleted_onewire_address,
-            "i2c_address": deleted_i2c_address,
-        }
-        esp_service: ESPService = get_esp_service(db)
-        schedule_result = await esp_service.trigger_config_push_debounced(
-            esp_id,
-            reason_code="sensor_config_change",
-            extra_sensor_entries=[tombstone],
-        )
-        mqtt_correlation_id = schedule_result.get("correlation_id")
-        logger.info("Config push coalesced for ESP %s after sensor delete", esp_id)
-    except Exception as e:
-        logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
+    tombstones = _build_sensor_delete_tombstones(
+        gpio=gpio,
+        sensor_type=deleted_sensor_type,
+        sensor_name=deleted_sensor_name,
+        onewire_address=deleted_onewire_address,
+        i2c_address=deleted_i2c_address,
+    )
+    esp_service: ESPService = get_esp_service(db)
+    mqtt_correlation_id, push_status = await schedule_config_push_intent(
+        esp_service,
+        esp_id,
+        reason_code="sensor_config_change",
+        extra_sensor_entries=tombstones,
+    )
 
     # 8. WebSocket event: Frontend removes ghost sensor from store
     try:
@@ -1347,6 +1373,7 @@ async def delete_sensor(
 
     # Convert model to response schema (correlation_id = last MQTT config push, like create/update)
     deleted_sensor_response.correlation_id = mqtt_correlation_id
+    deleted_sensor_response.push_status = push_status
     return deleted_sensor_response
 
 
@@ -2145,6 +2172,47 @@ async def list_onewire_sensors(
 # =============================================================================
 
 
+# ESP32-S3 / WROOM UART1 pair — CO2 may exist in NVS on either logical GPIO.
+_UART1_COMPLEMENT: dict[int, int] = {17: 18, 18: 17}
+
+
+def _build_sensor_delete_tombstones(
+    gpio: int,
+    sensor_type: str,
+    sensor_name: str,
+    onewire_address: str,
+    i2c_address: int,
+) -> list[dict]:
+    """
+    Build MQTT tombstone entries (active=False) for sensor delete.
+
+    CO2 UART sensors can drift between GPIO 17 and 18 in ESP NVS when DB gpio
+    and firmware logical slot disagree. Emit both UART1 slots for co2 deletes.
+    """
+    base: dict = {
+        "gpio": gpio,
+        "sensor_type": sensor_type,
+        "sensor_name": sensor_name,
+        "active": False,
+        "onewire_address": onewire_address,
+        "i2c_address": i2c_address,
+    }
+    entries = [base]
+    if sensor_type.lower() == "co2":
+        alt_gpio = _UART1_COMPLEMENT.get(gpio)
+        # Convention matches config_builder: gpio = uart_rx_pin
+        base["uart_rx_pin"] = gpio
+        base["uart_tx_pin"] = _UART1_COMPLEMENT.get(gpio, gpio)
+        base["uart_baud"] = 9600
+        if alt_gpio is not None:
+            alt = dict(base)
+            alt["gpio"] = alt_gpio
+            alt["uart_rx_pin"] = alt_gpio
+            alt["uart_tx_pin"] = _UART1_COMPLEMENT.get(alt_gpio, alt_gpio)
+            entries.append(alt)
+    return entries
+
+
 def _infer_interface_type(sensor_type: str) -> str:
     """
     Infer interface_type from sensor_type naming convention.
@@ -2152,13 +2220,14 @@ def _infer_interface_type(sensor_type: str) -> str:
     Rules:
     - sht31*, bmp280*, bme280*, bh1750*, veml7700* → I2C
     - ds18b20* → ONEWIRE
+    - co2 → UART  (AUT-576: SEN0220/MH-Z16 is a UART sensor, not ANALOG)
     - Everything else → ANALOG (default)
 
     Args:
         sensor_type: Sensor type string (e.g., 'sht31_temp')
 
     Returns:
-        Interface type: 'I2C', 'ONEWIRE', 'ANALOG', or 'DIGITAL'
+        Interface type: 'I2C', 'ONEWIRE', 'UART', 'ANALOG', or 'DIGITAL'
     """
     sensor_lower = sensor_type.lower()
 
@@ -2166,6 +2235,11 @@ def _infer_interface_type(sensor_type: str) -> str:
         return "I2C"
     elif "ds18b20" in sensor_lower:
         return "ONEWIRE"
+    elif sensor_lower == "co2":
+        # AUT-576: CO2 sensor (DFRobot SEN0220 / MH-Z16) communicates via UART.
+        # Previously fell through to ANALOG, causing the ESP32 firmware to skip
+        # UART initialisation and return "UART CO2 not configured" on every reading.
+        return "UART"
     else:
         return "ANALOG"
 
