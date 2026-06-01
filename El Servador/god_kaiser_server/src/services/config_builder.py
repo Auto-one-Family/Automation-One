@@ -256,6 +256,11 @@ class ConfigPayloadBuilder:
             cls.TIME_WINDOW_ONLY_SENSOR_TYPE_OFF,
         )
 
+    # UART1 pin pairs on ESP32-S3 DevKit (and classic ESP32 WROOM UART1).
+    # GPIO 17 = UART1 TX, GPIO 18 = UART1 RX — complement of each other.
+    # Used as fallback when sensor_metadata doesn't carry explicit uart pins.
+    _UART1_COMPLEMENT: Dict[int, int] = {17: 18, 18: 17}
+
     def build_sensor_payload(self, sensor: SensorConfig) -> Dict[str, Any]:
         """
         Convert SensorConfig model to ESP32 payload format.
@@ -276,7 +281,24 @@ class ConfigPayloadBuilder:
         Returns:
             Dictionary with ESP32-compatible sensor payload
         """
-        return self.mapping_engine.apply_sensor_mapping(sensor)
+        payload = self.mapping_engine.apply_sensor_mapping(sensor)
+
+        # UART pin fallback (AUT-576): sensor_metadata may be empty for sensors
+        # created before uart_rx_pin/uart_tx_pin were stored on the write path.
+        # Derive pins from sensor.gpio so both old and new records work without
+        # requiring a DB migration or UI changes.
+        # Convention: sensor.gpio = uart_rx_pin (where sensor TX connects to ESP).
+        is_uart = (
+            getattr(sensor, "interface_type", None) == "UART"
+            or (getattr(sensor, "sensor_type", "") or "").lower() == "co2"
+        )
+        if is_uart and payload.get("uart_rx_pin", 255) in (255, 0):
+            rx = sensor.gpio
+            tx = self._UART1_COMPLEMENT.get(rx, rx)
+            payload["uart_rx_pin"] = rx
+            payload["uart_tx_pin"] = tx
+
+        return payload
 
     def build_actuator_payload(self, actuator: ActuatorConfig) -> Dict[str, Any]:
         """

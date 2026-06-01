@@ -15,6 +15,7 @@ export type RealtimeMutationType = 'replace' | 'patch' | 'refresh'
 export const ESP_STORE_WS_ON_HANDLER_TYPES = [
   'actuator_alert',
   'actuator_command',
+  'logic_execution',
   'actuator_command_failed',
   'actuator_config_deleted',
   'actuator_response',
@@ -87,6 +88,7 @@ export const ESP_STORE_WS_MUTATION_CONTRACT: Record<
   error_event: 'patch',
   intent_outcome: 'patch',
   intent_outcome_lifecycle: 'patch',
+  logic_execution: 'patch',
   notification: 'patch',
   notification_new: 'patch',
   notification_updated: 'patch',

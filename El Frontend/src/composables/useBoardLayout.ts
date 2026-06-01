@@ -11,6 +11,8 @@ export interface BoardLayout {
   label: string
   reservedGpios: readonly number[]
   safeGpios: readonly number[]
+  /** Pins that cannot be used as digital outputs (ADC1-only, no output mode). */
+  inputOnlyGpios: readonly number[]
   adc1Pins: readonly number[]
   adc2WifiConflictPins: readonly number[]
   i2cSda: number
@@ -20,8 +22,9 @@ export interface BoardLayout {
 
 const ESP32_WROOM_LAYOUT: BoardLayout = {
   label: 'ESP32-WROOM-32',
-  reservedGpios: [0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 12],
-  safeGpios: [4, 5, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33, 34, 35, 36, 39],
+  reservedGpios: [0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 12, 13],
+  safeGpios: [4, 5, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33, 34, 35, 36, 39],
+  inputOnlyGpios: [34, 35, 36, 39],
   adc1Pins: [32, 33, 34, 35, 36, 39],
   adc2WifiConflictPins: [0, 2, 4, 12, 13, 14, 15, 25, 26, 27],
   i2cSda: 21,
@@ -33,6 +36,7 @@ const ESP32_S3_DEVKITC1_LAYOUT: BoardLayout = {
   label: 'ESP32-S3-DevKitC-1 N8R8',
   reservedGpios: [0, 3, 19, 20, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 43, 44, 45, 46, 48],
   safeGpios: [1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 21, 39, 40, 41, 42, 47],
+  inputOnlyGpios: [],
   adc1Pins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
   adc2WifiConflictPins: [11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
   i2cSda: 8,
@@ -44,6 +48,7 @@ const XIAO_ESP32_C3_LAYOUT: BoardLayout = {
   label: 'Seeed XIAO ESP32-C3',
   reservedGpios: [0, 1, 3, 18, 19],
   safeGpios: [2, 4, 5, 6, 7, 8, 9, 10, 21],
+  inputOnlyGpios: [],
   adc1Pins: [0, 1, 2, 3, 4],
   adc2WifiConflictPins: [],
   i2cSda: 4,
@@ -90,6 +95,12 @@ export function useBoardLayout(hardwareType: Ref<string | null | undefined>) {
     return layout.value.safeGpios.includes(gpio)
   }
 
+  const safeOutputGpios = computed(() => {
+    if (!layout.value) return []
+    const inputOnly = layout.value.inputOnlyGpios
+    return layout.value.safeGpios.filter(g => !inputOnly.includes(g))
+  })
+
   return {
     layout,
     normalizedType,
@@ -98,5 +109,6 @@ export function useBoardLayout(hardwareType: Ref<string | null | undefined>) {
     isReserved,
     isSafe,
     adc1Pins: computed(() => layout.value?.adc1Pins ?? []),
+    safeOutputGpios,
   }
 }

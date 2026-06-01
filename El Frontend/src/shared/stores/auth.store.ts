@@ -67,6 +67,7 @@ export const useAuthStore = defineStore('auth', () => {
         try {
           user.value = await authApi.me()
           await ensureRealtimeConnected()
+          await useEspStore().ensureRealtimeHandlers()
           await ensureInitialStateLoaded()
         } catch {
           // Token might be expired, try refresh ONCE
@@ -74,6 +75,7 @@ export const useAuthStore = defineStore('auth', () => {
             try {
               await refreshTokens()
               await ensureRealtimeConnected()
+              await useEspStore().ensureRealtimeHandlers()
               await ensureInitialStateLoaded()
             } catch {
               // Refresh also failed - clear auth silently, don't throw
@@ -103,6 +105,7 @@ export const useAuthStore = defineStore('auth', () => {
       // User is included in login response
       user.value = response.user
       await ensureRealtimeConnected()
+      await useEspStore().ensureRealtimeHandlers()
       await ensureInitialStateLoaded()
     } catch (err: unknown) {
       error.value = formatUiApiError(toUiApiError(err, 'Login fehlgeschlagen'))
@@ -124,6 +127,7 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = response.user
       setupRequired.value = false
       await ensureRealtimeConnected()
+      await useEspStore().ensureRealtimeHandlers()
       await ensureInitialStateLoaded()
     } catch (err: unknown) {
       error.value = formatUiApiError(toUiApiError(err, 'Setup fehlgeschlagen'))

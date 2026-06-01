@@ -100,6 +100,10 @@ export const WS_EVENT_TYPES = [
   'calibration_measurement_failed',
   'contract_mismatch',
   'contract_unknown_event',
+  'queue_pressure',
+  'esp_diagnostics',
+  'actuator_latched_offline',
+  'plant_lifecycle_update',
 ] as const
 
 export const WS_EVENT_TYPES_SET = new Set<string>(WS_EVENT_TYPES as readonly string[])
@@ -188,6 +192,10 @@ const EVENT_TYPE_TO_DATASOURCE: Record<string, ContractDataSource> = {
   calibration_measurement_failed: 'audit_log',
   contract_mismatch: 'audit_log',
   contract_unknown_event: 'audit_log',
+  queue_pressure: 'esp_health',
+  esp_diagnostics: 'esp_health',
+  actuator_latched_offline: 'actuators',
+  plant_lifecycle_update: 'audit_log',
 }
 
 function hasStringField(data: Record<string, unknown>, field: string): boolean {

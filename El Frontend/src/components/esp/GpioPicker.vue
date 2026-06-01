@@ -26,7 +26,9 @@
 
 import { computed, watch } from 'vue'
 import { useGpioStatus } from '@/composables/useGpioStatus'
-import { getRecommendedGpios, getGpioConfig } from '@/utils/gpioConfig'
+import { useBoardLayout } from '@/composables/useBoardLayout'
+import { useEspStore } from '@/stores/esp'
+import { getRecommendedGpios, getGpioConfig, type HardwareType } from '@/utils/gpioConfig'
 import type { GpioPinStatus } from '@/types/gpio'
 
 // Icons from lucide-vue-next
@@ -84,8 +86,15 @@ const {
 } = useGpioStatus(computed(() => props.espId))
 
 // ════════════════════════════════════════════════════════════════
-// MOCK-ESP FALLBACK
+// BOARD-AWARE FALLBACK
 // ════════════════════════════════════════════════════════════════
+
+const espStore = useEspStore()
+const deviceHardwareType = computed(() => {
+  const device = espStore.devices.find(d => espStore.getDeviceId(d) === props.espId)
+  return (device as any)?.hardware_type ?? null
+})
+const { layout: boardLayout } = useBoardLayout(deviceHardwareType)
 
 /**
  * Check if we have dynamic GPIO status from the server.
@@ -94,23 +103,26 @@ const {
 const hasDynamicStatus = computed(() => gpioStatus.value !== null)
 
 /**
- * Static GPIO list for Mock-ESP fallback.
- * Uses ESP32_WROOM config when dynamic status is not available.
+ * Static GPIO list for fallback when server GPIO status is not available.
+ * Board-aware via useBoardLayout; falls back to WROOM config for unknown boards.
  */
 const staticFallbackPins = computed<GpioPinStatus[]>(() => {
-  const staticConfig = getGpioConfig('ESP32_WROOM')
-  return staticConfig
-    .filter(pin => pin.category !== 'avoid') // Exclude "avoid" pins
-    .map(pin => ({
-      gpio: pin.gpio,
-      available: true, // All non-avoid pins are "available" in static mode
+  const gpios: number[] = boardLayout.value
+    ? [...boardLayout.value.safeGpios]
+    : getGpioConfig('ESP32_WROOM')
+        .filter(pin => pin.category !== 'avoid')
+        .map(pin => pin.gpio)
+  return gpios
+    .sort((a, b) => a - b)
+    .map(gpio => ({
+      gpio,
+      available: true,
       owner: null,
       component: null,
-      name: pin.label,
+      name: `GPIO ${gpio}`,
       statusClass: 'available' as const,
-      tooltip: `GPIO ${pin.gpio} - ${pin.label}`,
+      tooltip: `GPIO ${gpio}`,
     }))
-    .sort((a, b) => a.gpio - b.gpio)
 })
 
 /**
@@ -131,11 +143,12 @@ const effectivePinStatuses = computed<GpioPinStatus[]>(() => {
  * Recommended GPIOs for the selected sensor/actuator type.
  */
 const recommendedGpios = computed<number[]>(() => {
+  const hwType = deviceHardwareType.value as HardwareType | null
   if (props.sensorType) {
-    return getRecommendedGpios(props.sensorType, 'sensor')
+    return getRecommendedGpios(props.sensorType, 'sensor', hwType)
   }
   if (props.actuatorType) {
-    return getRecommendedGpios(props.actuatorType, 'actuator')
+    return getRecommendedGpios(props.actuatorType, 'actuator', hwType)
   }
   return []
 })

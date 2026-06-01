@@ -286,10 +286,22 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
    */
   function cleanup(): void {
     stopStatusMonitor()
+    removeConnectResubscribe?.()
+    removeConnectResubscribe = null
     messageHandlers.clear()
     if (subscriptionId.value) {
       unsubscribe()
     }
+  }
+
+  // Re-subscribe filtered handlers after every successful reconnect (auth/tab/visibility).
+  let removeConnectResubscribe: (() => void) | null = null
+  if (autoConnect && activeFilters.value) {
+    removeConnectResubscribe = websocketService.onConnect(() => {
+      if (activeFilters.value) {
+        subscribe(activeFilters.value)
+      }
+    })
   }
 
   // Auto-connect immediately if enabled (works in both component and store contexts)

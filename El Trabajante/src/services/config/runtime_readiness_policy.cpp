@@ -3,7 +3,7 @@
 RuntimeReadinessPolicy defaultRuntimeReadinessPolicy() {
     RuntimeReadinessPolicy policy{};
     policy.profile = RuntimeReadinessProfile::SENSOR_REQUIRED;
-    policy.require_actuator = true;
+    policy.require_actuator = false;
     // Offline rules are optional for pending-exit readiness.
     // When none are configured, disconnect handling already forces default safe states.
     policy.require_offline_rules = false;

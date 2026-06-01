@@ -983,6 +983,8 @@ export function getSensorTypeAwareSummary(sensorType: string): string | null {
     parts.push(`auf I2C ${mvDevice.i2cAddress}`)
   } else if (iface === 'ONEWIRE') {
     parts.push('auf OneWire-Bus')
+  } else if (iface === 'UART') {
+    parts.push('auf UART (RX-Pin)')
   }
 
   if (mvDevice) {
@@ -1262,7 +1264,7 @@ export function getSensorDisplayName(sensor: { sensor_type: string; name?: strin
 // INTERFACE TYPE INFERENCE
 // =============================================================================
 
-export type InterfaceType = 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL'
+export type InterfaceType = 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'UART'
 
 /**
  * Infer interface type from sensor_type.
@@ -1272,6 +1274,7 @@ export type InterfaceType = 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL'
  * Rules:
  * - sht31*, bmp280*, bme280*, bh1750*, veml7700* → I2C
  * - ds18b20* → ONEWIRE
+ * - co2*, mhz19* → UART (MH-Z19/SEN0220)
  * - Everything else → ANALOG (default)
  *
  * @example
@@ -1296,6 +1299,11 @@ export function inferInterfaceType(sensorType: string): InterfaceType {
   // OneWire sensors
   if (lower.includes('ds18b20')) {
     return 'ONEWIRE'
+  }
+
+  // UART CO2 (MH-Z19 / SEN0220)
+  if (lower.includes('co2') || lower.includes('mhz19')) {
+    return 'UART'
   }
 
   // Default to ANALOG

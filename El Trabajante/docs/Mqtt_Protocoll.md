@@ -1920,6 +1920,18 @@ mosquitto_pub -h localhost \
       "raw_mode": true,
       "operating_mode": "continuous",    // ✅ Phase 2C: "continuous", "on_demand", "paused", "scheduled"
       "measurement_interval_seconds": 30 // ✅ Phase 2C: Messintervall in Sekunden (1-300)
+    },
+    {
+      "gpio": 18,
+      "sensor_type": "co2",
+      "sensor_name": "Greenhouse CO2",
+      "subzone_id": "zone_a",
+      "active": true,
+      "raw_mode": true,
+      "interface_type": "UART",
+      "uart_rx_pin": 18,
+      "uart_tx_pin": 17,
+      "uart_baud": 9600
     }
   ],
   "actuators": [                       // Optional
@@ -1963,10 +1975,11 @@ mosquitto_pub -h localhost \
 **ESP32-Verhalten:**
 1. Empfängt Config-Update
 2. Validiert JSON-Schema
-3. Validiert einzelne Sections (GPIO-Konflikte, etc.)
-4. Wendet Config an (Section-by-Section)
-5. Sendet Config-Response (Success/Failure)
-6. Bei WiFi/Server-Änderung: Reconnect erforderlich
+3. **Sensor-Tombstones:** `active=false` wird **vor** Feld-Validierung verarbeitet (AUT-527 UART CO2)
+4. Validiert aktive Sensor-Configs (GPIO-Konflikte, UART-Pins, etc.)
+5. Wendet Config an (Section-by-Section)
+6. Sendet Config-Response (Success/Failure)
+7. Bei WiFi/Server-Änderung: Reconnect erforderlich
 
 **Config-Response-Topic:** `kaiser/god/esp/{esp_id}/config_response`  
 **TopicBuilder:** `TopicBuilder::buildConfigResponseTopic()`  

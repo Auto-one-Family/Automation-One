@@ -316,6 +316,8 @@ Since R20-P11: NVS writes are skipped for identical config pushes (0 writes) and
 
   - `sen_{i}_ubd` (uint32_t) - UART Baudrate (default: 9600)
 
+  **UART CO2 (AUT-527):** Ein logischer NVS-Slot (`sensor_{i}_gpio`) reserviert **beide** UART-Pins (typ. 17+18). Nach UI-Löschen können Geister auf dem Komplement-GPIO bleiben — Server sendet dual Tombstone; Firmware entfernt Fallback GPIO 17/18.
+
 ## Actuator Configuration
 
 - **Namespace**: `actuator_config`

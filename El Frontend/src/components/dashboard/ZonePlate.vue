@@ -20,9 +20,7 @@ import { VueDraggable } from 'vue-draggable-plus'
 import type { ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
 import { useDragStateStore } from '@/shared/stores'
-import { useUiStore } from '@/shared/stores/ui.store'
-import { useSubzoneCRUD } from '@/composables/useSubzoneCRUD'
-import { Pencil, Trash2, Plus, Check, X, Leaf } from 'lucide-vue-next'
+import { Pencil } from 'lucide-vue-next'
 import { PackageOpen } from 'lucide-vue-next'
 import AccordionSection from '@/shared/design/primitives/AccordionSection.vue'
 import { EmptyState } from '@/shared/design/patterns'
@@ -66,28 +64,23 @@ const emit = defineEmits<{
 
 const espStore = useEspStore()
 const dragStore = useDragStateStore()
-const uiStore = useUiStore()
-const subzoneCRUD = useSubzoneCRUD()
 const plateRef = ref<HTMLElement | null>(null)
 
-// ── Subzone Filter (declared early — localDevices watch depends on it) ────
-/** Active subzone filter (null = show all) */
-const activeSubzoneFilter = ref<string | null>(null)
+// ── Subzone Filter (kept for future use; always null → all devices shown) ──
+const filteredDevices = computed(() => props.devices)
 
-/** Filtered devices for VueDraggable based on subzone filter */
-const filteredDevices = computed(() => {
-  if (!activeSubzoneFilter.value) return props.devices
-  return props.devices.filter(d =>
-    d.subzones?.some(sz => sz.subzone_id === activeSubzoneFilter.value) ?? false
-  )
-})
-
-// Local copy of devices for VueDraggable v-model.
-// Syncs with filteredDevices (respects subzone filter).
+// Local copy of devices for VueDraggable v-model (synced from store-backed props).
 const localDevices = ref<ESPDevice[]>([...props.devices])
-watch([() => props.devices, () => activeSubzoneFilter.value], () => {
-  localDevices.value = [...filteredDevices.value]
-})
+function syncLocalDevicesFromStore(): void {
+  if (dragStore.isAnyDragActive) return
+  localDevices.value = filteredDevices.value.map((device) => {
+    const id = espStore.getDeviceId(device)
+    return espStore.devices.find((entry) => espStore.getDeviceId(entry) === id) ?? device
+  })
+}
+
+watch(filteredDevices, syncLocalDevicesFromStore, { deep: true })
+watch(() => espStore.devicesLiveTick, syncLocalDevicesFromStore)
 // ── Status Aggregation ───────────────────────────────────────────────────
 const stats = computed(() => {
   const total = props.devices.length
@@ -156,64 +149,6 @@ const statusLabel = computed(() => {
   if (stats.value.online === 0) return `0/${stats.value.total} Offline`
   return `${stats.value.online}/${stats.value.total} Online`
 })
-
-// ── B3: Subzone Chips ────────────────────────────────────────────────────
-function toggleSubzoneFilter(subzoneId: string | null) {
-  if (activeSubzoneFilter.value === subzoneId) {
-    activeSubzoneFilter.value = null // Deselect
-  } else {
-    activeSubzoneFilter.value = subzoneId
-  }
-}
-
-// ── Subzone aggregation from device.subzones[] (T14-Fix-F) ──────────────
-interface AggregatedSubzone {
-  subzoneId: string
-  subzoneName: string
-  sensorCount: number
-  actuatorCount: number
-  devices: ESPDevice[]
-}
-
-/** Distinct subzones aggregated from all device.subzones[] arrays */
-const distinctSubzones = computed((): AggregatedSubzone[] => {
-  const subzoneMap = new Map<string, AggregatedSubzone>()
-
-  for (const device of props.devices) {
-    if (!device.subzones?.length) continue
-    for (const sz of device.subzones) {
-      if (!subzoneMap.has(sz.subzone_id)) {
-        subzoneMap.set(sz.subzone_id, {
-          subzoneId: sz.subzone_id,
-          subzoneName: sz.subzone_name,
-          sensorCount: 0,
-          actuatorCount: 0,
-          devices: [],
-        })
-      }
-      const entry = subzoneMap.get(sz.subzone_id)!
-      entry.sensorCount += sz.sensor_count
-      entry.actuatorCount += sz.actuator_count
-      if (!entry.devices.includes(device)) {
-        entry.devices.push(device)
-      }
-    }
-  }
-
-  return Array.from(subzoneMap.values())
-    .sort((a, b) => (a.subzoneName ?? '').localeCompare(b.subzoneName ?? ''))
-})
-
-/** Subzone status dot color based on device online status */
-function getSubzoneStatusColor(group: AggregatedSubzone): string {
-  const online = group.devices.filter(d => {
-    const s = getESPStatus(d)
-    return s === 'online' || s === 'stale'
-  }).length
-  if (online === 0) return 'var(--color-error)'
-  if (online < group.devices.length) return 'var(--color-warning)'
-  return 'var(--color-success)'
-}
 
 // ── Inline Rename ────────────────────────────────────────────────────────
 const isRenaming = ref(false)
@@ -392,92 +327,12 @@ function handleDragEnd() {
 
         </div>
 
-        <!-- B3: Subzone chips (with CRUD — disabled for archived zones) -->
-        <div v-if="!isArchived && (distinctSubzones.length > 0 || subzoneCRUD.creatingSubzoneForZone.value === zoneId)" class="zone-plate__subzone-chips" @click.stop>
-          <template v-for="sz in distinctSubzones" :key="sz.subzoneId ?? '__none'">
-            <!-- Inline rename mode -->
-            <div v-if="subzoneCRUD.editingSubzoneId.value === sz.subzoneId" class="zone-plate__subzone-chip zone-plate__subzone-chip--editing">
-              <input
-                v-model="subzoneCRUD.editingSubzoneName.value"
-                class="zone-plate__subzone-rename-input"
-                @click.stop
-                @keyup.enter.stop="subzoneCRUD.saveSubzoneName(sz.subzoneId!, zoneId)"
-                @keyup.escape.stop="subzoneCRUD.cancelRenameSubzone()"
-              />
-              <button class="zone-plate__subzone-action" @click.stop="subzoneCRUD.saveSubzoneName(sz.subzoneId!, zoneId)" :disabled="subzoneCRUD.subzoneActionLoading.value">
-                <Check class="w-3 h-3" />
-              </button>
-              <button class="zone-plate__subzone-action" @click.stop="subzoneCRUD.cancelRenameSubzone()">
-                <X class="w-3 h-3" />
-              </button>
-            </div>
-            <!-- Normal chip with hover actions -->
-            <div v-else class="zone-plate__subzone-chip-wrap">
-              <button
-                class="zone-plate__subzone-chip"
-                :class="{ 'zone-plate__subzone-chip--active': activeSubzoneFilter === sz.subzoneId }"
-                @click.stop="toggleSubzoneFilter(sz.subzoneId)"
-              >
-                <span
-                  class="zone-plate__subzone-chip-dot"
-                  :style="{ backgroundColor: getSubzoneStatusColor(sz) }"
-                />
-                {{ sz.subzoneName }}
-                <span v-if="sz.sensorCount > 0 || sz.actuatorCount > 0" class="zone-plate__subzone-chip-count">
-                  {{ sz.sensorCount }}S{{ sz.actuatorCount > 0 ? ` ${sz.actuatorCount}A` : '' }}
-                </span>
-              </button>
-              <div class="zone-plate__subzone-hover-actions">
-                <button class="zone-plate__subzone-action" title="Umbenennen" @click.stop="subzoneCRUD.startRenameSubzone(sz.subzoneId!, sz.subzoneName)">
-                  <Pencil class="w-2.5 h-2.5" />
-                </button>
-                <button
-                  class="zone-plate__subzone-action zone-plate__subzone-action--plant"
-                  title="Pflanzenprofil anzeigen"
-                  @click.stop="emit('subzone-plant', { subzoneId: sz.subzoneId!, subzoneName: sz.subzoneName, zoneId })"
-                >
-                  <Leaf class="w-2.5 h-2.5" />
-                </button>
-                <button class="zone-plate__subzone-action zone-plate__subzone-action--danger" title="Loeschen" @click.stop="uiStore.confirm({ title: 'Subzone loeschen', message: `&quot;${sz.subzoneName}&quot; wirklich loeschen?`, variant: 'danger', confirmText: 'Loeschen' }).then(ok => { if (ok) subzoneCRUD.deleteSubzone(sz.subzoneId!, sz.subzoneName, zoneId) })">
-                  <Trash2 class="w-2.5 h-2.5" />
-                </button>
-              </div>
-            </div>
-          </template>
-
-          <!-- Create subzone inline form -->
-          <div v-if="subzoneCRUD.creatingSubzoneForZone.value === zoneId" class="zone-plate__subzone-chip zone-plate__subzone-chip--editing">
-            <input
-              v-model="subzoneCRUD.newSubzoneName.value"
-              class="zone-plate__subzone-rename-input"
-              placeholder="Name..."
-              @click.stop
-              @keyup.enter.stop="subzoneCRUD.confirmCreateSubzone(zoneId)"
-              @keyup.escape.stop="subzoneCRUD.cancelCreateSubzone()"
-            />
-            <button class="zone-plate__subzone-action" :disabled="subzoneCRUD.subzoneActionLoading.value" @click.stop="subzoneCRUD.confirmCreateSubzone(zoneId)">
-              <Check class="w-3 h-3" />
-            </button>
-            <button class="zone-plate__subzone-action" @click.stop="subzoneCRUD.cancelCreateSubzone()">
-              <X class="w-3 h-3" />
-            </button>
-          </div>
-
-          <!-- Add subzone button -->
-          <button
-            v-if="subzoneCRUD.creatingSubzoneForZone.value !== zoneId"
-            class="zone-plate__subzone-chip zone-plate__subzone-chip--add"
-            @click.stop="subzoneCRUD.startCreateSubzone(zoneId)"
-          >
-            <Plus class="w-3 h-3" />
-          </button>
-        </div>
       </template>
 
       <!-- Devices inside VueDraggable for cross-zone drag-drop (disabled for archived zones) -->
       <VueDraggable
         v-model="localDevices"
-        class="zone-plate__devices grid-auto-md"
+        class="zone-plate__devices"
         :group="isArchived ? undefined : 'esp-devices'"
         :animation="150"
         handle=".esp-drag-handle"
@@ -538,6 +393,9 @@ function handleDragEnd() {
   transition: box-shadow var(--transition-base);
   position: relative;
   overflow: hidden;
+  /* Container query root — reacts to actual available width (sidebar state, zoom, device) */
+  container-type: inline-size;
+  container-name: zone-plate;
 }
 
 /* Noise overlay for depth */
@@ -898,15 +756,27 @@ function handleDragEnd() {
 
 /* ═══════ Body (expanded content) ═══════ */
 
-/* Device grid — auto-fill stretches cards when few devices */
+/* Device grid — auto-fit fills the full row width; min() prevents overflow at narrow widths */
 .zone-plate__devices {
-  gap: var(--space-2);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  align-items: start;
+  gap: var(--space-3);
   min-height: 32px;
-  padding-top: var(--space-1);
+  padding-top: var(--space-2);
+}
+
+/* Single-column layout at narrow container widths */
+@container zone-plate (max-width: 400px) {
+  .zone-plate__devices {
+    grid-template-columns: 1fr;
+  }
 }
 
 .zone-plate__device-wrapper {
   /* Must be a real box element — display: contents breaks SortableJS drag visuals */
+  /* Cap extreme width when card is the only one in a very wide zone */
+  max-width: 520px;
 }
 
 /* Subzone label inline within flat drag list */

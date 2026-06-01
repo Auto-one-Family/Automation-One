@@ -25,7 +25,7 @@ Dieses Dokument definiert die **vollständige Implementierung der verbleibenden 
 - ⏳ **EC Sensor** (Electrical Conductivity) - Analog ADC
 - ⏳ **Moisture Sensor** (Capacitive Soil Moisture) - Analog ADC
 - ⏳ **BMP280** (Pressure + Temperature) - I2C Digital
-- ⏳ **CO2 Sensor** (MHZ19/SCD30) - UART/I2C
+- ⏳ **CO2 Sensor** (SEN0220/MH-Z16 kanonisch, MH-Z19 kompatibel) - UART; SCD30 optional I2C
 - ⏳ **Light Sensor** (TSL2561/BH1750) - I2C Digital
 - ⏳ **Flow Sensor** (YFS201) - GPIO Interrupt
 
@@ -740,48 +740,61 @@ class BMP280TemperatureProcessor(BaseSensorProcessor):
 
 ## 3. Phase 3: Nice-to-Have Sensoren (Woche 5-6)
 
-### 3.1 CO2 Sensor (MHZ19/SCD30)
+### 3.1 CO2 Sensor (SEN0220 / MH-Z16 / MH-Z19)
 
 **Priorität:** 🟢 MITTEL
 **Komplexität:** High
 **Geschätzte Zeit:** 6-8 Stunden (inkl. Tests)
 
+> **Kanonische Hardware (AUT-527):** DFRobot SEN0220 = Winsen MH-Z16, UART, 0–50000 ppm.
+> ESP32-S3 DevKitC-1 N8R8: UART1 TX=GPIO17, RX=GPIO18.
+> Firmware-Driver: `El Trabajante/src/drivers/mhz19_uart.cpp` — bereits korrekt für MH-Z16 (50000 ppm, Serial2).
+
 #### 3.1.1 Sensor-Spezifikationen
 
-| Eigenschaft | MHZ-19B | SCD30 |
-|-------------|---------|-------|
-| **Technology** | NDIR (Non-Dispersive Infrared) | NDIR + SHT31 |
-| **CO2 Range** | 0 - 5000 ppm | 400 - 10000 ppm |
-| **CO2 Accuracy** | ±(50ppm + 5%) | ±(30ppm + 3%) |
-| **Communication** | UART (9600 baud) | I2C (0x61) |
-| **Warm-up Time** | 3 minutes | 2 seconds (data after 2 min) |
-| **Calibration** | ABC (Auto Baseline Correction) | Manual 1-Point (400 ppm) |
-| **Temperature** | Not included | ±0.3°C |
-| **Humidity** | Not included | ±2% RH |
+| Eigenschaft | SEN0220 / MH-Z16 | MH-Z19B | SCD30 |
+|-------------|-----------------|---------|-------|
+| **Technology** | NDIR | NDIR | NDIR + SHT31 |
+| **CO2 Range** | 0 - 50000 ppm | 0 - 5000 ppm | 400 - 10000 ppm |
+| **CO2 Accuracy** | ±(50ppm + 5%) | ±(50ppm + 5%) | ±(30ppm + 3%) |
+| **Communication** | UART (9600 baud) | UART (9600 baud) | I2C (0x61) |
+| **Warm-up Time** | 3 minutes | 3 minutes | 2 seconds (data after 2 min) |
+| **Calibration** | ABC (Auto Baseline Correction) | ABC | Manual 1-Point (400 ppm) |
+| **Temperature** | Not included | Not included | ±0.3°C |
+| **Humidity** | Not included | Not included | ±2% RH |
 
 #### 3.1.2 ESP32 Hardware-Setup
 
-**Option A: MHZ-19B (UART)**
+**Kanonisch: SEN0220 / MH-Z16 auf ESP32-S3 DevKitC-1 (AUT-527)**
 
 ```
-UART Connection:
-- VCC → 5V (External power! MHZ-19B requires 150mA peak)
+UART1 Connection (ESP32-S3 DevKitC-1 N8R8):
+- VCC → 5V (External power! SEN0220/MH-Z16 requires 150mA peak)
 - GND → GND
-- TX (MHZ-19B) → GPIO16 (ESP32 RX2)
-- RX (MHZ-19B) → GPIO17 (ESP32 TX2)
+- TX (Sensor) → GPIO18 (ESP RX, uart_rx_pin=18)
+- RX (Sensor) → GPIO17 (ESP TX, uart_tx_pin=17)
 
-ESP32 Library:
-- MHZ19 by Jonathan Dempsey (Arduino Library Manager)
-- HardwareSerial (Serial2)
+ESP32-S3 UART-Belegung:
+- UART0: 43/44 (reserviert, Boot-Log)
+- UART1: GPIO17 (TX), GPIO18 (RX) — CO2 Sensor
+- USB-CDC: GPIO19/20 (reserviert)
 
-Configuration:
-- Baud Rate: 9600
-- Protocol: Custom 9-byte command packets
-- Auto-calibration: Enabled (400 ppm outdoor air)
+Firmware-Driver: El Trabajante/src/drivers/mhz19_uart.cpp
+  - Serial2 (UART1), 9600 8N1
+  - MH-Z19/MH-Z16 9-Byte-Frame, RAW ppm
+  - Warmup-Phase ~3 min → quality="warming_up"
+
+Config-Push vom Server (AUT-527):
+  interface_type: "UART"
+  uart_rx_pin: 18   (ESP RX ← Sensor TX)
+  uart_tx_pin: 17   (ESP TX → Sensor RX)
+  uart_baud:   9600
+
+Löschen (AUT-527): `DELETE /sensors/{esp_id}/{config_id}` → Server `_build_sensor_delete_tombstones()` sendet für `co2` zwei Einträge mit `"active": false` (GPIO aus DB + UART1-Komplement 17↔18), inkl. `uart_rx_pin`/`uart_tx_pin`. ESP verarbeitet Tombstone **vor** `validateSensorConfig()`.
 
 ⚠️ WICHTIG:
-- MHZ-19B needs 5V power (NOT 3.3V!)
-- Use level shifter for TX/RX if needed (though 3.3V often works)
+- Sensor needs 5V power (NOT 3.3V!)
+- GPIO17/18 durch driver reserviert, kein ADC-Konflikt
 - Allow 3 minutes warm-up before readings
 ```
 
@@ -791,8 +804,8 @@ Configuration:
 I2C Connection:
 - VCC → 5V (SCD30 requires 3.3-5.5V, 75mA peak)
 - GND → GND
-- SDA → GPIO21 (ESP32 I2C SDA)
-- SCL → GPIO22 (ESP32 I2C SCL)
+- SDA → GPIO8 (ESP32-S3 I2C SDA) / GPIO21 (WROOM)
+- SCL → GPIO9 (ESP32-S3 I2C SCL) / GPIO22 (WROOM)
 
 I2C Address: 0x61 (fixed)
 
@@ -810,16 +823,17 @@ Features:
 
 **Datei:** `co2.py`
 **Klassen:**
-1. `MHZ19CO2Processor` (sensor_type: `"mhz19_co2"`)
+1. `MHZ19CO2Processor` (sensor_type: `"mhz19_co2"`) — auch für SEN0220/MH-Z16 (50000 ppm range)
 2. `SCD30CO2Processor` (sensor_type: `"scd30_co2"`)
 
 **Komplexität-Hinweise:**
 
-1. **UART Communication (MHZ-19B):**
+1. **UART Communication (SEN0220/MH-Z16/MH-Z19):**
    - ESP32 sendet 9-byte Kommando
    - Sensor antwortet mit 9-byte Response
-   - Checksum-Validation erforderlich
+   - Checksum-Validation im Firmware-Driver (`mhz19_uart.cpp`)
    - Server verarbeitet nur fertige PPM-Werte vom ESP32
+   - `interface_type="UART"` wird von `_infer_interface_type()` fuer Sensortyp `"co2"` automatisch gesetzt
 
 2. **Calibration:**
    - ABC (Automatic Baseline Correction): 400 ppm outdoor air
@@ -838,26 +852,25 @@ Features:
 ```python
 class MHZ19CO2Processor(BaseSensorProcessor):
     """
-    MHZ-19B NDIR CO2 Sensor Processor.
+    MHZ-19/MH-Z16/SEN0220 NDIR CO2 Sensor Processor.
 
-    ESP32-side library (MHZ19) handles UART communication and checksum validation.
+    ESP32-side driver (mhz19_uart.cpp) handles UART communication and checksum validation.
     Server-side processing focuses on:
-    - Validation of CO2 range (0-5000 ppm)
+    - Validation of CO2 range (0-50000 ppm for SEN0220/MH-Z16)
     - Quality assessment (Indoor Air Quality levels)
     - Optional altitude compensation
 
-    Sensor Specifications:
-    - Range: 0 - 5000 ppm (parts per million)
+    Sensor Specifications (SEN0220 / MH-Z16):
+    - Range: 0 - 50000 ppm (parts per million)
     - Accuracy: ±(50ppm + 5%)
-    - Communication: UART (9600 baud)
+    - Communication: UART (9600 baud, 8N1)
     - Warm-up: 3 minutes
-    - Calibration: ABC (400 ppm outdoor air)
 
-    ESP32 Setup:
-    - Library: MHZ19 by Jonathan Dempsey
-    - UART: Serial2 (GPIO16 RX, GPIO17 TX)
+    ESP32-S3 Setup (AUT-527):
+    - Driver: mhz19_uart.cpp, Serial2
+    - uart_rx_pin=18 (ESP RX), uart_tx_pin=17 (ESP TX)
     - Power: 5V, 150mA peak (external power recommended)
-    - Warm-up: Wait 3 minutes after power-on
+    - Warm-up: quality="warming_up" during first ~3 min
 
     Indoor Air Quality Levels:
     - Excellent: 400-600 ppm (outdoor air level)
@@ -868,7 +881,7 @@ class MHZ19CO2Processor(BaseSensorProcessor):
     """
 
     CO2_MIN = 0.0  # ppm
-    CO2_MAX = 5000.0  # ppm (MHZ-19B limit)
+    CO2_MAX = 50000.0  # ppm (SEN0220/MH-Z16 limit; MH-Z19B: 5000 ppm)
     CO2_OUTDOOR = 400.0  # ppm (typical outdoor level)
     CO2_EXCELLENT_MAX = 600.0  # ppm
     CO2_GOOD_MAX = 1000.0  # ppm
@@ -885,10 +898,10 @@ class MHZ19CO2Processor(BaseSensorProcessor):
         params: Optional[Dict[str, Any]] = None,
     ) -> ProcessingResult:
         """
-        Process MHZ-19B CO2 reading.
+        Process MHZ-19/MH-Z16/SEN0220 CO2 reading.
 
         Args:
-            raw_value: CO2 in ppm (from MHZ19 library)
+            raw_value: CO2 in ppm (from mhz19_uart.cpp driver)
             calibration: {"offset": float} (optional ppm offset)
             params: {
                 "altitude_compensation": float (meters above sea level),
@@ -901,6 +914,8 @@ class MHZ19CO2Processor(BaseSensorProcessor):
 ```
 
 **Referenz:**
+- [DFRobot SEN0220 Wiki](https://wiki.dfrobot.com/Infrared_CO2_Sensor_0-50000ppm_SKU__SEN0220)
+- [Winsen MH-Z16 Datasheet](https://www.winsen-sensor.com/d/files/infrared-gas-sensor/mh-z16-co2-detection-module-manual.pdf)
 - [MHZ-19B Manual](https://www.winsen-sensor.com/d/files/infrared-gas-sensor/mh-z19b-co2-ver1_0.pdf)
 - [SCD30 Datasheet](https://www.sensirion.com/en/environmental-sensors/carbon-dioxide-sensors/carbon-dioxide-sensors-scd30/)
 

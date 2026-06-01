@@ -303,7 +303,7 @@ export interface MockSensor {
   // Interface / Address Fields (for Orbital display)
   // ═══════════════════════════════════════════════════════════════════════════
   /** Interface type: I2C, ONEWIRE, ANALOG, DIGITAL, VIRTUAL */
-  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'VIRTUAL' | 'UART' | null
+  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'VIRTUAL' | null
   /** I2C address (0-127) for I2C sensors */
   i2c_address?: number | null
   /** OneWire ROM address for DS18B20 sensors (16 hex chars) */
@@ -419,7 +419,7 @@ export interface MockSensorConfig {
   /** I2C address for I2C sensors (e.g., SHT31: 0x44=68 or 0x45=69) */
   i2c_address?: number | null
   /** Interface type for sensor (I2C, ONEWIRE, ANALOG, DIGITAL, VIRTUAL) */
-  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'VIRTUAL' | 'UART'
+  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'VIRTUAL'
 }
 
 export interface MockActuatorConfig {
@@ -751,7 +751,7 @@ export interface SensorConfigCreate {
   // MULTI-VALUE SENSOR SUPPORT (I2C/OneWire)
   // =========================================================================
   /** Interface type: I2C, ONEWIRE, ANALOG, DIGITAL, VIRTUAL (auto-inferred if not provided) */
-  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'VIRTUAL' | 'UART'
+  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'VIRTUAL'
   /** I2C address (0-127) - required for I2C sensors */
   i2c_address?: number | null
   /** OneWire device ROM address - optional, server auto-generates if not provided */
@@ -786,9 +786,6 @@ export interface SensorConfigCreate {
   /** AUT-299: UUID of the linked temperature sensor config for ATC. Null = no sensor linked. */
   temp_sensor_config_id?: string | null
 }
-
-/** MQTT config push disposition from REST save/delete (AUT-586) */
-export type ConfigPushStatus = 'queued' | 'published' | 'db_only'
 
 export interface SensorConfigResponse {
   id: string
@@ -839,8 +836,6 @@ export interface SensorConfigResponse {
   updated_at: string
   /** MQTT send_config correlation_id for this save; matches WS config_response / config_published */
   correlation_id?: string | null
-  /** Server-side MQTT disposition: queued | published | db_only (AUT-586) */
-  push_status?: ConfigPushStatus | null
   /** AUT-299: UUID of the linked temperature sensor config for ATC (Automatic Temperature Compensation). Null = no sensor linked. */
   temp_sensor_config_id?: string | null
 }
@@ -1045,9 +1040,6 @@ export interface ActuatorConfigResponse {
   last_command_at?: string | null
   created_at: string
   updated_at: string
-  correlation_id?: string | null
-  request_id?: string | null
-  push_status?: ConfigPushStatus | null
 }
 
 // =============================================================================

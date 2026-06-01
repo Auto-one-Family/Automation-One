@@ -68,7 +68,7 @@ const STATUS_DISPLAY: Record<ESPStatus, StatusDisplay> = {
 }
 
 /** Heartbeat timing thresholds */
-const HEARTBEAT_STALE_MS = 90_000   // 1.5x default 60s interval
+const HEARTBEAT_STALE_MS = 120_000  // 2x default 60s interval — buffer for one missed heartbeat
 const HEARTBEAT_OFFLINE_MS = 210_000 // 3.5 minutes (faster offline fallback)
 const STATUS_REEVALUATION_TICK_MS = 1_000
 
@@ -80,13 +80,32 @@ const STATUS_REEVALUATION_TICK_MS = 1_000
 const statusReevaluationTick = ref(0)
 
 let statusTickTimerId: ReturnType<typeof setInterval> | null = null
+let visibilityListenerRegistered = false
 
-function ensureStatusTickTimer(): void {
+function startStatusTickTimer(): void {
   if (statusTickTimerId !== null) return
   if (typeof globalThis.setInterval !== 'function') return
   statusTickTimerId = globalThis.setInterval(() => {
     statusReevaluationTick.value += 1
   }, STATUS_REEVALUATION_TICK_MS)
+}
+
+function ensureStatusTickTimer(): void {
+  startStatusTickTimer()
+  if (visibilityListenerRegistered || typeof document === 'undefined') return
+  visibilityListenerRegistered = true
+  // Browser throttles setInterval in background tabs (~1/min instead of 1/s).
+  // On tab focus: fire an immediate tick and restart the timer to clear drift.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      statusReevaluationTick.value += 1
+      if (statusTickTimerId !== null) {
+        clearInterval(statusTickTimerId)
+        statusTickTimerId = null
+      }
+      startStatusTickTimer()
+    }
+  })
 }
 
 function statusFromHeartbeatAge(ts: string | null | undefined): ESPStatus | null {
@@ -148,6 +167,40 @@ export function getESPStatusDisplay(status: ESPStatus): StatusDisplay {
   return STATUS_DISPLAY[status]
 }
 
+/** Operator-facing status label (e.g. stale → "Keine Live-Daten"). */
+export function getESPStatusDetailLabel(status: ESPStatus): string {
+  switch (status) {
+    case 'stale':
+      return 'Keine Live-Daten'
+    case 'safemode':
+      return 'Sicherheitsmodus'
+    default:
+      return getESPStatusDisplay(status).text
+  }
+}
+
+/** Multi-line tooltip for header status dots (online/offline/stale + offline context). */
+export function getESPStatusTooltip(device: ESPDevice): string {
+  const status = getESPStatus(device)
+  const lines: string[] = [`Status: ${getESPStatusDetailLabel(status)}`]
+
+  if (status !== 'online') {
+    const ts = device.last_seen || device.last_heartbeat
+    if (ts) {
+      lines.push(`Letztes Lebenszeichen: ${formatRelativeTime(ts)}`)
+    }
+  }
+
+  const offlineInfo = device.offlineInfo
+  if (offlineInfo) {
+    lines.push(`Erkennung: ${offlineInfo.displayText}`)
+    lines.push(`Quelle: ${offlineInfo.source}`)
+    lines.push(`Grund: ${offlineInfo.reason}`)
+  }
+
+  return lines.join('\n')
+}
+
 /**
  * Calculate ESP device status from all available signals.
  *
@@ -159,6 +212,8 @@ export function useESPStatus(esp: MaybeRefOrGetter<ESPDevice>) {
 
   const statusColor = computed(() => STATUS_DISPLAY[status.value].color)
   const statusText = computed(() => STATUS_DISPLAY[status.value].text)
+  const statusDetailLabel = computed(() => getESPStatusDetailLabel(status.value))
+  const statusTooltip = computed(() => getESPStatusTooltip(toValue(esp)))
   const statusIcon = computed(() => STATUS_DISPLAY[status.value].icon)
   const statusPulse = computed(() => STATUS_DISPLAY[status.value].pulse)
 
@@ -192,8 +247,9 @@ export function useESPStatus(esp: MaybeRefOrGetter<ESPDevice>) {
     return device.device_id || device.esp_id || ''
   })
 
-  /** Relative time since last seen */
+  /** Relative time since last seen — updates every tick so the display stays live */
   const lastSeenText = computed(() => {
+    void statusReevaluationTick.value
     const device = toValue(esp)
     const ts = device.last_seen || device.last_heartbeat
     if (!ts) return 'Nie'
@@ -220,6 +276,8 @@ export function useESPStatus(esp: MaybeRefOrGetter<ESPDevice>) {
     status,
     statusColor,
     statusText,
+    statusDetailLabel,
+    statusTooltip,
     statusIcon,
     statusPulse,
     isReachable,

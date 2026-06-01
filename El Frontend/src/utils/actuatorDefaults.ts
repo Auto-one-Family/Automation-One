@@ -7,6 +7,8 @@
  * Phase 7: ActuatorSidebar Integration
  */
 
+import { ACTUATOR_TYPE_LABELS } from '@/utils/labels'
+
 // =============================================================================
 // Interfaces
 // =============================================================================
@@ -245,6 +247,35 @@ export function getActuatorSafetyDefaults(type: string): {
  */
 export function getActuatorIcon(type: string): string {
   return ACTUATOR_TYPE_CONFIG[type]?.icon || 'Power'
+}
+
+/**
+ * Get human-readable display name for an actuator.
+ *
+ * Mirrors getSensorDisplayName() in sensorDefaults.ts.
+ * Fallback chain:
+ * 1. actuator.name  (if set by operator)
+ * 2. ACTUATOR_TYPE_CONFIG[actuator_type].label  (e.g. "Relais", "Pumpe")
+ * 3. raw actuator_type string
+ *
+ * @example
+ * getActuatorDisplayName({ actuator_type: 'digital', name: null })
+ * // => "Relais"
+ *
+ * getActuatorDisplayName({ actuator_type: 'pump', name: 'Nährlösung-Pumpe' })
+ * // => "Nährlösung-Pumpe"
+ */
+export function getActuatorDisplayName(actuator: { actuator_type: string; name?: string | null }): string {
+  if (actuator.name) {
+    return actuator.name
+  }
+  // ACTUATOR_TYPE_CONFIG covers canonical types (pump, valve, relay, pwm)
+  // ACTUATOR_TYPE_LABELS also covers server-normalized types (e.g. 'digital' → 'Relais')
+  return (
+    ACTUATOR_TYPE_CONFIG[actuator.actuator_type]?.label ??
+    ACTUATOR_TYPE_LABELS[actuator.actuator_type] ??
+    actuator.actuator_type
+  )
 }
 
 /**

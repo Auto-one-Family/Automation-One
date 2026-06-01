@@ -201,6 +201,9 @@ services:
       VITE_API_TARGET: http://el-servador:8000
       VITE_WS_TARGET: ws://el-servador:8000
       VITE_LOG_LEVEL: ${VITE_LOG_LEVEL:-debug}
+      # Polling required for Docker Desktop on Windows (inotify events don't propagate)
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "300"
     ports:
       - "0.0.0.0:5173:5173"
     volumes:

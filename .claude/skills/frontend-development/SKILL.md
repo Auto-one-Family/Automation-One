@@ -1480,7 +1480,20 @@ Beispiel S3: `ESP_ABC123:7:ec` — GPIO-Nummer ist board-spezifisch, das Format 
 2. **Strapping-Warnung:** S3 GPIO 0, 3, 46 (WROOM: 0, 2, 12, 15) im Picker als „Strapping — nur mit Vorsicht“ (`category: 'caution'`), nicht als empfohlene Pins.
 3. **ADC1-Hinweis:** Bei analoger Sensorauswahl auf S3 Helper + Dropdown auf GPIO 1–10 beschraenken; ADC2 (11–20) bei WiFi nicht nutzen — Hinweis in UI, Validierung primaer Server.
 
-### 20.6 Agent-Checkliste (S3-Aufgabe)
+### 20.6 UART CO2 (SEN0220 / MH-Z19, AUT-527)
+
+**Ein Pin im UI reicht:** Operator wählt nur **GPIO = logischer Slot = `uart_rx_pin`** (S3-Empfehlung: **GPIO 18**). `uart_tx_pin` (**17**) kommt vom Server (`config_builder.build_sensor_payload()` Komplement-Regel 17↔18) — nicht im Dashboard editierbar.
+
+| Layer | Verhalten |
+|-------|-----------|
+| Frontend `inferInterfaceType('co2')` | **`UART`** — aligned with Server `_infer_interface_type()` |
+| Server `_infer_interface_type('co2')` | **`UART`** — SSOT für MQTT-Push |
+| MQTT an ESP | `gpio=18`, `uart_rx_pin=18`, `uart_tx_pin=17`, `uart_baud=9600` |
+| Löschen | `DELETE /sensors/{esp_id}/{config_id}` → dual Tombstone GPIO 17+18 |
+
+**Board-Hinweis:** S3-CO₂-Empfehlung in `gpioConfig.ts`: **`[18]`** (UART RX, mit ★ im GpioPicker).
+
+### 20.7 Agent-Checkliste (S3-Aufgabe)
 
 1. `hardware_type` aus `espStore.devices` lesen — **kein** neues Pinia-Feld ohne TM-Freigabe.
 2. `useBoardLayout(computed(() => device?.hardware_type))` fuer Pin-Listen/Defaults.
@@ -1505,7 +1518,9 @@ Beispiel S3: `ESP_ABC123:7:ec` — GPIO-Nummer ist board-spezifisch, das Format 
 
 ## Versions-Historie
 
-**Version:** 10.16 | **Letzte Aktualisierung:** 2026-05-29
+**Version:** 10.17 | **Letzte Aktualisierung:** 2026-05-29
+
+- 2026-05-29: **AUT-527** — Section 20.6 UART CO2: ein Pin (GPIO=RX), Server leitet TX ab; dual Tombstone beim Löschen; Frontend `inferInterfaceType` vs. Server `_infer_interface_type`.
 
 - 2026-05-29: **AUT-528 S5c** — Section 20 ESP32-S3 Board-Awareness: `useBoardLayout`, `hardware_type`-SSOT in `esp.ts` (Search-vor-Create: kein paralleles Board-Feld in sensor/dashboard stores), SensorConfigPanel ADC1/I2C, GpioPicker/gpioConfig Gap, unveraendertes sensorId-Format + ActuatorCard/ZoneAssignmentPanel.
 

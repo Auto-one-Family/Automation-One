@@ -18,8 +18,6 @@ import GpioPicker from './GpioPicker.vue'
 import SubzoneAssignmentSection from '@/components/devices/SubzoneAssignmentSection.vue'
 import { BaseModal } from '@/shared/design/primitives'
 import { useEspStore } from '@/stores/esp'
-import { useActuatorStore } from '@/shared/stores/actuator.store'
-import { notifyConfigAddPush } from '@/utils/configPushAck'
 import { useToast } from '@/composables/useToast'
 import {
   getActuatorTypeOptions,
@@ -48,7 +46,6 @@ const emit = defineEmits<{
 }>()
 
 const espStore = useEspStore()
-const actuatorStore = useActuatorStore()
 const toast = useToast()
 
 // ── Form State ───────────────────────────────────────────────────────
@@ -56,9 +53,8 @@ const toast = useToast()
 const defaultActuatorType = 'relay'
 const actuatorTypeOptions = getActuatorTypeOptions()
 
-// gpio is number | null to support unselected state in GpioPicker before user picks a pin.
-const newActuator = ref<Omit<MockActuatorConfig, 'gpio'> & { gpio: number | null }>({
-  gpio: null,
+const newActuator = ref<MockActuatorConfig>({
+  gpio: 0,
   aux_gpio: 255,
   actuator_type: defaultActuatorType,
   name: '',
@@ -79,11 +75,6 @@ const actuatorAuxGpio = computed({
   get: (): number | null => newActuator.value.aux_gpio ?? 255,
   set: (value: number | null) => { newActuator.value.aux_gpio = value },
 })
-
-const isPump = computed(() => newActuator.value.actuator_type === 'pump')
-const isRelay = computed(() =>
-  ['relay', 'digital', 'binary', 'switch'].includes(newActuator.value.actuator_type),
-)
 
 const device = computed(() =>
   (espStore.devices ?? []).find((d) => espStore.getDeviceId(d) === props.espId)
@@ -147,7 +138,7 @@ function close() {
 function resetForm() {
   const defaults = getActuatorSafetyDefaults(defaultActuatorType)
   newActuator.value = {
-    gpio: null,
+    gpio: 0,
     aux_gpio: 255,
     actuator_type: defaultActuatorType,
     name: '',
@@ -166,19 +157,8 @@ function resetForm() {
 
 async function addActuator() {
   try {
-    const cfg = newActuator.value as MockActuatorConfig
-    const ack = await espStore.addActuator(props.espId, cfg)
-    const label = `Aktor ${cfg.actuator_type} an GPIO ${cfg.gpio}`
-    notifyConfigAddPush(
-      ack as Record<string, unknown>,
-      label,
-      'Aktor erfolgreich hinzugefügt',
-      `${props.espId}:actuator-add:${cfg.gpio}:${cfg.actuator_type}`,
-      toast,
-      actuatorStore,
-      props.espId,
-      `actuator-add:${cfg.gpio}:${cfg.actuator_type}`,
-    )
+    await espStore.addActuator(props.espId, newActuator.value)
+    toast.success('Aktor erfolgreich hinzugefügt')
     close()
     resetForm()
     espStore.fetchGpioStatus(props.espId)
@@ -231,7 +211,7 @@ function onActuatorAuxGpioValidation(valid: boolean, _message: string | null): v
       <div class="form-group">
         <SubzoneAssignmentSection
           :esp-id="espId"
-          :gpio="newActuator.gpio ?? 0"
+          :gpio="newActuator.gpio"
           :zone-id="zoneId"
           v-model="subzoneModel"
         />
@@ -250,13 +230,13 @@ function onActuatorAuxGpioValidation(valid: boolean, _message: string | null): v
       </div>
 
       <!-- Max Runtime -->
-      <div v-if="isPump || isRelay" class="form-group">
-        <label class="form-label">Sicherheitslimit (Sekunden) - 0 = unbegrenzt / aus</label>
-        <input v-model.number="newActuator.max_runtime_seconds" type="number" min="0" max="86400" class="form-input" :placeholder="isRelay ? '300' : '3600'" />
+      <div v-if="newActuator.actuator_type === 'pump'" class="form-group">
+        <label class="form-label">Sicherheitslimit <span class="form-label-hint">Sekunden (0 = kein Limit)</span></label>
+        <input v-model.number="newActuator.max_runtime_seconds" type="number" min="0" max="86400" class="form-input" placeholder="3600" />
       </div>
 
       <!-- Cooldown -->
-      <div v-if="isPump" class="form-group">
+      <div v-if="newActuator.actuator_type === 'pump'" class="form-group">
         <label class="form-label">Cooldown <span class="form-label-hint">Sekunden</span></label>
         <input v-model.number="newActuator.cooldown_seconds" type="number" min="0" max="3600" class="form-input" placeholder="30" />
       </div>

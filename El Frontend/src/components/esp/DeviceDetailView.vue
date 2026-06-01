@@ -19,11 +19,11 @@
  */
 
 import { defineAsyncComponent } from 'vue'
+import { ArrowLeft } from 'lucide-vue-next'
 import type { ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
 import { useLogicStore } from '@/shared/stores/logic.store'
 import ESPOrbitalLayout from './ESPOrbitalLayout.vue'
-import DeviceHeaderBar from './DeviceHeaderBar.vue'
 
 const CrossEspConnectionOverlay = defineAsyncComponent(
   () => import('@/components/dashboard/CrossEspConnectionOverlay.vue')
@@ -77,12 +77,10 @@ function handleActuatorClick(gpio: number) {
 
 <template>
   <div class="device-detail-view">
-    <!-- Header with back navigation -->
-    <DeviceHeaderBar
-      :device="device"
-      :zone-name="zoneName"
-      @back="emit('back')"
-    />
+    <button class="device-detail-view__back" @click="emit('back')">
+      <ArrowLeft class="w-4 h-4" />
+      <span>Zurück</span>
+    </button>
 
     <!-- Cross-ESP Connection Overlay (only on Level 3) -->
     <div class="device-detail-view__content">
@@ -112,11 +110,30 @@ function handleActuatorClick(gpio: number) {
 .device-detail-view {
   background: linear-gradient(180deg, var(--color-bg-level-3), var(--color-bg-tertiary));
   border-radius: var(--radius-lg);
-  padding: var(--space-4);
-  min-height: 400px;
-  width: min(100%, 1560px);
-  max-width: 1560px;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  width: min(100%, 1700px);
+  max-width: 1700px;
   margin-inline: auto;
+}
+
+.device-detail-view__back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  margin-bottom: var(--space-2);
+  background: transparent;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.device-detail-view__back:hover {
+  color: var(--color-text-secondary);
+  border-color: var(--glass-border-hover);
 }
 
 .device-detail-view__content {
@@ -124,31 +141,9 @@ function handleActuatorClick(gpio: number) {
   width: 100%;
 }
 
-/* Override ESPOrbitalLayout width constraints for full-page Level 3 view */
+/* Orbital layout overrides for full-page detail view */
 .device-detail-view__content :deep(.esp-horizontal-layout) {
-  width: min(100%, 1460px);
-  max-width: 1460px;
   margin-inline: auto;
-  justify-content: center;
-  gap: clamp(0.75rem, 1.4vw, 1.5rem);
-}
-
-/* Let columns grow naturally; use page scroll instead of nested inner scroll */
-.device-detail-view__content :deep(.esp-horizontal-layout__column--sensors),
-.device-detail-view__content :deep(.esp-horizontal-layout__column--actuators) {
-  width: clamp(190px, 16vw, 260px);
-  max-width: none;
-  max-height: none;
-  overflow: visible;
-}
-
-/* Widen the analysis/chart area */
-.device-detail-view__content :deep(.esp-horizontal-layout__center) {
-  flex: 1 1 clamp(420px, 34vw, 760px);
-  width: auto;
-  max-width: clamp(560px, 46vw, 820px);
-  min-width: clamp(360px, 30vw, 560px);
-  align-self: flex-start;
 }
 
 .device-detail-view__content :deep(.esp-info-compact) {
@@ -156,71 +151,56 @@ function handleActuatorClick(gpio: number) {
   height: auto;
 }
 
-/* Standard/Normal-Zoom: sauber gestapelt statt gequetschte 3-Spalten */
-@media (max-width: 1700px) {
+/* Orbit shape — wide flat ellipse. Direct x/y overrides bypass the 1.3/0.75 formula
+   and let the orbit fill available horizontal space without vertical scroll.
+   Width  = 2 * orbit-radius-x + 260px
+   Height = 2 * orbit-radius-y + 260px */
+@media (max-height: 720px) {
   .device-detail-view__content :deep(.esp-horizontal-layout) {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-3);
-    width: min(100%, 980px);
-    justify-content: stretch;
-  }
-
-  .device-detail-view__content :deep(.esp-horizontal-layout__column) {
-    width: 100%;
-    max-width: none;
-  }
-
-  .device-detail-view__content :deep(.esp-horizontal-layout__column--sensors) {
-    order: 1;
-  }
-
-  .device-detail-view__content :deep(.esp-horizontal-layout__center) {
-    order: 2;
-    width: 100%;
-    max-width: none;
-  }
-
-  .device-detail-view__content :deep(.esp-horizontal-layout__column--actuators) {
-    order: 3;
-  }
-
-  /*
-   * Detail/Range-zoom mode:
-   * Actuators should be neatly side-by-side at the bottom.
-   */
-  .device-detail-view__content :deep(.esp-horizontal-layout__column--actuators .actuator-column) {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(170px, 220px));
-    justify-content: center;
-    gap: var(--space-3);
+    --orbit-radius-x: 330px;
+    --orbit-radius-y: 120px;
   }
 }
 
-/* Erst auf sehr breiten Screens wieder klassisches 3-Spalten-Gefuehl */
-@media (min-width: 1701px) {
+@media (min-height: 721px) and (max-height: 780px) {
   .device-detail-view__content :deep(.esp-horizontal-layout) {
-    width: 100%;
-  }
-
-  /*
-   * Orbital desktop mode:
-   * Keep actuators stacked vertically on the right column.
-   */
-  .device-detail-view__content :deep(.esp-horizontal-layout__column--actuators .actuator-column) {
-    display: flex;
-    flex-direction: column;
+    --orbit-radius-x: 380px;
+    --orbit-radius-y: 135px;
   }
 }
 
-@media (max-width: 1100px) {
+@media (min-height: 781px) and (max-height: 860px) {
+  .device-detail-view__content :deep(.esp-horizontal-layout) {
+    --orbit-radius-x: 430px;
+    --orbit-radius-y: 150px;
+  }
+}
+
+@media (min-height: 861px) and (max-height: 960px) {
+  .device-detail-view__content :deep(.esp-horizontal-layout) {
+    --orbit-radius-x: 470px;
+    --orbit-radius-y: 165px;
+  }
+}
+
+@media (min-height: 961px) and (max-width: 1700px) {
+  .device-detail-view__content :deep(.esp-horizontal-layout) {
+    --orbit-radius-x: 510px;
+    --orbit-radius-y: 182px;
+  }
+}
+
+@media (min-width: 1701px) and (min-height: 961px) {
+  .device-detail-view__content :deep(.esp-horizontal-layout) {
+    --orbit-radius-x: 590px;
+    --orbit-radius-y: 210px;
+  }
+}
+
+@media (max-width: 1200px) {
   .device-detail-view {
     width: 100%;
     padding: var(--space-3);
-  }
-
-  .device-detail-view__content :deep(.esp-horizontal-layout) {
-    width: 100%;
   }
 }
 </style>

@@ -21,6 +21,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { useDashboardStore } from '@/shared/stores/dashboard.store'
+import { useAlertCenterStore } from '@/shared/stores/alert-center.store'
 import { useEspStore } from '@/stores/esp'
 import {
   LogOut, ChevronDown, Menu, Filter,
@@ -39,6 +40,7 @@ const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const dashStore = useDashboardStore()
+const alertCenterStore = useAlertCenterStore()
 const espStore = useEspStore()
 const showUserMenu = ref(false)
 const showMobileFilters = ref(false)
@@ -75,6 +77,10 @@ const connectionTooltip = computed(() => {
 
 const pageTitle = computed(() =>
   (route.meta.title as string) || 'Dashboard'
+)
+
+const showAlertEntry = computed(
+  () => alertCenterStore.alertStats !== null && espStore.devices.length > 0,
 )
 
 const breadcrumbSegments = computed(() => {
@@ -185,7 +191,7 @@ async function handleLogout() {
         </button>
       </template>
 
-      <div class="header__alerts-group">
+      <div v-if="showAlertEntry" class="header__alerts-group">
         <div class="header__divider" />
         <AlertStatusBar />
         <div class="header__divider" />
@@ -299,6 +305,7 @@ async function handleLogout() {
   gap: var(--space-3);
   min-width: 0;
   flex-shrink: 1;
+  max-width: 240px;
 }
 
 .header__hamburger {
@@ -418,9 +425,10 @@ async function handleLogout() {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  flex: 1;
+  flex: 1 1 0;
   justify-content: center;
   min-width: 0;
+  overflow: hidden;
 }
 
 /* ── Compact Status Chip (Online/Total) ── */
@@ -592,7 +600,6 @@ async function handleLogout() {
     vertical-align: bottom;
   }
 
-  .header__alerts-group,
   .header__action-btn--create {
     display: none;
   }

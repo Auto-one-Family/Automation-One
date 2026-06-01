@@ -105,8 +105,9 @@ export const actuatorsApi = {
   /**
    * Delete actuator configuration
    */
-  async delete(espId: string, gpio: number): Promise<void> {
-    await api.delete(`/actuators/${espId}/${gpio}`)
+  async delete(espId: string, gpio: number): Promise<ActuatorConfigResponse> {
+    const response = await api.delete<ActuatorConfigResponse>(`/actuators/${espId}/${gpio}`)
+    return response.data
   },
 
   /**

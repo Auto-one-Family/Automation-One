@@ -22,7 +22,7 @@ public:
     void end();
     bool isInitialized() const { return initialized_; }
 
-    // Read raw CO2 PPM (0-50000). Bounded millis() timeout, no delay().
+    // Read raw CO2 PPM (0-50000). Frame-sync + readBytes(), 2s timeout.
     bool readRawPpm(uint16_t& ppm_out);
 
 private:
@@ -32,6 +32,7 @@ private:
     uint8_t rx_pin_;
     uint8_t tx_pin_;
     uint32_t baud_;
+    bool abc_disabled_;  // ABC disable sent after first successful read
 
     static bool validateChecksum(const uint8_t* frame, size_t len);
 };

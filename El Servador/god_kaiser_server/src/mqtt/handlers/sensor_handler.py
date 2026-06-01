@@ -99,7 +99,7 @@ class SensorDataHandler:
         # Environmental sensors
         "moisture": {"min": 0.0, "max": 100.0},
         "soil_moisture": {"min": 0.0, "max": 100.0},
-        "co2": {"min": 0.0, "max": 10000.0},
+        "co2": {"min": 0.0, "max": 50000.0},  # AUT-576: SEN0220/MH-Z16 range 0-50000 ppm
         "light": {"min": 0.0, "max": 200000.0},
         "flow": {"min": 0.0, "max": 1000.0},
     }

@@ -64,7 +64,7 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
   const isDrawerOpen = ref(false)
   const isPreferencesOpen = ref(false)
   const activeFilter = ref<InboxFilter>('all')
-  const lifecycleFilter = ref<InboxLifecycleFilter>('all')
+  const lifecycleFilter = ref<InboxLifecycleFilter>('active')
   const sourceFilter = ref<SourceFilterValue>(null)
   /** When true, GET /notifications includes suppressed-channel audit notifications */
   const showSuppressed = ref(false)

@@ -21,11 +21,10 @@ import {
   ToggleRight, GitBranch, Fan, Flame, Lightbulb, Cog, Power,
 } from 'lucide-vue-next'
 import ESPCardBase from '@/components/esp/ESPCardBase.vue'
-import { getESPStatus, getESPStatusDisplay, type ESPStatus } from '@/composables/useESPStatus'
+import { getESPStatus, type ESPStatus } from '@/composables/useESPStatus'
+import { useEspStore } from '@/stores/esp'
 import { espHealthPresentation } from '@/domain/esp/espHealth'
 import { groupSensorsByBaseType, getSensorConfig, type RawSensor } from '@/utils/sensorDefaults'
-import { espStatusToLevel } from '@/utils/formatters'
-import StatusBadge from '@/components/base/StatusBadge.vue'
 import { getActuatorTypeInfo } from '@/utils/labels'
 import type { MockActuator } from '@/types'
 import { actuatorDutyToDisplayPercent } from '@/utils/eventTransformer'
@@ -36,6 +35,14 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+const espStore = useEspStore()
+
+/** Always bind live fields from esp.store (AUT-580 L1 — avoids VueDraggable local copies going stale). */
+const liveDevice = computed(() => {
+  void espStore.devicesLiveTick
+  const id = espStore.getDeviceId(props.device)
+  return espStore.devices.find((entry) => espStore.getDeviceId(entry) === id) ?? props.device
+})
 
 const emit = defineEmits<{
   (e: 'click', payload: { deviceId: string; originRect: DOMRect }): void
@@ -48,29 +55,14 @@ const emit = defineEmits<{
 const cardRef = ref<InstanceType<typeof ESPCardBase> | null>(null)
 
 /** Device ID (needed locally for emit payloads) */
-const deviceId = computed(() => {
-  const d = props.device
-  return d.device_id || (d as any).esp_id || ''
-})
+const deviceId = computed(() => espStore.getDeviceId(liveDevice.value))
 
 // ── Status ───────────────────────────────────────────────────────────────
-const deviceStatus = computed<ESPStatus>(() => getESPStatus(props.device))
-const statusDisplay = computed(() => getESPStatusDisplay(deviceStatus.value))
+const deviceStatus = computed<ESPStatus>(() => getESPStatus(liveDevice.value))
 const isDeviceOnline = computed(() => deviceStatus.value === 'online')
-const statusText = computed(() => statusDisplay.value.text)
-const statusChipLabel = computed(() => {
-  switch (deviceStatus.value) {
-    case 'stale':
-      return 'Keine Live-Daten'
-    case 'safemode':
-      return 'Sicherheitsmodus'
-    default:
-      return statusText.value
-  }
-})
 
 const runtimeHealthBadge = computed(() => {
-  const vm = props.device.runtime_health_view
+  const vm = liveDevice.value.runtime_health_view
   if (!vm) return null
   const onlineLike = deviceStatus.value === 'online' || deviceStatus.value === 'stale'
   return espHealthPresentation(vm, onlineLike)
@@ -103,7 +95,7 @@ interface DeviceAlertConfigShape {
 }
 
 const deviceAlertConfig = computed<DeviceAlertConfigShape | null>(() => {
-  const cfg = (props.device as unknown as { alert_config?: DeviceAlertConfigShape }).alert_config
+  const cfg = (liveDevice.value as unknown as { alert_config?: DeviceAlertConfigShape }).alert_config
   return cfg ?? null
 })
 
@@ -123,7 +115,7 @@ const suppressionTooltip = computed(() => {
 })
 
 const handoverBadge = computed(() => {
-  const handover = props.device.runtime_health_view?.handover
+  const handover = liveDevice.value.runtime_health_view?.handover
   if (!handover) return null
 
   const hasEpoch = handover.epoch !== null
@@ -147,7 +139,7 @@ const handoverBadge = computed(() => {
 /** Relative time for stale/offline devices */
 const lastSeenText = computed(() => {
   if (isDeviceOnline.value) return ''
-  const ts = props.device.last_seen || props.device.last_heartbeat
+  const ts = liveDevice.value.last_seen || liveDevice.value.last_heartbeat
   if (!ts) return ''
   const diffMs = Date.now() - new Date(ts).getTime()
   if (diffMs < 0) return ''
@@ -158,22 +150,6 @@ const lastSeenText = computed(() => {
   if (hours < 24) return `vor ${hours} Std.`
   const days = Math.floor(hours / 24)
   return `vor ${days} Tag${days > 1 ? 'en' : ''}`
-})
-
-const statusChipTitle = computed(() => {
-  const lines: string[] = [`Status: ${statusChipLabel.value}`]
-  if (deviceStatus.value !== 'online' && lastSeenText.value) {
-    lines.push(`Letztes Lebenszeichen: ${lastSeenText.value}`)
-  }
-
-  const offlineInfo = props.device.offlineInfo
-  if (offlineInfo) {
-    lines.push(`Erkennung: ${offlineInfo.displayText}`)
-    lines.push(`Quelle: ${offlineInfo.source}`)
-    lines.push(`Grund: ${offlineInfo.reason}`)
-  }
-
-  return lines.join('\n')
 })
 
 // ── Sensor Icon Map ──────────────────────────────────────────────────────
@@ -196,7 +172,7 @@ interface SensorDisplay {
   icon: Component
 }
 
-const MAX_VISIBLE_ROWS = 6
+const MAX_VISIBLE_ROWS = 20
 
 /** Map quality to CSS color for value text */
 function qualityToValueColor(quality: 'normal' | 'warning' | 'stale' | 'unknown', isOnline: boolean): string {
@@ -220,7 +196,7 @@ function formatValue(value: number | null, quality: 'normal' | 'warning' | 'stal
 }
 
 const sensorDisplays = computed((): SensorDisplay[] => {
-  const sensors = props.device.sensors as RawSensor[] | undefined
+  const sensors = liveDevice.value.sensors as RawSensor[] | undefined
   if (!sensors || sensors.length === 0) return []
 
   const grouped = groupSensorsByBaseType(sensors)
@@ -245,7 +221,7 @@ const sensorDisplays = computed((): SensorDisplay[] => {
 
 /** Total number of grouped sensor values */
 const totalSensorValues = computed(() => {
-  const sensors = props.device.sensors as RawSensor[] | undefined
+  const sensors = liveDevice.value.sensors as RawSensor[] | undefined
   if (!sensors) return 0
   const grouped = groupSensorsByBaseType(sensors)
   return grouped.reduce((sum, g) => sum + g.values.length, 0)
@@ -289,7 +265,7 @@ function resolveActuatorIcon(type: string, hardwareType?: string | null): Compon
 }
 
 const actuatorDisplays = computed((): ActuatorDisplay[] => {
-  const actuators = (props.device.actuators as MockActuator[] | undefined) ?? []
+  const actuators = (liveDevice.value.actuators as MockActuator[] | undefined) ?? []
   if (actuators.length === 0) return []
 
   return actuators.map((actuator) => ({
@@ -337,22 +313,22 @@ const sensorFallback = computed(() => {
 
 /** Sensor & actuator counts for status line (grouped values, consistent with overflow count) */
 const sensorCount = computed(() => {
-  const sensors = props.device.sensors as RawSensor[] | undefined
+  const sensors = liveDevice.value.sensors as RawSensor[] | undefined
   if (Array.isArray(sensors)) {
     const grouped = groupSensorsByBaseType(sensors)
     return grouped.reduce((sum, g) => sum + g.values.length, 0)
   }
-  return props.device.sensor_count ?? 0
+  return liveDevice.value.sensor_count ?? 0
 })
 
 const actuatorCount = computed(() => {
-  const actuators = (props.device as any).actuators as unknown[] | undefined
+  const actuators = (liveDevice.value as { actuators?: unknown[] }).actuators
   if (Array.isArray(actuators)) return actuators.length
-  return props.device.actuator_count ?? 0
+  return liveDevice.value.actuator_count ?? 0
 })
 
 /** Subzone label (if assigned) */
-const subzoneName = computed(() => props.device.subzone_name || '')
+const subzoneName = computed(() => liveDevice.value.subzone_name || '')
 
 // ── Click / Action Handlers ──────────────────────────────────────────────
 function handleClick() {
@@ -364,15 +340,15 @@ function handleClick() {
 }
 
 function handleSettings() {
-  emit('settings', props.device)
+  emit('settings', liveDevice.value)
 }
 
 function handleChangeZone() {
-  emit('change-zone', props.device)
+  emit('change-zone', liveDevice.value)
 }
 
 function handleMonitorNav() {
-  emit('monitor-nav', props.device)
+  emit('monitor-nav', liveDevice.value)
 }
 
 function handleDeviceDelete() {
@@ -384,9 +360,16 @@ function handleDeviceDelete() {
 <template>
   <ESPCardBase
     ref="cardRef"
-    :esp="device"
+    :esp="liveDevice"
     variant="mini"
-    :class="['device-mini-card', { 'device-mini-card--stale': !isDeviceOnline }]"
+    :class="[
+      'device-mini-card',
+      {
+        'device-mini-card--stale': !isDeviceOnline,
+        'device-mini-card--mock': isMock,
+        'device-mini-card--real': !isMock,
+      },
+    ]"
     @click="handleClick"
     @keydown.enter.prevent="handleClick"
     @settings="handleSettings"
@@ -398,14 +381,8 @@ function handleDeviceDelete() {
 
     <!-- Card content: status line, subzone, sensors -->
     <template #default>
-      <!-- Status line: dot + text + last seen + sensor count -->
+      <!-- Status line: health badges + last seen + sensor count (dot lives in ESPCardBase header) -->
       <div class="device-mini-card__status-line">
-        <StatusBadge
-          :level="espStatusToLevel(deviceStatus)"
-          :label-override="statusChipLabel"
-          :title="statusChipTitle"
-          compact
-        />
         <span
           v-if="isDeviceSuppressed"
           class="device-mini-card__suppression-pill"
@@ -487,6 +464,7 @@ function handleDeviceDelete() {
         <span v-if="sensorFallback">{{ sensorFallback }}</span>
         <span v-else>Keine Sensoren oder Aktoren</span>
       </div>
+
     </template>
   </ESPCardBase>
 </template>
@@ -494,7 +472,7 @@ function handleDeviceDelete() {
 <style scoped>
 /* ── Root overrides on ESPCardBase for mini card styling ── */
 .device-mini-card {
-  background: var(--color-bg-tertiary);
+  background: var(--glass-bg-l2);
   padding: var(--space-3);
   cursor: pointer;
   transition:
@@ -503,9 +481,11 @@ function handleDeviceDelete() {
     transform var(--transition-fast),
     box-shadow var(--transition-fast);
   min-width: 180px;
+  /* Content-driven height; empty cards collapse to ~120px naturally */
   max-width: 100%;
   position: relative;
   overflow: hidden;
+  will-change: transform;
 }
 
 .device-mini-card.esp-card-base {
@@ -538,16 +518,66 @@ function handleDeviceDelete() {
 .device-mini-card:hover {
   background: var(--color-bg-quaternary);
   border-color: var(--glass-border-hover);
-  transform: translateY(-1px);
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.26);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
   filter: brightness(1.05);
 }
+
 
 /* Tactile touch feedback */
 .device-mini-card:active {
   transform: scale(0.99);
   transition-duration: 60ms;
 }
+
+/* Mock / Real glow border — analog to esp-info-compact--mock/--real */
+.device-mini-card--mock {
+  border-left: 3px solid var(--color-mock);
+  box-shadow:
+    var(--glass-shadow-l2),
+    0 0 16px color-mix(in srgb, var(--color-mock) 15%, transparent);
+}
+
+.device-mini-card--mock:hover {
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.35),
+    0 0 22px color-mix(in srgb, var(--color-mock) 22%, transparent);
+}
+
+.device-mini-card--real {
+  border-left: 3px solid var(--color-real);
+  box-shadow:
+    var(--glass-shadow-l2),
+    0 0 16px color-mix(in srgb, var(--color-real) 13%, transparent);
+}
+
+.device-mini-card--real:hover {
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.35),
+    0 0 22px color-mix(in srgb, var(--color-real) 18%, transparent);
+}
+
+/* Status-dot puls ring on online devices */
+:deep(.esp-card-base__status-dot)::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: var(--radius-full);
+  border: 1px solid currentColor;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.device-mini-card:not(.device-mini-card--stale) :deep(.esp-card-base__status-dot)::after {
+  animation: status-ring-pulse 2.4s ease-out infinite;
+}
+
+@keyframes status-ring-pulse {
+  0% { opacity: 0.6; transform: scale(1); }
+  60% { opacity: 0; transform: scale(2.2); }
+  100% { opacity: 0; transform: scale(2.2); }
+}
+
 
 /* ── Grip handle (always visible for discoverability) ── */
 :deep(.esp-drag-handle) {
@@ -592,10 +622,10 @@ function handleDeviceDelete() {
 
 /* ── ESPCardBase inner overrides for mini sizing ── */
 
-/* Smaller status dot */
+/* Status dot: 8px per orbital design spec */
 :deep(.esp-card-base__status-dot) {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 /* Status dot glow on hover */
@@ -749,12 +779,11 @@ function handleDeviceDelete() {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  min-height: 108px;
   justify-content: flex-start;
 }
 
 .device-mini-card__section-title {
-  font-size: var(--text-xxs);
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: var(--tracking-wide);
@@ -794,7 +823,7 @@ function handleDeviceDelete() {
 .device-mini-card__sensor-name {
   flex: 1;
   min-width: 0;
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -832,11 +861,11 @@ function handleDeviceDelete() {
   color: var(--color-text-secondary);
 }
 
-/* Fallback text */
+/* Fallback text — compact empty state */
 .device-mini-card__values {
   display: flex;
   align-items: center;
-  min-height: 108px;
+  min-height: 48px;
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
 }

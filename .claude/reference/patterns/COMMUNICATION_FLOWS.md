@@ -576,7 +576,7 @@ Config-Pushes werden automatisch nach folgenden API-Operationen gesendet:
 | Trigger | Endpoint |
 |---------|----------|
 | Sensor Create/Update | `POST /sensors/{esp_id}/{gpio}` |
-| Sensor Delete | `DELETE /sensors/{esp_id}/{config_id}` |
+| Sensor Delete | `DELETE /sensors/{esp_id}/{config_id}` — MQTT Tombstone `active:false`; bei `co2` dual GPIO 17+18 (AUT-527) |
 | Actuator Create/Update | `POST /actuators/{esp_id}/{gpio}` |
 | Actuator Delete | `DELETE /actuators/{esp_id}/{gpio}` |
 

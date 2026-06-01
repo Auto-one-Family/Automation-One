@@ -27,6 +27,7 @@ context: inline
 | **GPIO-Fehler** | [Error-Codes](#5-error-code-vollreferenz) | `grep -E "1001\|1002\|GPIO"` |
 | **ESP32-S3 Pins / ADC1** | `esp32-development/SKILL.md` § ESP32-S3 N8R8 | `esp32_s3_devkit.h`; ADC1 = GPIO 1–10, RESERVED 26–37 |
 | **Sensor-Problem** | [Datenfluesse](#4-datenfluesse) | `grep -E "1040\|1041\|sensor"` |
+| **UART CO2 / GPIO 17+18 blockiert** | [UART CO2 Diagnose](#45-uart-co2-aut-527) | `grep -iE "UART CO2\|rx=18\|GPIO 18 not available\|1033\|1034"` |
 | **MQTT offline** | [Circuit-Breaker](#8-circuit-breaker) | `grep -i "circuit\|MQTT\|3011"` |
 | **Watchdog** | [Error-Codes](#5-error-code-vollreferenz) | `grep -E "4070\|4071\|watchdog"` |
 
@@ -161,6 +162,23 @@ POST /actuators/emergency-stop → kaiser/broadcast/emergency
 Namespaces: `wifi_config` (SSID/PW/Server), `zone_config` (Zone-Zuordnung), `system_config` (ESP-ID/State/Boot-Count), `sensors_config` (GPIO/Type/Interval), `actuators_config` (GPIO/Type/Safety).
 **NICHT gespeichert:** Sensor-Messwerte, Aktuator-States (fluechtig!)
 
+### 4.5 UART CO2 (AUT-527)
+
+**Hardware (ESP32-S3):** SEN0220/MH-Z19 — Sensor TX → ESP **GPIO 18** (RX), Sensor RX → ESP **GPIO 17** (TX), 9600 8N1, 5V, ~3 min Warmup.
+
+**Config-Pfad:** MQTT `config` → `parseAndConfigureSensorWithTracking()` → `SensorManager::configureSensor()` → `Mhz19UartReader` (`Serial2`).
+
+**Diagnose-Checkliste:**
+
+| Symptom | Serial-Pattern | Ursache | Fix |
+|---------|----------------|---------|-----|
+| GPIO 18 nicht verfügbar | `UART RX GPIO 18 not available` / `GPIO 18 reserved by sensor/co2` | NVS-Geist auf GPIO **17** (UART-Paar) | UI: CO₂ **löschen** (Server dual Tombstone 17+18), dann neu anlegen auf GPIO 18 |
+| Tombstone failed | `UART sensor missing uart_rx_pin` (historisch) | Validierung vor `active=false` | Firmware-Fix: Tombstone **vor** `validateSensorConfig()` |
+| Keine ppm nach 3 min | `1034` / `UART_READ_TIMEOUT` | Verkabelung vertauscht, 3.3V statt 5V, ABC/Warmup | TX/RX prüfen; 5V; ABC disable beim Init |
+| Checksum | `1035` | EMI, falscher Baud | 9600 8N1, kurze Leitung |
+
+**Erfolg:** `Configured UART CO2 … rx=18 tx=17` → nach Warmup `UART CO2 raw PPM=…` → MQTT `.../sensor/18/data`.
+
 ---
 
 ## 5. Error-Code Vollreferenz (1000-4999)
@@ -173,6 +191,7 @@ Namespaces: `wifi_config` (SSID/PW/Server), `zone_config` (Zone-Zuordnung), `sys
 | 1007-1019 | I2C | TIMEOUT(1007), BUS_STUCK(1015) | Verkabelung, Pull-ups 4.7k |
 | 1020-1029 | OneWire | NO_DEVICES(1021), INVALID_ROM(1023-1025) | Sensor angeschlossen? |
 | 1030-1032 | PWM | CHANNEL_FULL(1031) | Max PWM-Channels erreicht |
+| 1033-1036 | UART CO2 | INIT_FAILED(1033), READ_TIMEOUT(1034), CHECKSUM(1035) | GPIO 17/18, 5V, Verkabelung; siehe §4.5 |
 | 1040-1043 | Sensor | READ_FAILED(1040), TIMEOUT(1043) | Hardware defekt? |
 | 1050-1053 | Actuator | SET_FAILED(1050), CONFLICT(1053) | GPIO-Kollision? |
 | 1060-1063 | DS18B20 | SENSOR_FAULT(1060), OUT_OF_RANGE(1062) | Verkabelung, Sensor |

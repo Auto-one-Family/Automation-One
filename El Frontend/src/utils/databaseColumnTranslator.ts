@@ -118,7 +118,8 @@ function formatInterfaceType(value: unknown): string {
     I2C: 'I2C-Bus',
     ONEWIRE: 'OneWire-Bus',
     ANALOG: 'Analog',
-    DIGITAL: 'Digital'
+    DIGITAL: 'Digital',
+    UART: 'UART',
   }
   return typeMap[type] ?? value
 }

@@ -18,7 +18,6 @@ import { useEspStore } from '@/stores/esp'
 import { useUiStore } from '@/shared/stores/ui.store'
 import { useToast } from '@/composables/useToast'
 import { inferInterfaceType } from '@/utils/sensorDefaults'
-import { getRecommendedGpios, type HardwareType } from '@/utils/gpioConfig'
 import { roundToDecimals } from '@/utils/formatters'
 import { SENSOR_TYPE_CONFIG, getSensorUnit } from '@/utils/sensorDefaults'
 import { AccordionSection } from '@/shared/design/primitives'
@@ -42,7 +41,6 @@ import { deviceContextApi } from '@/api/device-context'
 import { useZoneStore } from '@/shared/stores/zone.store'
 import { useActuatorStore } from '@/shared/stores/actuator.store'
 import { createLogger } from '@/utils/logger'
-import { notifyConfigDeletePush, runConfigSaveAckFlow } from '@/utils/configPushAck'
 import type { DeviceScope } from '@/types'
 import type { DeviceMetadata } from '@/types/device-metadata'
 import { parseDeviceMetadata, mergeDeviceMetadata } from '@/types/device-metadata'
@@ -349,7 +347,6 @@ async function applyPlantThresholds(): Promise<void> {
 
 const isI2C = computed(() => interfaceType.value === 'I2C')
 const isOneWire = computed(() => interfaceType.value === 'ONEWIRE')
-const isUart = computed(() => interfaceType.value === 'UART')
 const isAnalog = computed(() => interfaceType.value === 'ANALOG')
 const isDigital = computed(() => props.sensorType.toLowerCase().includes('flow'))
 const contextDevice = computed(() =>
@@ -380,16 +377,6 @@ const subzoneContextLabel = computed(() =>
 )
 
 /** ADC1-only pins for analog sensors — board-aware via useBoardLayout */
-
-/** UART RX pin options (recommended first — star in UI) */
-const uartRxGpios = computed((): number[] =>
-  getRecommendedGpios(props.sensorType, 'sensor', deviceHardwareType.value as HardwareType | null)
-)
-
-/** Safe GPIO pins for OneWire/Digital sensors — board-aware, falls back to ESP32-dev list */
-const oneWireDigitalGpios = computed((): number[] =>
-  boardLayout.value?.safeGpios.slice() ?? [4, 5, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27]
-)
 
 /** I2C address options per sensor type */
 const i2cAddressOptions = computed(() => {
@@ -638,16 +625,7 @@ async function confirmAndDelete() {
     if (props.configId) {
       // Unified path: Mock AND Real ESPs use the same DELETE /sensors/{esp_id}/{config_id}
       // This endpoint handles simulation job cleanup, dual-storage sync, and MQTT config publish
-      const deleted = await sensorsApi.delete(props.espId, props.configId)
-      notifyConfigDeletePush(
-        deleted as unknown as Record<string, unknown>,
-        `Sensor-Löschung GPIO ${props.gpio}`,
-        `sensor-delete:${props.espId}:${props.gpio}:${props.sensorType}`,
-        toast,
-        actuatorStore,
-        props.espId,
-        `sensor-delete:${props.gpio}:${props.sensorType}`,
-      )
+      await sensorsApi.delete(props.espId, props.configId)
     } else if (espApi.isMockEsp(props.espId)) {
       // Fallback for Mock-ESPs without config_id (e.g. freshly added sensors not yet in DB)
       await espStore.removeSensor(props.espId, props.gpio)
@@ -657,6 +635,10 @@ async function confirmAndDelete() {
     }
     if (isMockEsp.value) {
       toast.success('[Simulation] Sensor entfernt', {
+        dedupeKey: `sensor-delete:${props.espId}:${props.gpio}:${props.sensorType}`,
+      })
+    } else {
+      toast.info('Löschauftrag akzeptiert - warte auf Geräte-Rückmeldung', {
         dedupeKey: `sensor-delete:${props.espId}:${props.gpio}:${props.sensorType}`,
       })
     }
@@ -743,27 +725,67 @@ async function handleSave() {
       emit('saved')
     } else {
       const response = result as unknown as Record<string, unknown>
+      const correlationId = typeof response.correlation_id === 'string' ? response.correlation_id : undefined
+      const requestId = typeof response.request_id === 'string' ? response.request_id : undefined
+      const handles = [correlationId ? `Korrelation: ${correlationId}` : '', requestId ? `Request-ID: ${requestId}` : '']
+        .filter(Boolean)
+        .join(' | ')
       const scope = `sensor:${props.gpio}:${props.sensorType}`
       const summary = `Sensor-Konfiguration ${props.sensorType} an GPIO ${props.gpio}`
-      const outcome = await runConfigSaveAckFlow(
+      const subjectId = actuatorStore.registerConfigIntentFromRest({
+        espId: props.espId,
+        scope,
+        correlationId,
+        requestId,
+        summary,
+      })
+      lastConfigSubjectId.value = subjectId
+      lastConfigCorrelationId.value = correlationId ?? null
+      toast.info(
+        `Konfigurationsauftrag akzeptiert: ${summary}.${handles ? ` ${handles}` : ''}`,
         {
-          response,
-          espId: props.espId,
-          scope,
-          summary,
-          dedupeScope: `${props.espId}:${scope}`,
+          dedupeKey: `config-accepted:${correlationId ?? requestId ?? `${props.espId}:${scope}`}`,
         },
-        actuatorStore,
-        toast,
-        configLogger,
       )
-      lastConfigSubjectId.value = outcome.subjectId ?? null
-      lastConfigCorrelationId.value = outcome.correlationId ?? null
-      if (outcome.result === 'saved') {
+      const terminal = await actuatorStore.waitForConfigTerminal({
+        subjectId,
+        correlationId,
+        timeoutMs: 65_000,
+      })
+      if (!terminal) {
+        configLogger.info('config_pending_over_timeout: UI-Wartezeit abgelaufen', {
+          subject_id: subjectId,
+          correlation_id: correlationId,
+        })
+        toast.warning('Konfigurationsauftrag ausstehend: Noch keine Geräte-Rückmeldung. Status wird im Panel angezeigt.', {
+          dedupeKey: `config-await-timeout:${correlationId ?? requestId ?? subjectId}`,
+        })
+        return
+      }
+      if (terminal.state === 'terminal_success') {
         lastConfigSubjectId.value = null
         lastConfigCorrelationId.value = null
+        toast.success('Sensor-Konfiguration wurde vom Gerät bestätigt')
         emit('saved')
+        return
       }
+      if (terminal.state === 'terminal_timeout') {
+        configLogger.info('config_pending_over_timeout: Store-Timeout erreicht', {
+          subject_id: subjectId,
+          correlation_id: correlationId,
+        })
+        toast.warning('Konfigurationsauftrag ausstehend: Gerät hat nicht innerhalb der Frist geantwortet.', {
+          dedupeKey: `config-terminal-timeout:${correlationId ?? requestId ?? subjectId}`,
+        })
+        return
+      }
+      lastConfigSubjectId.value = null
+      lastConfigCorrelationId.value = null
+      toast.error('Konfiguration fehlgeschlagen. Details im Event-Monitor prüfen.', {
+        persistent: true,
+        dedupeKey: `config-terminal-failed:${correlationId ?? requestId ?? subjectId}`,
+      })
+      return
     }
   } catch (err) {
     const msg = (err as any)?.response?.data?.detail ?? 'Fehler beim Speichern'
@@ -1239,8 +1261,8 @@ async function handleSave() {
           <div class="sensor-config__field">
             <label class="sensor-config__label">GPIO Pin</label>
             <select v-model.number="gpioPin" class="sensor-config__select">
-              <option v-for="pin in oneWireDigitalGpios" :key="pin" :value="pin">
-                GPIO {{ pin }}<template v-if="isReserved(pin)"> (reserviert)</template>
+              <option v-for="pin in [4, 5, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27]" :key="pin" :value="pin">
+                GPIO {{ pin }}
               </option>
             </select>
           </div>
@@ -1249,29 +1271,13 @@ async function handleSave() {
           </div>
         </template>
 
-        <!-- UART: GPIO (RX pin — TX set by server) -->
-        <template v-else-if="isUart">
-          <div class="sensor-config__field">
-            <label class="sensor-config__label">GPIO Pin (UART RX)</label>
-            <select v-model.number="gpioPin" class="sensor-config__select">
-              <option v-for="pin in uartRxGpios" :key="pin" :value="pin">
-                GPIO {{ pin }} ★
-              </option>
-            </select>
-            <span class="sensor-config__helper">
-              Logischer Slot = ESP RX (Sensor TX). TX-Pin wird vom Server automatisch ergänzt
-              (z.&nbsp;B. GPIO 17 bei RX=18 auf ESP32-S3).
-            </span>
-          </div>
-        </template>
-
         <!-- Digital: GPIO + Pulses -->
         <template v-else-if="isDigital">
           <div class="sensor-config__field">
             <label class="sensor-config__label">GPIO Pin</label>
             <select v-model.number="gpioPin" class="sensor-config__select">
-              <option v-for="pin in oneWireDigitalGpios" :key="pin" :value="pin">
-                GPIO {{ pin }}<template v-if="isReserved(pin)"> (reserviert)</template>
+              <option v-for="pin in [4, 5, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27]" :key="pin" :value="pin">
+                GPIO {{ pin }}
               </option>
             </select>
           </div>

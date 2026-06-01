@@ -310,9 +310,9 @@ describe('getGpioWarning', () => {
     expect(warning).toContain('Boot-Modus')
   })
 
-  it('returns null for GPIO 13 (no warning)', () => {
+  it('returns JTAG warning for GPIO 13 on WROOM', () => {
     const warning = getGpioWarning(13, 'ESP32_WROOM')
-    expect(warning).toBeNull()
+    expect(warning).toContain('JTAG')
   })
 
   it('returns warning for GPIO 12 (strapping)', () => {
@@ -418,6 +418,12 @@ describe('getRecommendedGpios', () => {
     const gpios = getRecommendedGpios('sht31', 'sensor')
     expect(gpios).toContain(21)
     expect(gpios).toContain(22)
+  })
+
+  it('returns GPIO 18 for co2 on ESP32-S3 (UART RX)', () => {
+    const gpios = getRecommendedGpios('co2', 'sensor', 'ESP32_S3_DEVKITC1')
+    expect(gpios[0]).toBe(18)
+    expect(gpios).not.toContain(17)
   })
 
   it('returns default actuator list for unknown type', () => {

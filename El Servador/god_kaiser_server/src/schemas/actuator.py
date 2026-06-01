@@ -374,16 +374,6 @@ class ActuatorConfigResponse(ActuatorConfigBase, TimestampMixin):
         None,
         description="Alias/Fallback-Handle zur Korrelation von REST-Antwort und WS-Config-Lifecycle",
     )
-    push_status: Optional[str] = Field(
-        None,
-        pattern=r"^(queued|published|db_only)$",
-        description=(
-            "Config MQTT push disposition for this request: "
-            "'queued' = push scheduled/sent, ESP ack may follow; "
-            "'published' = broker publish confirmed synchronously; "
-            "'db_only' = DB committed but no MQTT path (broker down or schedule failed)."
-        ),
-    )
 
     model_config = ConfigDict(
         from_attributes=True,

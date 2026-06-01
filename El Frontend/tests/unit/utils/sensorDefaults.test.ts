@@ -543,6 +543,11 @@ describe('inferInterfaceType', () => {
     expect(inferInterfaceType('pH')).toBe('ANALOG')
   })
 
+  it('returns UART for co2 and mhz19_co2', () => {
+    expect(inferInterfaceType('co2')).toBe('UART')
+    expect(inferInterfaceType('mhz19_co2')).toBe('UART')
+  })
+
   it('returns ANALOG for unknown type (default)', () => {
     expect(inferInterfaceType('unknown')).toBe('ANALOG')
   })
@@ -629,7 +634,7 @@ describe('formatSubzoneKpiLine', () => {
       good('sht31_temp', 22),
       { sensor_type: 'sht31_humidity', raw_value: 40, unit: '', quality: 'stale' },
     ])
-    expect(line).toBe('22°C')
+    expect(line).toMatch(/22[,.]0?°C/)
   })
 
   it('skips vpd (other category)', () => {

@@ -227,7 +227,7 @@ export const useGpioStore = defineStore('gpio', () => {
     // Update available list
     const reservedGpios = new Set(mergedReserved.map(r => r.gpio))
     const systemGpios = new Set(current.system)
-    const available = Array.from({ length: 40 }, (_, i) => i)
+    const available = Array.from({ length: 49 }, (_, i) => i)
       .filter(gpio => !reservedGpios.has(gpio) && !systemGpios.has(gpio))
 
     gpioStatusMap.value.set(espId, {

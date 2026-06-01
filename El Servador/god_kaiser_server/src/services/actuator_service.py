@@ -20,7 +20,9 @@ from ..db.repositories.audit_log_repo import AuditLogRepository
 from ..db.repositories.command_contract_repo import CommandContractRepository
 from ..db.session import get_session
 from ..mqtt.publisher import Publisher
+from .notification_router import NotificationRouter
 from .safety_service import SafetyService
+from ..schemas.notification import NotificationCreate
 
 logger = get_logger(__name__)
 
@@ -714,6 +716,29 @@ class ActuatorService:
                     logger.error(
                         "Terminal fail persistence failed after safety rejection: correlation_id=%s",
                         correlation_id,
+                        exc_info=True,
+                    )
+
+                # AUT-561: Canonical notification ingestion with fingerprint dedup
+                try:
+                    fingerprint = f"safety_service_{esp_id}_{gpio}_actuator_rejected"
+                    notif = NotificationCreate(
+                        title="Aktor-Befehl abgelehnt (Safety)",
+                        body=safety_result.error or "Emergency Stop aktiv",
+                        severity="warning",
+                        source="system",
+                        category="system",
+                        channel="websocket",
+                        fingerprint=fingerprint,
+                        correlation_id=correlation_id,
+                        metadata={"esp_id": esp_id, "gpio": gpio, "occurrence_count": 1},
+                    )
+                    await NotificationRouter(self.session).route(notif)
+                except Exception:
+                    logger.warning(
+                        "Safety notification ingestion failed for esp_id=%s gpio=%d",
+                        esp_id,
+                        gpio,
                         exc_info=True,
                     )
 

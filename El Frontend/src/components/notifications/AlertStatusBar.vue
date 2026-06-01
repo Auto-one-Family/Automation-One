@@ -16,24 +16,13 @@ const alertStore = useAlertCenterStore()
 const espStore = useEspStore()
 const inboxStore = useNotificationInboxStore()
 
-/** Hide entire bar when no devices or no sensors exist (stale data from previous sessions) */
+/** Hide when no devices (stale inbox data from previous sessions without hardware). */
 const hasDevices = computed(() => espStore.devices.length > 0)
-const hasSensors = computed(() =>
-  espStore.devices.some(d => (d.sensors?.length ?? 0) > 0)
-)
 
-/** Show bar only when there is meaningful data to display */
+/** Always show entry to notification drawer when stats are loaded and hardware exists. */
 const showBar = computed(() => {
   if (!alertStore.alertStats) return false
-  if (!hasDevices.value) return false
-  if (!hasSensors.value) return false
-  const s = alertStore.alertStats
-  return (
-    s.active_count > 0 ||
-    s.acknowledged_count > 0 ||
-    s.resolved_today_count > 0 ||
-    inboxStore.unreadCount > 0
-  )
+  return hasDevices.value
 })
 
 const isCritical = computed(() => alertStore.hasCritical)

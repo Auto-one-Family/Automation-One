@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { getESPStatus, getESPStatusDisplay } from '@/composables/useESPStatus'
+import { getESPStatus, getESPStatusDisplay, getESPStatusDetailLabel, getESPStatusTooltip } from '@/composables/useESPStatus'
 import type { ESPDevice } from '@/api/esp'
 
 /** Helper: create minimal ESPDevice fixture */
@@ -61,16 +61,16 @@ describe('getESPStatus', () => {
   })
 
   describe('heartbeat-based timing (Priority 2)', () => {
-    it('returns online when last_seen is within 90 seconds', () => {
+    it('returns online when last_seen is within 120 seconds', () => {
       // 30 seconds ago
       const ts = new Date(1_700_000_000_000 - 30_000).toISOString()
       const device = makeDevice({ last_seen: ts })
       expect(getESPStatus(device)).toBe('online')
     })
 
-    it('returns stale when last_seen is between 90s and 210s', () => {
-      // 120 seconds ago (2 min)
-      const ts = new Date(1_700_000_000_000 - 120_000).toISOString()
+    it('returns stale when last_seen is between 120s and 210s', () => {
+      // 150 seconds ago
+      const ts = new Date(1_700_000_000_000 - 150_000).toISOString()
       const device = makeDevice({ last_seen: ts })
       expect(getESPStatus(device)).toBe('stale')
     })
@@ -89,8 +89,8 @@ describe('getESPStatus', () => {
       expect(getESPStatus(device)).toBe('online')
     })
 
-    it('returns stale at exactly 90s boundary', () => {
-      const ts = new Date(1_700_000_000_000 - 90_000).toISOString()
+    it('returns stale at exactly 120s boundary', () => {
+      const ts = new Date(1_700_000_000_000 - 120_000).toISOString()
       const device = makeDevice({ last_seen: ts })
       expect(getESPStatus(device)).toBe('stale')
     })
@@ -231,6 +231,57 @@ describe('getESPStatusDisplay', () => {
   })
 })
 
+describe('getESPStatusDetailLabel', () => {
+  it('maps stale to operator label Keine Live-Daten', () => {
+    expect(getESPStatusDetailLabel('stale')).toBe('Keine Live-Daten')
+  })
+
+  it('maps safemode to Sicherheitsmodus', () => {
+    expect(getESPStatusDetailLabel('safemode')).toBe('Sicherheitsmodus')
+  })
+
+  it('falls back to display text for online', () => {
+    expect(getESPStatusDetailLabel('online')).toBe('Online')
+  })
+})
+
+describe('getESPStatusTooltip', () => {
+  let dateSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    dateSpy = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
+  })
+
+  afterEach(() => {
+    dateSpy.mockRestore()
+  })
+
+  it('includes status line for online devices', () => {
+    const device = makeDevice({ status: 'online' })
+    expect(getESPStatusTooltip(device)).toBe('Status: Online')
+  })
+
+  it('includes last seen and offline context for offline devices', () => {
+    const ts = new Date(1_700_000_000_000 - 600_000).toISOString()
+    const device = makeDevice({
+      status: 'offline',
+      last_seen: ts,
+      offlineInfo: {
+        displayText: 'Timeout nach 180s',
+        source: 'heartbeat_timeout',
+        reason: 'heartbeat_timeout',
+        timestamp: 1_700_000_000,
+      },
+    })
+    const tooltip = getESPStatusTooltip(device)
+    expect(tooltip).toContain('Status: Offline')
+    expect(tooltip).toContain('Letztes Lebenszeichen:')
+    expect(tooltip).toContain('Erkennung: Timeout nach 180s')
+    expect(tooltip).toContain('Quelle: heartbeat_timeout')
+    expect(tooltip).toContain('Grund: heartbeat_timeout')
+  })
+})
+
 // =============================================================================
 // STATUS TRANSITIONS WITH FAKE TIMERS
 // =============================================================================
@@ -247,15 +298,15 @@ describe('getESPStatus - Status Transitions (FakeTimers)', () => {
     vi.useRealTimers()
   })
 
-  it('Online → Stale after 91 seconds without heartbeat', () => {
+  it('Online → Stale after 121 seconds without heartbeat', () => {
     const heartbeatTime = new Date(BASE_TIME).toISOString()
     const device = makeDevice({ last_seen: heartbeatTime })
 
     // Initially online
     expect(getESPStatus(device)).toBe('online')
 
-    // Advance 91 seconds — crosses HEARTBEAT_STALE_MS (90_000)
-    vi.advanceTimersByTime(91_000)
+    // Advance 121 seconds — crosses HEARTBEAT_STALE_MS (120_000)
+    vi.advanceTimersByTime(121_000)
     expect(getESPStatus(device)).toBe('stale')
   })
 
@@ -266,11 +317,11 @@ describe('getESPStatus - Status Transitions (FakeTimers)', () => {
     expect(getESPStatus(device)).toBe('online')
 
     // Advance to stale range
-    vi.advanceTimersByTime(91_000)
+    vi.advanceTimersByTime(121_000)
     expect(getESPStatus(device)).toBe('stale')
 
     // Advance to offline range (total: 211s)
-    vi.advanceTimersByTime(120_000) // 91 + 120 = 211s total
+    vi.advanceTimersByTime(90_000) // 121 + 90 = 211s total
     expect(getESPStatus(device)).toBe('offline')
   })
 
@@ -286,21 +337,19 @@ describe('getESPStatus - Status Transitions (FakeTimers)', () => {
     expect(getESPStatus(device)).toBe('online')
   })
 
-  it('stays Online when heartbeat is within 89 seconds', () => {
+  it('stays Online when heartbeat is within 119 seconds', () => {
     const heartbeatTime = new Date(BASE_TIME).toISOString()
     const device = makeDevice({ last_seen: heartbeatTime })
 
-    vi.advanceTimersByTime(89_000)
+    vi.advanceTimersByTime(119_000)
     expect(getESPStatus(device)).toBe('online')
   })
 
-  it('boundary: exactly 90_000ms = stale (threshold is >=)', () => {
-    // Set last_seen to exactly BASE_TIME, then advance 90s
+  it('boundary: exactly 120_000ms = stale (threshold is >=)', () => {
     const heartbeatTime = new Date(BASE_TIME).toISOString()
     const device = makeDevice({ last_seen: heartbeatTime })
 
-    vi.advanceTimersByTime(90_000)
-    // getESPStatus: age < HEARTBEAT_STALE_MS returns 'online', so age=90_000 is NOT < 90_000 → stale
+    vi.advanceTimersByTime(120_000)
     expect(getESPStatus(device)).toBe('stale')
   })
 
@@ -333,11 +382,11 @@ describe('getESPStatus - Status Transitions (FakeTimers)', () => {
     vi.advanceTimersByTime(60_000)
     expect(getESPStatus(device)).toBe('online')
 
-    // 29 more seconds (89s since last heartbeat) — still online
-    vi.advanceTimersByTime(29_000)
+    // 59 more seconds (119s since last heartbeat) — still online
+    vi.advanceTimersByTime(59_000)
     expect(getESPStatus(device)).toBe('online')
 
-    // 1 more second (90s since last heartbeat = boundary) → stale
+    // 1 more second (120s since last heartbeat = boundary) → stale
     vi.advanceTimersByTime(1_000)
     expect(getESPStatus(device)).toBe('stale')
   })

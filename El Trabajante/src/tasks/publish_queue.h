@@ -17,22 +17,15 @@
 
 // Memory guard (ESP32 without PSRAM):
 // 15 slots consumed ~33 KB heap and repeatedly prevented CommTask creation on real devices.
-// Base sizing (AUT-481 P3): 10 slots via publish_queue_constants.h (+2 headroom for 4-msg actuator
-// toggle bursts without hitting shed watermark). S3 N8R8 overrides below for larger PSRAM budget.
+// Base sizing (AUT-481 P3): 10 slots (DEV/WROOM) / 16 slots (S3 N8R8) via publish_queue_constants.h.
+// PUBLISH_QUEUE_SIZE and PUBLISH_QUEUE_SHED_WATERMARK are defined there (board-aware).
 // (AUT-344: older docs may still say 15 — single queue `g_publish_queue`, depth is PUBLISH_QUEUE_SIZE.)
-//
-// S3 N8R8 (ESP32_S3_DEVKIT_MODE) override: 16 slots × ~2180 B ≈ 35 KB DRAM (~9% free heap after init).
-// Dev/WROOM uses publish_queue_constants.h defaults (SIZE=10, SHED=5).
 #ifdef ESP32_S3_DEVKIT_MODE
-// S3 N8R8: larger PSRAM budget allows 16 slots and 2048 B payloads (AUT-495).
-static const uint8_t  PUBLISH_QUEUE_SIZE           = 16;
-static const uint16_t PUBLISH_PAYLOAD_MAX_LEN      = 2048;
-static const uint8_t  PUBLISH_QUEUE_SHED_WATERMARK = 8;   // 50% of 16 slots
+// S3 N8R8: larger PSRAM budget allows 2048 B payloads (AUT-495).
+static const uint16_t PUBLISH_PAYLOAD_MAX_LEN = 2048;
 #else
-// Dev/WROOM: publish_queue_constants.h defines SIZE=10 / SHED=5 (AUT-481 P3).
-// Re-declared here for S3 vs non-S3 symmetry; values must match publish_queue_constants.h.
+// Dev/WROOM: 1536 B payload max.
 static const uint16_t PUBLISH_PAYLOAD_MAX_LEN = 1536;
-// PUBLISH_QUEUE_SIZE and PUBLISH_QUEUE_SHED_WATERMARK come from publish_queue_constants.h
 #endif
 static const uint16_t PUBLISH_TOPIC_MAX_LEN   = 128;
 // AUT-134: Heartbeat payload can exceed 1KB during reconnect/config bursts.

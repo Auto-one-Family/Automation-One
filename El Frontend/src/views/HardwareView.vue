@@ -31,12 +31,13 @@ import { shouldFallbackToHardwareOverview } from '@/utils/hardwareRouteGuard'
 
 const logger = createLogger('HardwareView')
 
-// Tab Bar + SlideOver + Config Panels
+// Tab Bar + Config Modal
 import ViewTabBar from '@/components/common/ViewTabBar.vue'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
-import SensorConfigPanel from '@/components/esp/SensorConfigPanel.vue'
-import ActuatorConfigPanel from '@/components/esp/ActuatorConfigPanel.vue'
 import ESPConfigPanel from '@/components/esp/ESPConfigPanel.vue'
+import ConfigWizardModal from '@/components/esp/ConfigWizardModal.vue'
+import PendingConfigBanner from '@/components/esp/PendingConfigBanner.vue'
+import { useActuatorStore } from '@/shared/stores/actuator.store'
 
 // Components
 import CreateMockEspModal from '@/components/modals/CreateMockEspModal.vue'
@@ -53,6 +54,7 @@ import DeviceMiniCard from '@/components/dashboard/DeviceMiniCard.vue'
 import DeviceDetailView from '@/components/esp/DeviceDetailView.vue'
 import AccordionSection from '@/shared/design/primitives/AccordionSection.vue'
 import InlineDashboardPanel from '@/components/dashboard/InlineDashboardPanel.vue'
+import BaseSpinner from '@/shared/design/primitives/BaseSpinner.vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import { useDragStateStore } from '@/shared/stores/dragState.store'
 import { Inbox } from 'lucide-vue-next'
@@ -67,7 +69,18 @@ const { groupDevicesByZone, handleDeviceDrop, handleRemoveFromZone, generateZone
 const { register } = useKeyboardShortcuts()
 const dragStore = useDragStateStore()
 const zoneStore = useZoneStore()
+const actuatorStore = useActuatorStore()
 const { success: showSuccess, error: showError, info: showInfo } = useToast()
+
+const detailEspId = computed(() => (route.params.espId as string) || null)
+const detailPendingConfigOrders = computed(() => {
+  const espId = detailEspId.value
+  if (!espId) return []
+  return actuatorStore.pendingConfigOrders.filter((intent) => {
+    const sid = intent.subjectId
+    return sid === espId || sid.startsWith(`rest:${espId}:`) || sid.includes(espId)
+  })
+})
 
 // =============================================================================
 // Navigation State (route-param based, 2 levels)
@@ -87,6 +100,10 @@ useSwipeNavigation(zoomContainerRef, {
     if (currentLevel.value > 1) zoomOut()
   },
 })
+
+const centeredEspId = ref<string | null>(null)
+const centeredOriginRect = ref<DOMRect | null>(null)
+const l2ContainerRef = ref<HTMLElement | null>(null)
 
 // =============================================================================
 // Accordion State — per-zone expand/collapse with localStorage persistence (D3)
@@ -227,12 +244,17 @@ watch(
   { immediate: true }
 )
 
-// SlideOver states for config panels
-const showSensorConfig = ref(false)
-const showActuatorConfig = ref(false)
+// Config Wizard Modal state (unified sensor + actuator)
+const isWizardOpen = ref(false)
+const wizardPayload = ref<{
+  espId: string
+  gpio: number
+  sensorType?: string
+  unit?: string
+  configId?: string
+  actuatorType?: string
+} | null>(null)
 const showEspConfig = ref(false)
-const configSensorData = ref<{ espId: string; gpio: number; sensorType: string; unit: string; configId?: string } | null>(null)
-const configActuatorData = ref<{ espId: string; gpio: number; actuatorType: string } | null>(null)
 const configEspDevice = ref<ESPDevice | null>(null)
 
 // =============================================================================
@@ -682,8 +704,28 @@ function zoomOut() {
 // =============================================================================
 
 function onDeviceCardClick(payload: { deviceId: string; originRect: DOMRect }) {
+  centeredEspId.value = payload.deviceId
+  centeredOriginRect.value = payload.originRect
   zoomToDevice(payload.deviceId)
 }
+
+watch(currentLevel, async (level) => {
+  if (level === 2 && centeredOriginRect.value && l2ContainerRef.value) {
+    await nextTick()
+    const last = l2ContainerRef.value.getBoundingClientRect()
+    const orig = centeredOriginRect.value
+    const dx = orig.left + orig.width / 2 - (last.left + last.width / 2)
+    const dy = orig.top + orig.height / 2 - (last.top + last.height / 2)
+    const scale = Math.min(orig.width / last.width, 0.15)
+    l2ContainerRef.value.style.setProperty('--flip-start-x', `${dx}px`)
+    l2ContainerRef.value.style.setProperty('--flip-start-y', `${dy}px`)
+    l2ContainerRef.value.style.setProperty('--flip-start-scale', `${scale}`)
+  }
+  if (level === 1) {
+    centeredEspId.value = null
+    centeredOriginRect.value = null
+  }
+})
 
 function onDeviceMonitorNav(device: ESPDevice) {
   const zoneId = device.zone_id
@@ -802,28 +844,19 @@ function handleSettingsClose() {
   }, 200)
 }
 
-function closeSensorConfigPanel() {
+function closeWizard() {
   endAnyDragIfActive()
-  showSensorConfig.value = false
-}
-
-function closeActuatorConfigPanel() {
-  endAnyDragIfActive()
-  showActuatorConfig.value = false
+  isWizardOpen.value = false
 }
 
 /**
- * AUT-251: User clicked "im Geraet aendern" inside SensorConfigPanel/ActuatorConfigPanel.
- * Closes the config panel and opens the ESP-Settings-Sheet for the device, where the
- * Zone is actually managed (Zone gehoert zum Geraet, nicht zum einzelnen Sensor/Aktor).
+ * AUT-251: User clicked "im Geraet aendern" inside ConfigWizardModal.
+ * Closes the wizard and opens the ESP-Settings-Sheet for the device.
  */
 function handleOpenEspSettingsFromConfig(payload: { espId: string }) {
   const device = espStore.devices.find(d => espStore.getDeviceId(d) === payload.espId)
   if (!device) return
-  // Close the inner config panels first (avoid stacked SlideOvers competing)
-  showSensorConfig.value = false
-  showActuatorConfig.value = false
-  // Open ESP-Settings-Sheet
+  isWizardOpen.value = false
   if (settingsCloseTimer) { clearTimeout(settingsCloseTimer); settingsCloseTimer = null }
   settingsDevice.value = device
   isSettingsOpen.value = true
@@ -894,14 +927,14 @@ function handleSensorClickFromDetail(payload: { espId: string; gpio: number; sen
   if (!sensor) sensor = sensors.find((s: any) => s.gpio === payload.gpio)
   if (!sensor) return
 
-  configSensorData.value = {
+  wizardPayload.value = {
     espId: payload.espId,
     gpio: payload.gpio,
     sensorType: sensor.sensor_type || 'unknown',
     unit: sensor.unit || '',
     configId: payload.configId || sensor.config_id,
   }
-  showSensorConfig.value = true
+  isWizardOpen.value = true
 }
 
 function handleActuatorClickFromDetail(payload: { espId: string; gpio: number }) {
@@ -910,18 +943,18 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
   const actuator = actuators.find((a: any) => a.gpio === payload.gpio)
   if (!actuator) return
 
-  configActuatorData.value = {
+  wizardPayload.value = {
     espId: payload.espId,
     gpio: payload.gpio,
     actuatorType: actuator.actuator_type || 'relay',
   }
-  showActuatorConfig.value = true
+  isWizardOpen.value = true
 }
 
 </script>
 
 <template>
-  <div :class="['hardware-view', currentLevel === 2 ? 'hardware-view--detail' : '']">
+  <div class="hardware-view">
     <!-- View Tab Bar (Übersicht / Monitor / Editor) -->
     <ViewTabBar />
 
@@ -955,14 +988,11 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
 
     <!-- Two-Level Hardware View -->
     <div v-else class="hardware-content" :class="{ 'hardware-content--has-side': dashStore.hardwarePanels.length > 0 }">
-      <div
-        class="hardware-main-layout"
-        :class="{ 'hardware-main-layout--detail': currentLevel === 2 }"
-      >
+      <div class="hardware-main-layout">
         <div ref="zoomContainerRef" class="zoom-container">
 
-          <!-- LEVEL 1: Zone Accordion Overview -->
-          <div v-if="currentLevel === 1" class="zoom-level--active">
+          <!-- LEVEL 1: Zone Accordion Overview (always visible, dimmed when overlay is open) -->
+          <div class="zoom-level--l1" :class="{ 'zoom-level--l1--dimmed': currentLevel === 2 }">
             <div class="zone-accordion-list">
               <div v-if="zoneGroups.length === 0" class="no-zones-hint">
                 <p>Alle Geräte sind noch keiner Zone zugewiesen.</p>
@@ -1165,8 +1195,45 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
             </button>
           </div>
 
-          <!-- LEVEL 2: Device Detail (Orbital Layout) -->
-          <div v-else-if="currentLevel === 2" class="zoom-level--active">
+        </div>
+
+      </div>
+
+      <!-- Hardware Side-Panel (target.view='hardware', placement='side-panel') -->
+      <aside v-if="dashStore.hardwarePanels.length > 0" class="hardware-side-panel">
+        <InlineDashboardPanel
+          v-for="panel in dashStore.hardwarePanels"
+          :key="panel.id"
+          :layoutId="panel.id"
+          mode="side-panel"
+        />
+      </aside>
+    </div>
+
+    <!-- LEVEL 2: Orbital Overlay — opens above L1 (Teleport to body, S4/S5) -->
+    <Teleport to="body">
+      <Transition name="orbital-overlay">
+        <div
+          v-if="currentLevel === 2"
+          class="orbital-overlay"
+          role="dialog"
+          aria-modal="true"
+          @click.self="zoomOut"
+        >
+          <div ref="l2ContainerRef" class="orbital-overlay__panel zoom-level--l2">
+            <div
+              v-if="detailPendingConfigOrders.length > 0"
+              class="hardware-pending-config-stack"
+              role="status"
+              aria-live="polite"
+            >
+              <PendingConfigBanner
+                v-for="order in detailPendingConfigOrders"
+                :key="order.intentId"
+                :subject-id="order.subjectId"
+                :correlation-id="order.correlationId"
+              />
+            </div>
             <DeviceDetailView
               v-if="selectedDevice"
               :device="selectedDevice"
@@ -1180,24 +1247,23 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
               @sensor-click="handleSensorClickFromDetail"
               @actuator-click="handleActuatorClickFromDetail"
             />
+            <div v-else class="orbital-device-not-found">
+              <BaseSpinner size="lg" />
+            </div>
           </div>
-
         </div>
+      </Transition>
+    </Teleport>
 
-        <!-- Component Sidebar (Level 2 / Orbital only) -->
-        <ComponentSidebar v-show="currentLevel === 2" />
-      </div>
-
-      <!-- Hardware Side-Panel (target.view='hardware', placement='side-panel') -->
-      <aside v-if="dashStore.hardwarePanels.length > 0" class="hardware-side-panel">
-        <InlineDashboardPanel
-          v-for="panel in dashStore.hardwarePanels"
-          :key="panel.id"
-          :layoutId="panel.id"
-          mode="side-panel"
+    <!-- Component Palette: Top-Drawer in Orbital Mode (S7, above overlay) -->
+    <Teleport to="body">
+      <Transition name="palette-slide">
+        <ComponentSidebar
+          v-show="currentLevel === 2"
+          :orbital-mode="true"
         />
-      </aside>
-    </div>
+      </Transition>
+    </Teleport>
 
     <!-- Create Mock ESP Modal -->
     <CreateMockEspModal v-model="dashStore.showCreateMock" @created="onMockEspCreated" />
@@ -1241,47 +1307,22 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
       />
     </SlideOver>
 
-    <!-- Sensor Config SlideOver (elevation=high wenn über Settings-Sheet) -->
-    <SlideOver
-      :open="showSensorConfig"
-      :title="configSensorData?.sensorType || 'Sensor'"
-      width="lg"
-      elevation="high"
-      @close="closeSensorConfigPanel"
-    >
-      <SensorConfigPanel
-        v-if="configSensorData"
-        :esp-id="configSensorData.espId"
-        :gpio="configSensorData.gpio"
-        :sensor-type="configSensorData.sensorType"
-        :unit="configSensorData.unit"
-        :config-id="configSensorData.configId"
-        :show-metadata="false"
-        @deleted="closeSensorConfigPanel(); espStore.fetchDevice(configSensorData!.espId)"
-        @saved="closeSensorConfigPanel(); espStore.fetchDevice(configSensorData!.espId)"
-        @open-esp-settings="handleOpenEspSettingsFromConfig"
-      />
-    </SlideOver>
-
-    <!-- Actuator Config SlideOver (elevation=high wenn über Settings-Sheet) -->
-    <SlideOver
-      :open="showActuatorConfig"
-      :title="configActuatorData?.actuatorType || 'Aktor'"
-      width="lg"
-      elevation="high"
-      @close="closeActuatorConfigPanel"
-    >
-      <ActuatorConfigPanel
-        v-if="configActuatorData"
-        :esp-id="configActuatorData.espId"
-        :gpio="configActuatorData.gpio"
-        :actuator-type="configActuatorData.actuatorType"
-        :show-metadata="false"
-        @deleted="closeActuatorConfigPanel(); espStore.fetchDevice(configActuatorData!.espId)"
-        @saved="closeActuatorConfigPanel(); espStore.fetchDevice(configActuatorData!.espId)"
-        @open-esp-settings="handleOpenEspSettingsFromConfig"
-      />
-    </SlideOver>
+    <!-- Config Wizard Modal (Sensor + Actuator unified, S8) -->
+    <ConfigWizardModal
+      v-if="wizardPayload"
+      :open="isWizardOpen"
+      :esp-id="wizardPayload.espId"
+      :gpio="wizardPayload.gpio"
+      :sensor-type="wizardPayload.sensorType"
+      :unit="wizardPayload.unit"
+      :config-id="wizardPayload.configId"
+      :actuator-type="wizardPayload.actuatorType"
+      @update:open="isWizardOpen = $event"
+      @close="closeWizard"
+      @deleted="closeWizard(); espStore.fetchDevice(wizardPayload!.espId)"
+      @saved="espStore.fetchDevice(wizardPayload!.espId)"
+      @open-esp-settings="handleOpenEspSettingsFromConfig"
+    />
 
     <!-- ESP Config SlideOver -->
     <SlideOver
@@ -1311,24 +1352,6 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
   padding-bottom: 120px;
   position: relative;
   background-color: var(--color-bg-level-1);
-  transition: background-color var(--transition-slow);
-}
-
-.hardware-view--detail {
-  background-color: var(--color-bg-level-3);
-  gap: var(--space-2);
-}
-
-/* Pull the detail header area closer under tabs. */
-.hardware-view--detail :deep(.device-detail-view) {
-  padding-top: var(--space-2);
-  width: 100%;
-  max-width: none;
-}
-
-/* Align component sidebar lower to avoid top misalignment. */
-.hardware-view--detail :deep(.component-sidebar) {
-  margin-top: var(--space-3);
 }
 
 /* ═══ Hardware Content with optional Side-Panel (Block 7d) ═══ */
@@ -1369,25 +1392,6 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
   display: flex;
   gap: var(--space-3);
   min-height: 400px;
-}
-
-.hardware-main-layout--detail {
-  align-items: flex-start;
-}
-
-.hardware-main-layout--detail .zoom-container {
-  display: flex;
-  justify-content: stretch;
-}
-
-.hardware-main-layout--detail .zoom-level--active {
-  width: 100%;
-}
-
-@media (min-width: 1440px) {
-  .hardware-main-layout--detail {
-    gap: var(--space-4);
-  }
 }
 
 .zoom-container {
@@ -1831,8 +1835,110 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
 @media (max-width: 640px) {
   .hardware-view { padding-bottom: 80px; }
   .zone-accordion-list { gap: var(--space-3); }
-  /* Keep detail view sidebar beside content even under browser zoom. */
-  .hardware-main-layout:not(.hardware-main-layout--detail) { flex-direction: column; }
+  .hardware-main-layout { flex-direction: column; }
   .zone-create-form { flex-wrap: wrap; }
+}
+
+/* ─── Level 1: always visible, dims behind overlay ─── */
+.zoom-level--l1 {
+  display: block;
+  transition: opacity 0.3s ease, filter 0.3s ease;
+}
+
+.zoom-level--l1--dimmed {
+  opacity: 0.25;
+  filter: blur(3px);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ─── Orbital Overlay (L2) — fixed over L1 ─── */
+.orbital-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal-backdrop);
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  overflow-y: auto;
+}
+
+.orbital-overlay__panel {
+  position: relative;
+  width: 100%;
+  max-width: min(960px, 100%);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border-l2);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elevation-floating), 0 0 80px rgba(96, 165, 250, 0.08);
+  overflow-y: auto;
+  max-height: 92vh;
+}
+
+/* FLIP Fly-in animation on the panel */
+.zoom-level--l2 {
+  animation: orbital-fly-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes orbital-fly-in {
+  from {
+    opacity: 0;
+    transform: translate(var(--flip-start-x, 0px), var(--flip-start-y, 0px)) scale(var(--flip-start-scale, 0.85));
+  }
+  to {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+}
+
+/* Backdrop fade transition */
+.orbital-overlay-enter-active {
+  transition: opacity 0.25s ease;
+}
+.orbital-overlay-leave-active {
+  transition: opacity 0.2s ease;
+}
+.orbital-overlay-enter-from,
+.orbital-overlay-leave-to {
+  opacity: 0;
+}
+
+</style>
+
+<style>
+/* palette-slide: Component Palette top-drawer enter/leave animation (S7) */
+.palette-slide-enter-active {
+  animation: palette-slide-down 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.palette-slide-leave-active {
+  animation: palette-slide-up 0.3s ease-in both;
+}
+@keyframes palette-slide-down {
+  from { opacity: 0; transform: translateX(-50%) translateY(-120%); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+@keyframes palette-slide-up {
+  from { opacity: 1; transform: translateX(-50%) translateY(0); }
+  to   { opacity: 0; transform: translateX(-50%) translateY(-120%); }
+}
+
+.orbital-device-not-found {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+}
+
+.hardware-pending-config-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  max-width: min(100%, 720px);
+  margin-inline: auto;
 }
 </style>

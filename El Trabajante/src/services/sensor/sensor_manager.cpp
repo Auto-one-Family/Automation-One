@@ -1,5 +1,6 @@
 #include "sensor_manager.h"
 #include "../../tasks/rtos_globals.h"
+#include "../../tasks/safety_task.h"
 #include "../communication/mqtt_client.h"
 #include "../config/config_manager.h"
 #include "../../drivers/gpio_manager.h"
@@ -30,6 +31,27 @@ static const unsigned long MHZ19_WARMUP_MS = 180000;
 static bool hasValidUartPinConfig(const SensorConfig& config) {
     return config.uart_rx_pin != 255 && config.uart_tx_pin != 255 &&
            config.uart_rx_pin != 0 && config.uart_tx_pin != 0;
+}
+
+static void mergeUartPinsFromPrevious(SensorConfig& incoming, const SensorConfig& previous) {
+    if (hasValidUartPinConfig(incoming)) {
+        return;
+    }
+    if (!hasValidUartPinConfig(previous)) {
+        return;
+    }
+    incoming.uart_rx_pin = previous.uart_rx_pin;
+    incoming.uart_tx_pin = previous.uart_tx_pin;
+    incoming.uart_baud = previous.uart_baud;
+    if (incoming.interface_type.length() == 0) {
+        incoming.interface_type = previous.interface_type;
+    }
+}
+
+static bool uartHardwareConfigChanged(const SensorConfig& a, const SensorConfig& b) {
+    return a.uart_rx_pin != b.uart_rx_pin ||
+           a.uart_tx_pin != b.uart_tx_pin ||
+           a.uart_baud != b.uart_baud;
 }
 
 static bool isUartSensorConfig(const SensorConfig& config, const SensorCapability* capability) {
@@ -174,6 +196,23 @@ float computePopulationStdDev(const uint32_t* values, uint8_t count) {
         variance_sum += diff * diff;
     }
     return sqrtf(variance_sum / static_cast<float>(count));
+}
+
+static constexpr uint16_t kSafetyCooperativeDelayStepMs = 10;
+
+void delayWithSafetyCooperation(uint16_t delay_ms) {
+    if (delay_ms == 0) {
+        return;
+    }
+    uint32_t remaining = delay_ms;
+    while (remaining > 0) {
+        const uint16_t chunk_ms = remaining > kSafetyCooperativeDelayStepMs
+                                      ? kSafetyCooperativeDelayStepMs
+                                      : static_cast<uint16_t>(remaining);
+        vTaskDelay(pdMS_TO_TICKS(chunk_ms));
+        remaining -= chunk_ms;
+        runSafetyCooperativeSlice();
+    }
 }
 }  // namespace
 
@@ -533,39 +572,51 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
                        ": Circuit Breaker reset by config push");
         }
 
+        SensorConfig merged = config;
+        mergeUartPinsFromPrevious(merged, *existing);
+        const unsigned long prev_warmup_ms = existing->uart_configured_at_ms;
+        const bool uart_hw_changed = isUartSensorConfig(merged, capability) &&
+                                     uartHardwareConfigChanged(merged, *existing);
+
         // Update configuration
-        *existing = config;
+        *existing = merged;
         existing->active = true;
         // F7: Explicit CB reset (config push = fresh start)
         existing->cb_state = SensorCBState::CLOSED;
         existing->consecutive_failures = 0;
 
-        if (isUartSensorConfig(config, capability)) {
-            if (!hasValidUartPinConfig(config)) {
+        if (isUartSensorConfig(merged, capability)) {
+            if (!hasValidUartPinConfig(*existing)) {
                 LOG_E(TAG, "Sensor Manager: UART sensor missing uart_rx_pin/uart_tx_pin");
                 errorTracker.trackError(ERROR_UART_INIT_FAILED, ERROR_SEVERITY_ERROR,
                                        "UART CO2 pins missing on update");
                 xSemaphoreGive(g_sensor_mutex);
                 return false;
             }
-            if (!mhz19UartReader.begin(config.uart_rx_pin, config.uart_tx_pin, config.uart_baud)) {
+            if (!mhz19UartReader.begin(existing->uart_rx_pin, existing->uart_tx_pin,
+                                       existing->uart_baud)) {
                 errorTracker.trackError(ERROR_UART_INIT_FAILED, ERROR_SEVERITY_ERROR,
                                        "UART CO2 begin failed on update");
                 xSemaphoreGive(g_sensor_mutex);
                 return false;
             }
-            existing->uart_configured_at_ms = millis();
+            // Only restart warmup when UART hardware mapping actually changed
+            if (uart_hw_changed || prev_warmup_ms == 0) {
+                existing->uart_configured_at_ms = millis();
+            } else {
+                existing->uart_configured_at_ms = prev_warmup_ms;
+            }
         }
 
         // Phase 7: Persist to NVS immediately
-        if (!configManager.saveSensorConfig(config)) {
+        if (!configManager.saveSensorConfig(*existing)) {
             LOG_E(TAG, "Sensor Manager: Failed to persist sensor config to NVS");
         } else {
             LOG_I(TAG, "  ✅ Configuration persisted to NVS");
         }
 
-        LOG_I(TAG, "Sensor Manager: Updated sensor on GPIO " + String(config.gpio) +
-                 " (" + config.sensor_type + ")");
+        LOG_I(TAG, "Sensor Manager: Updated sensor on GPIO " + String(existing->gpio) +
+                 " (" + existing->sensor_type + ")");
         xSemaphoreGive(g_sensor_mutex);
         return true;
     }
@@ -1068,7 +1119,7 @@ bool SensorManager::measureAnalogProbeMedian(SensorConfig* config, SensorReading
 
     for (uint8_t i = 0; i < bounded_count; i++) {
         if (i > 0 && sample_delay_ms > 0) {
-            vTaskDelay(pdMS_TO_TICKS(sample_delay_ms));
+            delayWithSafetyCooperation(sample_delay_ms);
         }
         uint32_t raw = readRawAnalog(config->gpio);
         samples[i].raw_value = raw;
@@ -1171,12 +1222,10 @@ bool SensorManager::performMeasurementForConfig(SensorConfig* config, SensorRead
                          "s remaining)");
                 return false;
             }
-            if (!mhz19UartReader.isInitialized()) {
-                if (!mhz19UartReader.begin(config->uart_rx_pin, config->uart_tx_pin, config->uart_baud)) {
-                    reading_out.valid = false;
-                    reading_out.error_message = "UART CO2 not initialized";
-                    return false;
-                }
+            if (!mhz19UartReader.begin(config->uart_rx_pin, config->uart_tx_pin, config->uart_baud)) {
+                reading_out.valid = false;
+                reading_out.error_message = "UART CO2 not initialized";
+                return false;
             }
             uint16_t ppm = 0;
             if (!mhz19UartReader.readRawPpm(ppm)) {
@@ -1684,6 +1733,7 @@ void SensorManager::performAllMeasurements() {
         sensors_[i].last_reading = now;
 
         bool measurement_ok = false;
+        bool skip_cb_for_warmup = false;
 
         if (capability && capability->is_multi_value) {
             // I2C dedup: Skip if this exact I2C address was already measured this cycle.
@@ -1731,6 +1781,9 @@ void SensorManager::performAllMeasurements() {
                 measurement_ok = true;
             } else {
                 LOG_D(TAG, "SensorManager: SINGLE-VALUE measurement FAILED");
+                if (reading.quality == "warming_up") {
+                    skip_cb_for_warmup = true;
+                }
             }
         }
 
@@ -1742,7 +1795,7 @@ void SensorManager::performAllMeasurements() {
                 sensors_[i].cb_state = SensorCBState::CLOSED;
             }
             sensors_[i].consecutive_failures = 0;
-        } else {
+        } else if (!skip_cb_for_warmup) {
             sensors_[i].consecutive_failures++;
 
             if (sensors_[i].cb_state == SensorCBState::HALF_OPEN) {
@@ -1764,10 +1817,9 @@ void SensorManager::performAllMeasurements() {
             }
         }
 
-        // Feed watchdog between sensor measurements to prevent WDT timeout
-        // during I2C error cascades (Error 1013→1016→1018 loop, see R20-P4)
+        // Cooperative safety slice between sensors (emergency + actuator queue).
         feedWatchdog("SENSOR_LOOP");
-        yield();
+        runSafetyCooperativeSlice();
     }
 
     // Update global timestamp for compatibility

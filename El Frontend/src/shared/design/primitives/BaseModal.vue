@@ -27,6 +27,8 @@ interface Props {
   closeOnOverlay?: boolean
   /** Whether pressing Escape closes the modal */
   closeOnEscape?: boolean
+  /** Z-index level: 'dialog' (default, 65) or 'prompt' (78, for confirm dialogs above other modals) */
+  level?: 'dialog' | 'prompt'
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -34,6 +36,7 @@ const props = withDefaults(defineProps<Props>(), {
   showClose: true,
   closeOnOverlay: true,
   closeOnEscape: true,
+  level: 'dialog',
 })
 
 const emit = defineEmits<{
@@ -85,7 +88,7 @@ onUnmounted(() => {
       <div
         v-if="open"
         class="fixed inset-0 flex items-center justify-center p-2 sm:p-4"
-        style="z-index: var(--z-dialog)"
+        :style="{ zIndex: `var(--z-${level})` }"
         role="dialog"
         aria-modal="true"
         :aria-labelledby="title"

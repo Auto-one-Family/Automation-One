@@ -623,7 +623,7 @@ public:
 extern Mhz19UartReader& mhz19UartReader;
 ```
 
-**Verwendung:** `SensorManager::configureSensor()` bei `sensor_registry` `is_uart=true` (`co2`, `mhz19_co2`). Pins aus MQTT/NVS (`uart_rx_pin`, `uart_tx_pin`, `uart_baud`). Warmup ~180s nach Configure. Error-Codes 1033-1036.
+**Verwendung:** `SensorManager::configureSensor()` bei `sensor_registry` `is_uart=true` (`co2`, `mhz19_co2`). Pins aus MQTT/NVS (`uart_rx_pin`, `uart_tx_pin`, `uart_baud`). Warmup ~180s nach Configure. Error-Codes 1033-1036. **Löschen:** Tombstone `active:false` vor `validateSensorConfig()`; CO₂-Fallback GPIO 17/18 (`main.cpp`, AUT-527).
 
 ---
 

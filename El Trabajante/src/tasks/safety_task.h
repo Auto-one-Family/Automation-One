@@ -16,3 +16,7 @@ static const uint32_t NOTIFY_SUBZONE_SAFE      = 0x04;  // Subzone safe-mode cha
 
 bool createSafetyTask();
 void safetyTaskFunction(void* param);
+
+// Non-blocking safety path: notifications, actuator queue drain, runtime loops, WDT.
+// Callable from Safety-Task loop and from long sensor reads (e.g. analog median delays).
+void runSafetyCooperativeSlice();

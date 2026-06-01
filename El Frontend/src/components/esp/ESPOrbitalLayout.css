@@ -3,133 +3,134 @@
    Extracted for maintainability. Imported via <style src> in the .vue file.
    ============================================================================= */
 
+/* Registered CSS custom properties — allow getComputedStyle to return resolved pixel values */
+@property --orbit-radius-x {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 364px;
+}
+
+@property --orbit-radius-y {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 210px;
+}
+
 /* =============================================================================
-   NEW: Horizontal 3-Column Layout (Sensors | ESP-Card | Actuators)
-   Replaces orbital/absolute positioning with side-by-side flexbox
+   Radial Orbital Layout (S5)
+   Elliptical orbit: wider than tall.
+   --orbit-radius-x: enforces a minimum of 270px so left/right satellites
+   never overlap the center card (max center-card half-width 180px + sat half 75px + 15px gap = 270px).
+   --orbit-radius-y: 75% of base for a compact vertical footprint.
    ============================================================================= */
 .esp-horizontal-layout {
   position: relative;
-  display: flex;
-  flex-direction: row;
-  align-items: flex-start;
-  justify-content: center;
-  gap: clamp(0.25rem, 1.5vw, 1rem);
-  padding: 0;
-  min-height: auto;
-  width: min(100%, 1220px);
-  max-width: 100%;
+  --orbit-radius: 280px;
+  --orbit-radius-x: max(270px, calc(var(--orbit-radius) * 1.3));
+  /* min 150px: center card can reach ~184px tall (half=92) + sat half ~44 + 14px gap = 150px */
+  --orbit-radius-y: max(150px, calc(var(--orbit-radius) * 0.75));
+  /* 260px = satellite width (150px) + 2×55px breathing room per side */
+  width: min(100%, calc(2 * var(--orbit-radius-x) + 260px));
+  /* 260px = same vertical breathing room */
+  height: calc(2 * var(--orbit-radius-y) + 260px);
   margin-inline: auto;
-  box-sizing: border-box;
+  overflow: visible;
+}
+
+@media (max-width: 768px) {
+  .esp-horizontal-layout {
+    --orbit-radius: 160px;
+    /* rx = max(270px, 160*1.3=208px) = 270px → width 720px
+       ry = 160*0.75 = 120px → height 420px */
+  }
 }
 
 /* =============================================================================
-   Left/Right Columns (Sensors & Actuators)
-   Dynamic sizing - columns shrink to fit content, no fixed min-width
+   Satellite Cards — absolutely positioned around orbital center
    ============================================================================= */
-.esp-horizontal-layout__column {
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-  width: clamp(130px, 16vw, 240px);
-  max-width: 240px;
-  flex-shrink: 0;
+.satellite-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform:
+    translate(-50%, -50%)
+    translate(
+      calc(var(--tx-norm) * var(--orbit-radius-x, 270px)),
+      calc(var(--ty-norm) * var(--orbit-radius-y, 210px))
+    )
+    scale(0);
+  opacity: 0;
+  transition:
+    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.5s ease;
+  z-index: 1;
+  width: 150px;
 }
 
-/* Sensors column: Default = single vertical column */
-.esp-horizontal-layout__column--sensors {
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-  align-items: stretch;
-  width: clamp(130px, 16vw, 240px);
+.satellite-card--visible {
+  opacity: 1;
+  transform:
+    translate(-50%, -50%)
+    translate(
+      calc(var(--tx-norm) * var(--orbit-radius-x, 270px)),
+      calc(var(--ty-norm) * var(--orbit-radius-y, 210px))
+    )
+    scale(1);
 }
 
-/* Sensors column: Empty state - minimal footprint */
-.esp-horizontal-layout__column--sensors.esp-horizontal-layout__column--empty {
-  width: 56px;
+/* =============================================================================
+   Orbital Center (ESP Card)
+   ============================================================================= */
+.esp-orbital-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  width: clamp(240px, 34vw, 360px);
 }
 
-/* Sensors column: Multi-column mode (>5 sensors) = 2 columns side by side */
-.esp-horizontal-layout__column--sensors.esp-horizontal-layout__column--multi-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.375rem;
-  width: clamp(220px, 24vw, 320px);
-  max-width: 100%;
-  align-content: start;
+/* =============================================================================
+   Orbital SVG Overlay (S6): decorative orbit ring + radial connection lines
+   ============================================================================= */
+.esp-orbital-svg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 0;
 }
 
-/* Actuators column */
-.esp-horizontal-layout__column--actuators {
-  align-items: stretch;
-  width: clamp(130px, 16vw, 240px);
+.esp-orbital-svg__ring {
+  fill: none;
+  stroke: var(--color-iridescent-3);
+  stroke-width: 1;
+  stroke-dasharray: 2 6;
+  opacity: 0.35;
+  animation: orbital-ring-march 4s linear infinite;
 }
 
-.esp-horizontal-layout__column--actuators.esp-horizontal-layout__column--empty {
-  width: 56px;
+.esp-orbital-svg__line {
+  stroke: var(--color-iridescent-3);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  opacity: 0;
+  transition: opacity 0.5s ease;
 }
 
-/* Satellite cards in horizontal layout - fill column width */
-.esp-horizontal-layout__satellite {
-  position: relative !important;
-  transform: none !important;
-  left: auto !important;
-  top: auto !important;
-  width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
-}
-
-/* Empty column placeholder */
-.esp-horizontal-layout__empty-column {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 60px;
-  padding: 0.5rem;
-  border: 1px dashed var(--glass-border);
-  border-radius: var(--radius-sm);
+.esp-orbital-svg__line--visible {
   opacity: 0.5;
+  animation: orbital-dash-march 1.5s linear infinite;
 }
 
-.esp-horizontal-layout__empty-label {
-  font-size: 0.625rem;
-  color: var(--color-text-muted);
-  text-align: center;
-  white-space: nowrap;
+@keyframes orbital-ring-march {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -8; }
 }
 
-/* Empty sensor/actuator slot - ghost placeholder */
-.esp-horizontal-layout__empty-slot {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.25rem;
-  padding: 0.75rem 0.5rem;
-  border: 1px dashed rgba(255, 255, 255, 0.08);
-  border-radius: var(--radius-md);
-  color: rgba(255, 255, 255, 0.2);
-  font-size: 0.5625rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  transition: all 0.2s ease;
-  cursor: default;
-}
-
-.esp-horizontal-layout__empty-slot:hover {
-  border-color: rgba(96, 165, 250, 0.2);
-  color: rgba(255, 255, 255, 0.35);
-  background: rgba(96, 165, 250, 0.03);
-}
-
-/* =============================================================================
-   Center Column (ESP Card)
-   ============================================================================= */
-.esp-horizontal-layout__center {
-  flex: 0 1 clamp(280px, 32vw, 520px);
-  min-width: 0;
+@keyframes orbital-dash-march {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -14; }
 }
 
 /* =============================================================================
@@ -221,6 +222,8 @@
 }
 
 .esp-info-compact__title {
+  flex: 1;
+  min-width: 0;
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--color-text-primary);
@@ -228,10 +231,9 @@
   white-space: nowrap;
   overflow: hidden;
   margin: 0;
-  max-width: 140px;
-  /* Fade-out Gradient für lange Namen (statt harter Ellipsis) */
-  mask-image: linear-gradient(to right, black 75%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to right, black 75%, transparent 100%);
+  /* Fade-out nur wenn der Name wirklich abgeschnitten wird */
+  mask-image: linear-gradient(to right, black 85%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, black 85%, transparent 100%);
 }
 
 .esp-info-compact__title--empty {
@@ -248,6 +250,9 @@
   display: flex;
   align-items: center;
   gap: 0.375rem;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
   cursor: pointer;
   padding: 0.125rem 0.25rem;
   margin: -0.125rem -0.25rem;
@@ -281,7 +286,6 @@
 .esp-info-compact__name-input {
   flex: 1;
   min-width: 0;
-  max-width: 120px;
   padding: 0.25rem 0.375rem;
   font-size: 0.8125rem;
   font-weight: 600;
@@ -616,25 +620,7 @@
   }
 }
 
-/* =============================================================================
-   Mid-range Layout (1024px - 1439px): Balanced gaps, tighter container
-   ============================================================================= */
-@media (min-width: 1024px) and (max-width: 1439px) {
-  .esp-horizontal-layout {
-    gap: clamp(0.375rem, 1.2vw, 0.75rem);
-    width: min(100%, 1100px);
-  }
-
-  /*
-   * Ab 6 Sensoren nicht in starres 2-Spalten-Raster zwingen:
-   * Bei mittleren Breiten bleibt die Sensor-Spalte einspaltig stabil,
-   * damit das Orbital-Layout nicht seitlich springt.
-   */
-  .esp-horizontal-layout__column--sensors.esp-horizontal-layout__column--multi-row {
-    grid-template-columns: 1fr;
-    width: clamp(140px, 18vw, 260px);
-  }
-}
+/* Mid-range Layout (1024px - 1439px): width derived from orbit radius via base rule */
 
 /* =============================================================================
    Desktop Layout (1440px+): Full horizontal with more space

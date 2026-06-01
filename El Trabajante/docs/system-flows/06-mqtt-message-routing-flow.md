@@ -1088,6 +1088,8 @@ mqttClient.setCallback([](const String& topic, const String& payload) {
 
 1. **Sensor Config Validation Fails:**
 
+> **Ausnahme (AUT-527):** `active=false` Tombstones werden **vor** `validateSensorConfig()` verarbeitet — UART-Löschungen ohne vollständige Pin-Felder sind gültig. Siehe `04-runtime-sensor-config-flow.md`.
+
 ```cpp
 // File: src/main.cpp (lines 785-791)
 if (!configManager.validateSensorConfig(config)) {

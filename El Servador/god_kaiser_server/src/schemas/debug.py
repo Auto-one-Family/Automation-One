@@ -78,8 +78,8 @@ class MockSensorConfig(BaseModel):
     # =========================================================================
     interface_type: Optional[str] = Field(
         None,
-        pattern=r"^(I2C|ONEWIRE|ANALOG|DIGITAL)$",
-        description="Interface type: I2C, ONEWIRE, ANALOG, DIGITAL (auto-inferred from sensor_type if not provided)",
+        pattern=r"^(I2C|ONEWIRE|ANALOG|DIGITAL|UART)$",
+        description="Interface type: I2C, ONEWIRE, ANALOG, DIGITAL, UART (auto-inferred from sensor_type if not provided)",
     )
     onewire_address: Optional[str] = Field(
         None,

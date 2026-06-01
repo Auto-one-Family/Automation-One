@@ -155,7 +155,15 @@ class NotificationRouter:
                     create_kwargs["fingerprint"],
                 )
                 increment_notification_deduplicated()
-                return None
+                # AUT-561: Track occurrence_count for repeated safety/threshold events
+                if db_notification is not None:
+                    existing_data = db_notification.extra_data or {}
+                    db_notification.extra_data = {
+                        **existing_data,
+                        "occurrence_count": existing_data.get("occurrence_count", 1) + 1,
+                    }
+                    await self.session.commit()
+                return db_notification
         else:
             db_notification = await self.notification_repo.create(**create_kwargs)
 

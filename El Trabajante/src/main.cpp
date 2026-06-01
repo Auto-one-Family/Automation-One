@@ -742,8 +742,12 @@ void onMqttConnectCallback() {
       g_defer_post_reconnect_actuator_deadline_ms.store(deadline, std::memory_order_release);
       g_defer_post_reconnect_actuator_status.store(true, std::memory_order_release);
     }
-    offlineModeManager.onReconnect();  // SAFETY-P4: transition to RECONNECTING state
   }
+  // SAFETY-P4: Always run — no-op when mode is ONLINE on a clean first boot.
+  // Required when the first MQTT_EVENT_CONNECTED succeeds after boot-time transport
+  // failures already moved P4 to DISCONNECTED/OFFLINE_ACTIVE (INC-EA5484): skipping
+  // here left active_handover_epoch_=0 and caused MISSING_ACTIVE_SESSION_EPOCH ACK rejects.
+  offlineModeManager.onReconnect();
   is_first_connect = false;
 
   // Send one bootstrap heartbeat only after heartbeat/ack topic was successfully subscribed.
@@ -4248,6 +4252,27 @@ bool parseAndConfigureSensorWithTracking(const JsonObjectConst& sensor_obj, Conf
   LOG_D(TAG, "Sensor GPIO " + String(config.gpio) + " config: mode=" +
             config.operating_mode + ", interval=" + String(interval_seconds) + "s");
 
+  // Tombstone deletes (active=false) must run before validateSensorConfig().
+  // UART tombstones often omit uart_rx/tx pins; validation would also reject
+  // reserved pins that the delete is meant to release (AUT-527 CO2 GPIO 17/18).
+  if (!config.active) {
+    bool removed = sensorManager.removeSensor(config.gpio, config.onewire_address,
+                                             config.i2c_address);
+    if (!removed && config.sensor_type == "co2") {
+      if (config.gpio != 17) {
+        removed = sensorManager.removeSensor(17, "", 0);
+      }
+      if (!removed && config.gpio != 18) {
+        removed = sensorManager.removeSensor(18, "", 0);
+      }
+    }
+    if (!removed) {
+      LOG_W(TAG, "Sensor removal requested, but no sensor on GPIO " + String(config.gpio));
+    }
+    LOG_I(TAG, "Sensor removed: GPIO " + String(config.gpio));
+    return true;
+  }
+
   if (!configManager.validateSensorConfig(config)) {
     LOG_E(TAG, "Sensor validation failed for GPIO " + String(config.gpio));
     // Check if it's a GPIO conflict using GPIOManager
@@ -4266,16 +4291,6 @@ bool parseAndConfigureSensorWithTracking(const JsonObjectConst& sensor_obj, Conf
       SET_FAILURE_AND_RETURN(config.gpio, ERROR_CONFIG_INVALID, "VALIDATION_FAILED",
                              "Sensor validation failed for GPIO " + String(config.gpio));
     }
-  }
-
-  if (!config.active) {
-    // R20-P2: Address-based removal for multi-sensor GPIOs
-    // removeSensor() handles both RAM removal AND NVS cleanup (via configManager.removeSensorConfig)
-    if (!sensorManager.removeSensor(config.gpio, config.onewire_address, config.i2c_address)) {
-      LOG_W(TAG, "Sensor removal requested, but no sensor on GPIO " + String(config.gpio));
-    }
-    LOG_I(TAG, "Sensor removed: GPIO " + String(config.gpio));
-    return true;
   }
 
   if (!sensorManager.configureSensor(config)) {

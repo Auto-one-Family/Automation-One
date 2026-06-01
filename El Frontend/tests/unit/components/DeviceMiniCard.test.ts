@@ -1,7 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { defineComponent } from 'vue'
 import { mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import DeviceMiniCard from '@/components/dashboard/DeviceMiniCard.vue'
+import { useEspStore } from '@/stores/esp'
 
 vi.mock('@/composables/useESPStatus', () => ({
   getESPStatus: () => 'online',
@@ -37,12 +39,19 @@ const device = {
 }
 
 function mountCard(deviceOverrides: Record<string, unknown> = {}) {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const mergedDevice = { ...device, ...deviceOverrides }
+  const espStore = useEspStore()
+  espStore.devices = [mergedDevice as any]
+
   return mount(DeviceMiniCard, {
     props: {
-      device: { ...device, ...deviceOverrides } as any,
+      device: mergedDevice as any,
       isMock: true,
     },
     global: {
+      plugins: [pinia],
       stubs: {
         ESPCardBase: ESPCardBaseStub,
       },

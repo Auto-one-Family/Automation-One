@@ -1202,7 +1202,7 @@ function handleClick() {
 
 .sensor-card__measure-hint {
   font-size: var(--text-xxs);
-  color: var(--color-warning, #eab308);
+  color: var(--color-warning);
   opacity: 0.8;
   letter-spacing: 0.02em;
 }
@@ -1215,9 +1215,9 @@ function handleClick() {
   font-weight: 500;
   padding: 3px var(--space-2);
   border-radius: var(--radius-sm);
-  border: 1px solid rgba(99, 179, 237, 0.3);
-  background: rgba(99, 179, 237, 0.07);
-  color: var(--color-info, #63b3ed);
+  border: 1px solid var(--color-info-border);
+  background: var(--color-info-bg);
+  color: var(--color-info);
   cursor: pointer;
   white-space: nowrap;
   min-height: 22px;
@@ -1226,8 +1226,8 @@ function handleClick() {
 }
 
 .sensor-card__measure-btn:hover:not(:disabled) {
-  border-color: rgba(99, 179, 237, 0.55);
-  background: rgba(99, 179, 237, 0.14);
+  border-color: var(--color-info-border);
+  background: var(--color-info-bg-hover);
 }
 
 .sensor-card__measure-btn:disabled {

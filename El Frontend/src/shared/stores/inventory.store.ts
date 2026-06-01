@@ -10,6 +10,7 @@ import { defineStore } from 'pinia'
 import { useEspStore } from '@/stores/esp'
 import { useZoneGrouping } from '@/composables/useZoneGrouping'
 import { getSensorUnit, getSensorLabel, getSensorDisplayName } from '@/utils/sensorDefaults'
+import { getActuatorDisplayName } from '@/utils/actuatorDefaults'
 import type { DeviceScope } from '@/types'
 import { getESPStatus } from '@/composables/useESPStatus'
 import { isMaintenanceOverdue, getNextMaintenanceDate, parseDeviceMetadata } from '@/types/device-metadata'
@@ -181,7 +182,7 @@ export const useInventoryStore = defineStore('inventory', () => {
 
       return {
         id: `${a.esp_id}_gpio${a.gpio}`,
-        name: a.name ?? `${a.actuator_type} (GPIO ${a.gpio})`,
+        name: getActuatorDisplayName({ actuator_type: a.actuator_type, name: a.name }),
         type: 'actuator' as const,
         deviceType: a.actuator_type,
         zone: a.zone_name || 'Nicht zugewiesen',

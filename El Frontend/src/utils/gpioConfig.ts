@@ -32,7 +32,7 @@ export interface GpioPin {
   notes?: string
 }
 
-export type HardwareType = 'ESP32_WROOM' | 'XIAO_ESP32_C3'
+export type HardwareType = 'ESP32_WROOM' | 'XIAO_ESP32_C3' | 'ESP32_S3_DEVKITC1'
 
 // =============================================================================
 // ESP32-WROOM GPIO CONFIGURATION
@@ -40,13 +40,6 @@ export type HardwareType = 'ESP32_WROOM' | 'XIAO_ESP32_C3'
 
 const ESP32_WROOM_PINS: GpioPin[] = [
   // === RECOMMENDED (Safe, versatile pins) ===
-  {
-    gpio: 13,
-    category: 'recommended',
-    label: 'GPIO 13',
-    features: ['ADC', 'PWM', 'Touch'],
-    recommendedFor: 'both',
-  },
   {
     gpio: 14,
     category: 'recommended',
@@ -202,14 +195,6 @@ const ESP32_WROOM_PINS: GpioPin[] = [
     warning: 'Verbunden mit Onboard-LED bei vielen Boards',
   },
   {
-    gpio: 12,
-    category: 'caution',
-    label: 'GPIO 12 (Strapping)',
-    features: ['ADC', 'PWM', 'Touch'],
-    recommendedFor: 'both',
-    warning: 'Boot schlägt fehl wenn HIGH beim Start',
-  },
-  {
     gpio: 15,
     category: 'caution',
     label: 'GPIO 15 (Strapping)',
@@ -226,6 +211,22 @@ const ESP32_WROOM_PINS: GpioPin[] = [
     features: [],
     recommendedFor: 'both',
     warning: 'Steuert Boot-Modus - NICHT VERWENDEN',
+  },
+  {
+    gpio: 12,
+    category: 'avoid',
+    label: 'GPIO 12 (Flash-Strapping RESERVIERT)',
+    features: ['ADC', 'PWM', 'Touch'],
+    recommendedFor: 'both',
+    warning: 'Flash-Spannungs-Strapping — HIGH beim Boot brickt das Board. RESERVIERT.',
+  },
+  {
+    gpio: 13,
+    category: 'avoid',
+    label: 'GPIO 13 (RESERVIERT)',
+    features: ['ADC', 'PWM', 'Touch'],
+    recommendedFor: 'both',
+    warning: 'Systemseitig reserviert (JTAG MTCK) — NICHT VERWENDEN',
   },
   {
     gpio: 1,
@@ -251,6 +252,49 @@ const ESP32_WROOM_PINS: GpioPin[] = [
     recommendedFor: 'both',
     warning: 'Verbunden mit internem Flash - NICHT VERWENDEN',
   },
+]
+
+// =============================================================================
+// ESP32-S3-DevKitC-1 GPIO CONFIGURATION
+// =============================================================================
+
+const ESP32_S3_DEVKITC1_PINS: GpioPin[] = [
+  // === RECOMMENDED (Safe, versatile output pins) ===
+  { gpio: 5,  category: 'recommended', label: 'GPIO 5',  features: ['ADC', 'PWM'], recommendedFor: 'both' },
+  { gpio: 10, category: 'recommended', label: 'GPIO 10', features: ['PWM'],         recommendedFor: 'actuator' },
+  { gpio: 11, category: 'recommended', label: 'GPIO 11', features: ['PWM'],         recommendedFor: 'actuator' },
+  { gpio: 12, category: 'recommended', label: 'GPIO 12', features: ['PWM'],         recommendedFor: 'actuator' },
+  { gpio: 13, category: 'recommended', label: 'GPIO 13', features: ['PWM'],         recommendedFor: 'both' },
+  { gpio: 14, category: 'recommended', label: 'GPIO 14', features: ['PWM'],         recommendedFor: 'both' },
+  { gpio: 15, category: 'recommended', label: 'GPIO 15', features: ['PWM'],         recommendedFor: 'both' },
+  { gpio: 16, category: 'recommended', label: 'GPIO 16', features: ['PWM'],         recommendedFor: 'actuator' },
+  { gpio: 17, category: 'recommended', label: 'GPIO 17', features: ['PWM'],         recommendedFor: 'actuator' },
+  { gpio: 18, category: 'recommended', label: 'GPIO 18', features: ['PWM'],         recommendedFor: 'actuator' },
+  { gpio: 21, category: 'recommended', label: 'GPIO 21', features: ['PWM'],         recommendedFor: 'both' },
+  { gpio: 39, category: 'recommended', label: 'GPIO 39', features: ['PWM'],         recommendedFor: 'both' },
+  { gpio: 40, category: 'recommended', label: 'GPIO 40', features: ['PWM'],         recommendedFor: 'both' },
+  { gpio: 41, category: 'recommended', label: 'GPIO 41', features: ['PWM'],         recommendedFor: 'both' },
+  { gpio: 42, category: 'recommended', label: 'GPIO 42', features: ['PWM'],         recommendedFor: 'both' },
+  { gpio: 47, category: 'recommended', label: 'GPIO 47', features: ['PWM'],         recommendedFor: 'both' },
+
+  // === AVAILABLE (ADC1 + OneWire + I2C) ===
+  { gpio: 1,  category: 'available', label: 'GPIO 1 (ADC1)',      features: ['ADC', 'PWM'], recommendedFor: 'sensor', notes: 'ADC1 Channel 0' },
+  { gpio: 2,  category: 'available', label: 'GPIO 2 (ADC1)',      features: ['ADC', 'PWM'], recommendedFor: 'sensor', notes: 'ADC1 Channel 1' },
+  { gpio: 4,  category: 'available', label: 'GPIO 4 (ADC1/OneWire)', features: ['ADC', 'PWM'], recommendedFor: 'sensor', notes: 'ADC1 Ch3, Standard OneWire' },
+  { gpio: 6,  category: 'available', label: 'GPIO 6 (ADC1)',      features: ['ADC', 'PWM'], recommendedFor: 'sensor', notes: 'ADC1 Channel 5' },
+  { gpio: 7,  category: 'available', label: 'GPIO 7 (ADC1)',      features: ['ADC', 'PWM'], recommendedFor: 'sensor', notes: 'ADC1 Channel 6' },
+  { gpio: 8,  category: 'available', label: 'GPIO 8 (I2C SDA)',   features: ['I2C', 'PWM'], recommendedFor: 'sensor', notes: 'Standard I2C Data (S3)' },
+  { gpio: 9,  category: 'available', label: 'GPIO 9 (I2C SCL)',   features: ['I2C', 'PWM'], recommendedFor: 'sensor', notes: 'Standard I2C Clock (S3)' },
+
+  // === AVOID (System reserved — Flash/PSRAM/USB/Strapping/RGB) ===
+  { gpio: 0,  category: 'avoid', label: 'GPIO 0 (Strapping)',      features: [],       recommendedFor: 'both', warning: 'Boot-Strapping — NICHT VERWENDEN' },
+  { gpio: 3,  category: 'avoid', label: 'GPIO 3 (JTAG)',           features: [],       recommendedFor: 'both', warning: 'JTAG MTDO — NICHT VERWENDEN' },
+  { gpio: 19, category: 'avoid', label: 'GPIO 19-20 (USB D-/D+)', features: [],       recommendedFor: 'both', warning: 'USB — NICHT VERWENDEN' },
+  { gpio: 26, category: 'avoid', label: 'GPIO 26-37 (Flash/PSRAM)', features: [],     recommendedFor: 'both', warning: 'Flash/PSRAM intern — NICHT VERWENDEN' },
+  { gpio: 38, category: 'avoid', label: 'GPIO 38 (RGB LED)',       features: [],       recommendedFor: 'both', warning: 'Onboard RGB LED — NICHT VERWENDEN' },
+  { gpio: 43, category: 'avoid', label: 'GPIO 43-44 (UART0)',     features: ['UART'], recommendedFor: 'both', warning: 'UART0 TX/RX Debug — MIT VORSICHT' },
+  { gpio: 45, category: 'avoid', label: 'GPIO 45-46 (Strapping)', features: [],       recommendedFor: 'both', warning: 'Strapping-Pins — NICHT VERWENDEN' },
+  { gpio: 48, category: 'avoid', label: 'GPIO 48 (RGB LED Ctrl)', features: [],       recommendedFor: 'both', warning: 'RGB LED Control — NICHT VERWENDEN' },
 ]
 
 // =============================================================================
@@ -348,6 +392,7 @@ const XIAO_ESP32_C3_PINS: GpioPin[] = [
 
 const GPIO_CONFIGS: Record<HardwareType, GpioPin[]> = {
   ESP32_WROOM: ESP32_WROOM_PINS,
+  ESP32_S3_DEVKITC1: ESP32_S3_DEVKITC1_PINS,
   XIAO_ESP32_C3: XIAO_ESP32_C3_PINS,
 }
 
@@ -513,6 +558,119 @@ export function getCategoryColorClass(category: GpioCategory): string {
 // GPIO RECOMMENDATIONS (Phase 5)
 // =============================================================================
 
+// =============================================================================
+// BOARD-SPECIFIC GPIO RECOMMENDATIONS
+// =============================================================================
+
+const WROOM_RECOMMENDATIONS: Record<string, number[]> = {
+  'ds18b20':     [4, 5, 14, 15],
+  'temperature': [4, 5, 14, 15],
+  'sht31':       [21, 22],
+  'bme280':      [21, 22],
+  'aht20':       [21, 22],
+  'humidity':    [21, 22],
+  'i2c':         [21, 22],
+  // ADC1 pins (no WiFi conflict): 32-39
+  'ph':           [32, 33, 34, 35, 36, 39],
+  'ec':           [32, 33, 34, 35, 36, 39],
+  'moisture':     [32, 33, 34, 35, 36, 39],
+  'soil_moisture':[32, 33, 34, 35, 36, 39],
+  'water_level':  [32, 33, 34, 35, 36, 39],
+  'light':        [32, 33, 34, 35, 36, 39],
+  'ldr':          [32, 33, 34, 35, 36, 39],
+  'analog':       [32, 33, 34, 35, 36, 39],
+  'co2':          [16],
+  'scd30':        [21, 22],
+  'scd40':        [21, 22],
+  'pressure':     [21, 22],
+  'bmp280':       [21, 22],
+  'flow':         [4, 5, 14, 15, 16, 17, 18, 19],
+  'relay':        [4, 5, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27],
+  'pump':         [4, 5, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27],
+  'valve':        [4, 5, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27],
+  'heater':       [4, 5, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27],
+  'cooler':       [4, 5, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27],
+  'pwm':          [4, 5, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27],
+  'fan':          [4, 5, 14, 15, 16, 17, 18, 19, 25, 26, 27],
+  'led':          [4, 5, 14, 15, 16, 17, 18, 19, 25, 26, 27],
+  'dimmer':       [4, 5, 14, 15, 16, 17, 18, 19, 25, 26, 27],
+}
+
+// S3 ADC1 safe pins: 1,2,4,6,7 (avoid 5=strapping-adjacent on some boards, 3=JTAG, 8/9=I2C)
+const S3_RECOMMENDATIONS: Record<string, number[]> = {
+  'ds18b20':     [4, 5, 13, 14],
+  'temperature': [4, 5, 13, 14],
+  // I2C default on S3: GPIO 8 (SDA) / 9 (SCL)
+  'sht31':       [8, 9],
+  'bme280':      [8, 9],
+  'aht20':       [8, 9],
+  'humidity':    [8, 9],
+  'i2c':         [8, 9],
+  // ADC1 pins on S3: 1-10 (safe subset without I2C/strapping pins)
+  'ph':           [1, 2, 4, 6, 7],
+  'ec':           [1, 2, 4, 6, 7],
+  'moisture':     [1, 2, 4, 6, 7],
+  'soil_moisture':[1, 2, 4, 6, 7],
+  'water_level':  [1, 2, 4, 6, 7],
+  'light':        [1, 2, 4, 6, 7],
+  'ldr':          [1, 2, 4, 6, 7],
+  'analog':       [1, 2, 4, 6, 7],
+  'co2':          [18],
+  'scd30':        [8, 9],
+  'scd40':        [8, 9],
+  'pressure':     [8, 9],
+  'bmp280':       [8, 9],
+  'flow':         [4, 5, 13, 14, 16, 17, 18, 21],
+  'relay':        [10, 11, 12, 13, 16, 17, 18, 21, 39, 40, 41, 42],
+  'pump':         [10, 11, 12, 13, 16, 17, 18, 21, 39, 40, 41, 42],
+  'valve':        [10, 11, 12, 13, 16, 17, 18, 21, 39, 40, 41, 42],
+  'heater':       [10, 11, 12, 13, 16, 17, 18, 21, 39, 40, 41, 42],
+  'cooler':       [10, 11, 12, 13, 16, 17, 18, 21, 39, 40, 41, 42],
+  'pwm':          [10, 11, 13, 16, 17, 18, 21, 39, 40, 41, 42, 47],
+  'fan':          [10, 11, 13, 16, 17, 18, 39, 40, 41, 42, 47],
+  'led':          [10, 11, 13, 16, 17, 18, 39, 40, 41, 42, 47],
+  'dimmer':       [10, 11, 13, 16, 17, 18, 39, 40, 41, 42, 47],
+}
+
+const XIAO_RECOMMENDATIONS: Record<string, number[]> = {
+  'ds18b20':     [2, 4, 5, 8, 9, 10],
+  'temperature': [2, 4, 5, 8, 9, 10],
+  'sht31':       [6, 7],
+  'bme280':      [6, 7],
+  'aht20':       [6, 7],
+  'humidity':    [6, 7],
+  'i2c':         [6, 7],
+  'ph':           [2, 3, 4, 5],
+  'ec':           [2, 3, 4, 5],
+  'moisture':     [2, 3, 4, 5],
+  'soil_moisture':[2, 3, 4, 5],
+  'water_level':  [2, 3, 4, 5],
+  'light':        [2, 3, 4, 5],
+  'ldr':          [2, 3, 4, 5],
+  'analog':       [2, 3, 4, 5],
+  'co2':          [6, 7],
+  'scd30':        [6, 7],
+  'scd40':        [6, 7],
+  'pressure':     [6, 7],
+  'bmp280':       [6, 7],
+  'flow':         [2, 4, 5, 8, 9, 10],
+  'relay':        [2, 4, 5, 8, 9, 10],
+  'pump':         [2, 4, 5, 8, 9, 10],
+  'valve':        [2, 4, 5, 8, 9, 10],
+  'heater':       [2, 4, 5, 8, 9, 10],
+  'cooler':       [2, 4, 5, 8, 9, 10],
+  'pwm':          [2, 4, 5, 8, 9, 10],
+  'fan':          [2, 4, 5, 8, 9, 10],
+  'led':          [2, 4, 5, 8, 9, 10],
+  'dimmer':       [2, 4, 5, 8, 9, 10],
+}
+
+const BOARD_RECOMMENDATIONS: Record<HardwareType, Record<string, number[]>> = {
+  ESP32_WROOM:      WROOM_RECOMMENDATIONS,
+  ESP32_S3_DEVKITC1: S3_RECOMMENDATIONS,
+  XIAO_ESP32_C3:    XIAO_RECOMMENDATIONS,
+}
+
 /**
  * Get recommended GPIOs for a specific sensor/actuator type.
  *
@@ -523,69 +681,25 @@ export function getCategoryColorClass(category: GpioCategory): string {
  *
  * @param componentType - Sensor or actuator type (e.g., "DS18B20", "pH", "pump")
  * @param category - 'sensor' or 'actuator' (default: 'sensor')
+ * @param hardwareType - Board variant (defaults to ESP32_WROOM when omitted)
  * @returns Array of recommended GPIO numbers
  *
  * @example
- * getRecommendedGpios('DS18B20', 'sensor')  // [4, 5, 13, 14, 15]
- * getRecommendedGpios('pH', 'sensor')       // [32, 33, 34, 35, 36, 39] (ADC pins)
- * getRecommendedGpios('pump', 'actuator')   // [4, 5, 12, 13, ...]
+ * getRecommendedGpios('ph', 'sensor', 'ESP32_WROOM')       // [32,33,34,35,36,39]
+ * getRecommendedGpios('ph', 'sensor', 'ESP32_S3_DEVKITC1') // [1,2,4,6,7]
+ * getRecommendedGpios('pump', 'actuator', 'ESP32_S3_DEVKITC1') // [10,11,12,13,16,17,18,21,39,40,41,42]
  */
 export function getRecommendedGpios(
   componentType: string,
-  category: 'sensor' | 'actuator' = 'sensor'
+  category: 'sensor' | 'actuator' = 'sensor',
+  hardwareType?: HardwareType | null
 ): number[] {
-  // Sensor/Actuator type-based recommendations
-  const recommendations: Record<string, number[]> = {
-    // Temperature sensors (OneWire) - general purpose GPIOs
-    'ds18b20': [4, 5, 13, 14, 15],
-    'temperature': [4, 5, 13, 14, 15],
-
-    // I2C sensors - standard I2C pins
-    'sht31': [21, 22],
-    'bme280': [21, 22],
-    'aht20': [21, 22],
-    'humidity': [21, 22],
-    'i2c': [21, 22],
-
-    // Analog sensors - ADC-capable pins only (ADC1: 32-39)
-    'ph': [32, 33, 34, 35, 36, 39],
-    'ec': [32, 33, 34, 35, 36, 39],
-    'moisture': [32, 33, 34, 35, 36, 39],
-    'soil_moisture': [32, 33, 34, 35, 36, 39],
-    'water_level': [32, 33, 34, 35, 36, 39],
-    'light': [32, 33, 34, 35, 36, 39],
-    'ldr': [32, 33, 34, 35, 36, 39],
-    'analog': [32, 33, 34, 35, 36, 39],
-
-    // CO2 sensors (usually I2C or UART)
-    'co2': [21, 22, 16, 17],
-    'scd30': [21, 22],
-    'scd40': [21, 22],
-
-    // Pressure sensors (I2C)
-    'pressure': [21, 22],
-    'bmp280': [21, 22],
-
-    // Flow sensors (digital pulse counting)
-    'flow': [4, 5, 13, 14, 15, 16, 17, 18, 19],
-
-    // Actuators - output-capable GPIOs (avoid strapping pins)
-    'relay': [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27],
-    'pump': [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27],
-    'valve': [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27],
-    'heater': [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27],
-    'cooler': [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27],
-
-    // PWM actuators - PWM-capable pins
-    'pwm': [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27],
-    'fan': [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 25, 26, 27],
-    'led': [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 25, 26, 27],
-    'dimmer': [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 25, 26, 27],
-  }
+  const recommendations = hardwareType
+    ? (BOARD_RECOMMENDATIONS[hardwareType] ?? WROOM_RECOMMENDATIONS)
+    : WROOM_RECOMMENDATIONS
 
   const normalizedType = componentType.toLowerCase().trim()
 
-  // Direct match
   if (recommendations[normalizedType]) {
     return recommendations[normalizedType]
   }
@@ -597,14 +711,16 @@ export function getRecommendedGpios(
     }
   }
 
-  // Default based on category
+  // Default fallback based on category and board
   if (category === 'actuator') {
-    // Actuators: output-capable GPIOs
-    return [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27]
+    if (hardwareType === 'ESP32_S3_DEVKITC1') return [10, 11, 12, 13, 16, 17, 18, 21, 39, 40, 41, 42]
+    if (hardwareType === 'XIAO_ESP32_C3')     return [2, 4, 5, 8, 9, 10]
+    return [4, 5, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27]
   }
 
-  // Sensors: all general-purpose GPIOs
-  return [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27]
+  if (hardwareType === 'ESP32_S3_DEVKITC1') return [4, 5, 13, 14, 16, 17, 18, 21]
+  if (hardwareType === 'XIAO_ESP32_C3')     return [2, 4, 5, 6, 7, 8, 9, 10]
+  return [4, 5, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27]
 }
 
 // =============================================================================

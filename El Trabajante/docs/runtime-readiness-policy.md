@@ -9,7 +9,7 @@ Nach Reset darf die Firmware den Pending-Zustand nur verlassen, wenn die Runtime
 ## Verbindliche Policy
 
 - Default-Profil: `sensor_required`
-- Pflicht: mindestens ein Aktor (`actuator_count > 0`)
+- Aktoren: **optional** (`require_actuator = false` seit `runtime_readiness_policy.cpp:6`). Sensor-only Geraete koennen `CONFIG_PENDING_AFTER_RESET` verlassen ohne konfigurierten Aktor.
 - Offline-Rules sind fuer Pending-Exit optional.
   - Bei `offline_rule_count == 0` bleibt Disconnect-Verhalten fail-safe:
     Aktoren werden sofort auf `default_state` gesetzt.
@@ -21,7 +21,7 @@ Nach Reset darf die Firmware den Pending-Zustand nur verlassen, wenn die Runtime
 
 - `CONFIG_PENDING_EXIT_READY`
 - `MISSING_SENSORS`
-- `MISSING_ACTUATORS`
+- `MISSING_ACTUATORS` (nicht mehr als Blocker, nur als informativer Reason)
 - `OFFLINE_RULES_ONLY_AUTO_EXIT` (Offline-Rules vorhanden, aber keine Aktoren)
 
 ## State-Transition-Regeln

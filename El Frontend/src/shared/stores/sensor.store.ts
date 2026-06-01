@@ -24,9 +24,15 @@ import { createLogger } from '@/utils/logger'
 import {
   getDeviceTypeFromSensorType,
   getMultiValueDeviceConfigBySensorType,
+  VIRTUAL_SENSOR_META,
+  SENSOR_TYPE_CONFIG,
 } from '@/utils/sensorDefaults'
 import type { ESPDevice } from '@/api/esp'
 import type { MockSensor, MultiValueEntry, QualityLevel, SensorHealthEvent } from '@/types'
+
+// Virtual sensor types (server-computed) that must never be merged into physical sensors,
+// even when they share gpio=0 with I2C sensors like SHT31.
+const VIRTUAL_SENSOR_TYPES = new Set(Object.keys(VIRTUAL_SENSOR_META).map(k => k.toLowerCase()))
 
 const logger = createLogger('SensorStore')
 
@@ -247,6 +253,13 @@ export const useSensorStore = defineStore('sensor', () => {
         return { ...device, sensors }
       }
 
+      // Virtual sensors (e.g. vpd) are server-computed and must never be merged into
+      // physical I2C sensors that share gpio=0. They are always standalone satellites.
+      if (VIRTUAL_SENSOR_TYPES.has(normalizeSensorType(sensorType))) {
+        handleVirtualSensorData(sensors, data, eventReceivedAtIso)
+        return { ...device, sensors }
+      }
+
       // Dynamic multi-value detection (different type on same GPIO)
       const existingSensor = sensors.find(s => s.gpio === gpio)
       if (
@@ -368,7 +381,47 @@ export const useSensorStore = defineStore('sensor', () => {
   }
 
   // ════════════════════════════════════════════════════════════════════════════
-  // HANDLER 3: SINGLE-VALUE (unchanged behavior)
+  // HANDLER 3: VIRTUAL SENSOR (server-computed, always standalone)
+  // ════════════════════════════════════════════════════════════════════════════
+  function handleVirtualSensorData(
+    sensors: MockSensor[],
+    data: SensorDataPayload,
+    eventReceivedAtIso: string,
+  ): void {
+    const normalizedType = normalizeSensorType(data.sensor_type)
+    const existing = sensors.find(s => normalizeSensorType(s.sensor_type) === normalizedType)
+
+    if (existing) {
+      if (data.value !== undefined) existing.raw_value = data.value
+      if (data.quality) existing.quality = data.quality
+      if (data.unit) existing.unit = data.unit
+      const ts = normalizeRawTimestamp(data.timestamp)
+      if (ts !== null) existing.last_read = ts
+      existing.last_event_at = eventReceivedAtIso
+      applyMeasurementMetadata(existing, data)
+    } else {
+      // VPD sensor config may not be in the store yet (created lazily server-side).
+      // Add it as a standalone satellite so it gets its own card immediately.
+      const config = SENSOR_TYPE_CONFIG[data.sensor_type]
+      sensors.push({
+        gpio: data.gpio,
+        sensor_type: data.sensor_type,
+        name: config?.label ?? data.sensor_type,
+        raw_value: data.value,
+        unit: data.unit || config?.unit || '',
+        quality: data.quality ?? 'good',
+        raw_mode: false,
+        last_read: normalizeRawTimestamp(data.timestamp),
+        last_event_at: eventReceivedAtIso,
+        interface_type: 'VIRTUAL',
+        is_multi_value: false,
+        multi_values: null,
+      })
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // HANDLER 4: SINGLE-VALUE (unchanged behavior)
   // ════════════════════════════════════════════════════════════════════════════
   function handleSingleValueSensorData(
     sensors: MockSensor[],

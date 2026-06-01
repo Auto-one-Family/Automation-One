@@ -12,48 +12,29 @@
  */
 
 import { ref, computed, watch } from 'vue'
-import { Settings, CheckCheck, Mail, ChevronDown, ChevronUp, Filter, Bell, BellOff, Activity } from 'lucide-vue-next'
+import { Settings, CheckCheck, ChevronDown, ChevronUp, Filter, Bell, BellOff, Activity, SlidersHorizontal } from 'lucide-vue-next'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import NotificationItem from '@/components/notifications/NotificationItem.vue'
 import NotificationPreferences from '@/components/notifications/NotificationPreferences.vue'
 import {
   useNotificationInboxStore,
-  type InboxFilter,
   type SourceFilterValue,
 } from '@/shared/stores/notification-inbox.store'
 import { useAlertCenterStore, STATS_POLL_INTERVAL_MS } from '@/shared/stores/alert-center.store'
-import { useAuthStore } from '@/shared/stores/auth.store'
-import { notificationsApi, type EmailLogEntry } from '@/api/notifications'
 import { formatRelativeTime } from '@/utils/formatters'
-import { getEmailStatusLabel } from '@/utils/labels'
 import { useToast } from '@/composables/useToast'
 import { formatAlertLifecycleFailureMessage } from '@/utils/alertLifecycleUi'
 
 const inboxStore = useNotificationInboxStore()
 const alertStore = useAlertCenterStore()
-const authStore = useAuthStore()
 const toast = useToast()
 
-type StatusFilter = 'all' | 'active' | 'acknowledged' | 'resolved'
 const isResolvingAll = ref(false)
 const advancedSourcesOpen = ref(false)
-// AUT-255: Toggle to include suppressed alerts in the list view.
-const showSuppressed = ref(false)
+const settingsOpen = ref(false)
+const sourceSearchQuery = ref('')
 
-function applyActiveCriticalPreset(): void {
-  inboxStore.activeFilter = 'critical'
-  inboxStore.lifecycleFilter = 'active'
-  inboxStore.setSourceFilter(null)
-}
-
-const filterTabs: { key: InboxFilter; label: string }[] = [
-  { key: 'all', label: 'Alle' },
-  { key: 'critical', label: 'Kritisch' },
-  { key: 'warning', label: 'Warnungen' },
-  { key: 'info', label: 'Infos' },
-]
-
-/** Source filter chips: Alle | Sensor | Infrastruktur | Aktor | Regel | System */
+/** Source filter chips for the collapsed advanced section */
 const sourceChips: { value: SourceFilterValue; label: string }[] = [
   { value: null, label: 'Alle Quellen' },
   { value: 'sensor_threshold', label: 'Sensor' },
@@ -66,22 +47,50 @@ const sourceChips: { value: SourceFilterValue; label: string }[] = [
   { value: '__system__', label: 'System' },
 ]
 
-const statusTabs = computed(() => {
+/** Filter chips by search query */
+const filteredSourceChips = computed(() => {
+  const q = sourceSearchQuery.value.trim().toLowerCase()
+  if (!q) return sourceChips
+  return sourceChips.filter(c => c.label.toLowerCase().includes(q))
+})
+
+/** Segmented control: Aktiv / Bestätigt / Erledigt */
+const segmentTabs = computed(() => {
   const stats = alertStore.alertStats
   const active = stats?.active_count ?? 0
   const ack = stats?.acknowledged_count ?? 0
-
   return [
-    { key: 'all' as StatusFilter, label: 'Alle' },
-    { key: 'active' as StatusFilter, label: `Aktiv (${active})` },
-    { key: 'acknowledged' as StatusFilter, label: `Bestätigt (${ack})` },
-    { key: 'resolved' as StatusFilter, label: 'Erledigt' },
+    { key: 'active' as const, label: 'Aktiv', count: active },
+    { key: 'acknowledged' as const, label: 'Bestätigt', count: ack },
+    { key: 'resolved' as const, label: 'Erledigt', count: 0 },
   ]
 })
 
-function setLifecycleFilter(key: StatusFilter): void {
-  inboxStore.lifecycleFilter = key === 'all' ? 'all' : key
+function setSegmentFilter(key: 'active' | 'acknowledged' | 'resolved'): void {
+  inboxStore.lifecycleFilter = key
+  void inboxStore.reloadListForFilters()
 }
+
+/** Severity sort order for display */
+const SEVERITY_ORDER: Record<string, number> = { critical: 0, warning: 1, info: 2 }
+
+/** Notifications sorted by severity desc, then created_at desc within each date group */
+const sortedGroupedNotifications = computed(() =>
+  inboxStore.groupedNotifications.map(group => ({
+    ...group,
+    items: [...group.items].sort((a, b) => {
+      const sa = SEVERITY_ORDER[a.severity] ?? 3
+      const sb = SEVERITY_ORDER[b.severity] ?? 3
+      if (sa !== sb) return sa - sb
+      return new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime()
+    }),
+  }))
+)
+
+/** Reload list when showSuppressed changes */
+watch(() => inboxStore.showSuppressed, () => {
+  void inboxStore.reloadListForFilters()
+})
 
 /** P3: KPI-Tabs nutzen gepollte Server-Stats; Liste unread/WS kann schneller sein. */
 const syncHintLine = computed(() => {
@@ -152,33 +161,6 @@ async function handleResolve(id: string): Promise<void> {
   }
 }
 
-// Email log footer
-const emailLog = ref<EmailLogEntry[]>([])
-const emailLogExpanded = ref(false)
-const emailLogLoading = ref(false)
-
-async function loadEmailLog(): Promise<void> {
-  emailLogLoading.value = true
-  try {
-    const res = await notificationsApi.getEmailLog({ page_size: 5 })
-    emailLog.value = res.data
-  } catch {
-    emailLog.value = []
-  } finally {
-    emailLogLoading.value = false
-  }
-}
-
-const hasEmailLog = computed(() => emailLog.value.length > 0)
-
-watch(
-  () => inboxStore.isDrawerOpen,
-  (isOpen) => {
-    if (isOpen && authStore.isAdmin) {
-      void loadEmailLog()
-    }
-  },
-)
 </script>
 
 <template>
@@ -194,51 +176,59 @@ watch(
       <div class="drawer__panel-root" data-testid="notification-drawer-panel">
       <!-- Header Actions Row -->
       <div class="drawer__header-actions">
-      <!-- Primary row: severity + lifecycle + preset -->
+      <!-- Segmented Control: Aktiv / Bestätigt / Erledigt -->
       <div class="drawer__primary-toolbar">
-        <div class="drawer__tabs">
-          <button
-            v-for="tab in filterTabs"
-            :key="tab.key"
-            type="button"
-            :data-testid="`notification-inbox-filter-${tab.key}`"
-            :class="[
-              'drawer__tab',
-              { 'drawer__tab--active': inboxStore.activeFilter === tab.key },
-            ]"
-            @click="inboxStore.activeFilter = tab.key"
-          >
-            {{ tab.label }}
-          </button>
-        </div>
-        <div class="drawer__status-tabs drawer__status-tabs--inline">
-          <button
-            v-for="tab in statusTabs"
-            :key="tab.key"
-            :class="[
-              'drawer__status-tab',
-              {
-                'drawer__status-tab--active':
-                  tab.key === 'all'
-                    ? inboxStore.lifecycleFilter === 'all'
-                    : inboxStore.lifecycleFilter === tab.key,
-              },
-            ]"
-            @click="setLifecycleFilter(tab.key)"
-          >
-            {{ tab.label }}
-          </button>
-        </div>
-        <button
-          type="button"
-          class="drawer__preset-btn"
-          title="Nur aktive kritische Alerts (Schnellauswahl)"
-          aria-label="Schnellauswahl: Nur aktive kritische Alerts anzeigen"
-          data-testid="notification-preset-active-critical"
-          @click="applyActiveCriticalPreset"
+        <div
+          class="drawer__segment-control"
+          role="tablist"
+          aria-label="Alert-Status-Filter"
         >
-          Nur Alerts
-        </button>
+          <button
+            v-for="seg in segmentTabs"
+            :key="seg.key"
+            type="button"
+            role="tab"
+            :aria-selected="inboxStore.lifecycleFilter === seg.key"
+            :data-testid="`notification-segment-${seg.key}`"
+            :class="[
+              'drawer__segment',
+              { 'drawer__segment--active': inboxStore.lifecycleFilter === seg.key },
+            ]"
+            @click="setSegmentFilter(seg.key)"
+          >
+            {{ seg.label }}
+            <span
+              v-if="seg.count > 0"
+              class="drawer__segment-badge"
+              aria-hidden="true"
+            >{{ seg.count }}</span>
+          </button>
+        </div>
+        <!-- Settings: suppressed-toggle hinter diesem Icon -->
+        <div class="drawer__settings-wrap">
+          <button
+            type="button"
+            class="drawer__settings-btn"
+            :aria-expanded="settingsOpen"
+            :title="settingsOpen ? 'Einstellungen schließen' : 'Erweiterte Einstellungen'"
+            data-testid="notification-settings-toggle"
+            @click="settingsOpen = !settingsOpen"
+          >
+            <SlidersHorizontal :size="14" aria-hidden="true" />
+          </button>
+          <div v-if="settingsOpen" class="drawer__settings-popover">
+            <label class="drawer__suppressed-label">
+              <input
+                v-model="inboxStore.showSuppressed"
+                type="checkbox"
+                class="drawer__suppressed-checkbox"
+                data-testid="notification-show-suppressed"
+              />
+              <BellOff :size="12" aria-hidden="true" class="drawer__suppressed-icon" />
+              Auch unterdrückte Alerts anzeigen
+            </label>
+          </div>
+        </div>
       </div>
 
       <div class="drawer__actions-row">
@@ -268,7 +258,7 @@ watch(
         </div>
       </div>
 
-      <!-- Advanced: source chips (collapsed by default) -->
+      <!-- Quelle filtern: collapsed by default, search + chips -->
       <div class="drawer__advanced">
         <button
           type="button"
@@ -279,7 +269,7 @@ watch(
           @click="advancedSourcesOpen = !advancedSourcesOpen"
         >
           <Filter class="drawer__advanced-icon" />
-          <span class="drawer__advanced-label">Erweitert: Quelle filtern</span>
+          <span class="drawer__advanced-label">Quelle filtern</span>
           <span
             v-if="inboxStore.sourceFilter !== null"
             class="drawer__advanced-badge"
@@ -295,37 +285,31 @@ watch(
         <div
           v-show="advancedSourcesOpen"
           id="notification-advanced-sources"
-          class="drawer__source-chips"
         >
-          <button
-            v-for="chip in sourceChips"
-            :key="chip.value ?? 'all'"
-            :class="[
-              'drawer__source-chip',
-              { 'drawer__source-chip--active': inboxStore.sourceFilter === chip.value },
-            ]"
-            @click="inboxStore.setSourceFilter(chip.value)"
-          >
-            {{ chip.label }}
-          </button>
+          <div class="drawer__source-search">
+            <input
+              v-model="sourceSearchQuery"
+              type="search"
+              class="drawer__source-input"
+              placeholder="Quelle suchen…"
+              aria-label="Quell-Filter suchen"
+            />
+          </div>
+          <div class="drawer__source-chips">
+            <button
+              v-for="chip in filteredSourceChips"
+              :key="chip.value ?? 'all'"
+              type="button"
+              :class="[
+                'drawer__source-chip',
+                { 'drawer__source-chip--active': inboxStore.sourceFilter === chip.value },
+              ]"
+              @click="inboxStore.setSourceFilter(chip.value)"
+            >
+              {{ chip.label }}
+            </button>
+          </div>
         </div>
-      </div>
-
-      <!-- AUT-255: Suppression-Filter-Toggle -->
-      <div class="drawer__suppressed-toggle">
-        <label class="drawer__suppressed-label">
-          <input
-            v-model="showSuppressed"
-            type="checkbox"
-            class="drawer__suppressed-checkbox"
-            data-testid="notification-show-suppressed"
-          />
-          <BellOff :size="12" aria-hidden="true" class="drawer__suppressed-icon" />
-          Auch unterdrückte Alerts anzeigen
-        </label>
-        <span v-if="showSuppressed" class="drawer__suppressed-hint">
-          Alerts mit aktiver Suppression werden ausgegraut angezeigt (wenn vorhanden).
-        </span>
       </div>
 
       <!-- P3: Poll vs. WebSocket — Operator-Hinweis -->
@@ -357,16 +341,16 @@ watch(
           <Bell class="drawer__empty-icon" aria-hidden="true" />
           <span class="drawer__empty-text">Keine Benachrichtigungen</span>
           <span class="drawer__empty-sub">
-            {{ inboxStore.activeFilter !== 'all' || inboxStore.sourceFilter || inboxStore.lifecycleFilter !== 'all'
+            {{ inboxStore.sourceFilter || inboxStore.lifecycleFilter !== 'all'
               ? 'Kein Ergebnis für diesen Filter'
-              : 'Hier erscheinen zukünftige Alarme und Ereignisse' }}
+              : 'Hier erscheinen zuk��nftige Alarme und Ereignisse' }}
           </span>
         </div>
 
-        <!-- Grouped Notifications -->
+        <!-- Grouped Notifications (sorted: severity desc, then created_at desc) -->
         <template v-else>
           <div
-            v-for="group in inboxStore.groupedNotifications"
+            v-for="group in sortedGroupedNotifications"
             :key="group.label"
             class="drawer__group"
           >
@@ -396,55 +380,6 @@ watch(
         </template>
       </div>
 
-      <!-- Email Log Footer (Admin only) -->
-      <div v-if="authStore.isAdmin" class="drawer__email-footer">
-        <div class="drawer__email-toggle-row">
-          <button
-            v-if="hasEmailLog"
-            class="drawer__email-toggle"
-            @click="emailLogExpanded = !emailLogExpanded"
-          >
-            <Mail class="drawer__email-toggle-icon" />
-            <span>Letzte 5 Emails</span>
-            <component
-              :is="emailLogExpanded ? ChevronUp : ChevronDown"
-              class="drawer__email-toggle-chevron"
-            />
-          </button>
-          <RouterLink
-            to="/email"
-            class="drawer__email-all-link"
-            @click="inboxStore.isDrawerOpen = false"
-          >
-            Alle anzeigen
-          </RouterLink>
-        </div>
-
-        <Transition name="expand">
-          <div v-if="hasEmailLog && emailLogExpanded" class="drawer__email-list">
-            <div
-              v-for="entry in emailLog"
-              :key="entry.id"
-              class="drawer__email-entry"
-            >
-              <span :class="['drawer__email-dot', `drawer__email-dot--${entry.status}`]" />
-              <span class="drawer__email-subject">{{ entry.subject }}</span>
-              <span class="drawer__email-status">
-                {{ getEmailStatusLabel(entry.status) }}
-                <span
-                  v-if="(entry.status === 'failed' || entry.status === 'permanently_failed') && entry.retry_count > 0"
-                  class="drawer__email-retry"
-                >
-                  ({{ entry.retry_count }}/3 Versuche)
-                </span>
-              </span>
-              <span v-if="entry.sent_at || entry.created_at" class="drawer__email-time">
-                {{ formatRelativeTime(entry.sent_at || entry.created_at!) }}
-              </span>
-            </div>
-          </div>
-        </Transition>
-      </div>
       </div>
     </template>
   </SlideOver>
@@ -472,7 +407,6 @@ watch(
 
 .drawer__primary-toolbar {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
 }
@@ -488,22 +422,106 @@ watch(
   min-width: 0;
 }
 
-.drawer__preset-btn {
-  flex-shrink: 0;
-  padding: var(--space-1) var(--space-2);
-  font-size: var(--text-xxs);
-  font-weight: 600;
-  color: var(--color-iridescent-2);
-  background: rgba(129, 140, 248, 0.08);
+/* Segmented Control — AUT-561 */
+.drawer__segment-control {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  flex: 1;
+  background: var(--color-bg-primary);
+  padding: 2px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border);
+}
+
+.drawer__segment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-width: 80px;
+  min-height: 44px;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.drawer__segment:hover {
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.drawer__segment--active {
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.drawer__segment-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--color-text-primary);
+  background: var(--color-bg-quaternary);
+  border-radius: var(--radius-full);
+}
+
+.drawer__segment--active .drawer__segment-badge {
+  background: var(--color-accent-dim);
+  color: var(--color-accent-bright);
+}
+
+/* Settings popover — suppressed toggle */
+.drawer__settings-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.drawer__settings-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all var(--transition-fast);
 }
 
-.drawer__preset-btn:hover {
-  background: rgba(129, 140, 248, 0.14);
-  border-color: var(--glass-border-hover);
+.drawer__settings-btn:hover,
+.drawer__settings-btn[aria-expanded="true"] {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border-color: var(--glass-border);
+}
+
+.drawer__settings-popover {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  z-index: var(--z-dropdown);
+  min-width: 220px;
+  padding: var(--space-3);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elevation-floating);
 }
 
 .drawer__actions-row {
@@ -638,46 +656,34 @@ watch(
   white-space: nowrap;
 }
 
-/* Status Filter Tabs */
-.drawer__status-tabs {
-  display: flex;
-  gap: var(--space-2);
-  padding-bottom: var(--space-3);
-  border-bottom: 1px solid var(--glass-border);
-  margin-bottom: var(--space-3);
+/* Source search input — AUT-561 */
+.drawer__source-search {
+  margin-bottom: var(--space-2);
 }
 
-.drawer__status-tab {
+.drawer__source-input {
+  width: 100%;
   padding: var(--space-1) var(--space-2);
   font-size: var(--text-xs);
-  font-weight: 500;
-  color: var(--color-text-muted);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  white-space: nowrap;
-}
-
-.drawer__status-tab:hover {
-  color: var(--color-text-secondary);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.drawer__status-tab--active {
   color: var(--color-text-primary);
-  background: var(--color-bg-tertiary);
-  border-color: var(--glass-border);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color var(--transition-fast);
 }
 
-/* AUT-255: Suppression-Filter-Toggle */
-.drawer__suppressed-toggle {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
-  margin-bottom: var(--space-2);
+.drawer__source-input:focus {
+  border-color: var(--color-accent);
+}
+
+.drawer__source-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* Suppressed label (now inside settings popover) */
+.drawer__settings-popover .drawer__suppressed-label {
+  padding: 0;
 }
 
 .drawer__suppressed-label {
@@ -864,148 +870,4 @@ watch(
   cursor: not-allowed;
 }
 
-/* Email Log Footer */
-.drawer__email-footer {
-  border-top: 1px solid var(--glass-border);
-  margin-top: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-}
-
-.drawer__email-toggle-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  width: 100%;
-}
-
-.drawer__email-toggle {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex: 1;
-  padding: var(--space-2) 0;
-  font-size: var(--text-xs);
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  transition: color var(--transition-fast);
-  text-align: left;
-}
-
-.drawer__email-all-link {
-  font-size: var(--text-xs);
-  font-weight: 600;
-  color: var(--color-iridescent-2);
-  text-decoration: none;
-  white-space: nowrap;
-  padding: var(--space-2) 0;
-}
-
-.drawer__email-all-link:hover {
-  text-decoration: underline;
-}
-
-.drawer__email-toggle:hover {
-  color: var(--color-text-primary);
-}
-
-.drawer__email-toggle-icon {
-  width: 14px;
-  height: 14px;
-  color: var(--color-text-muted);
-}
-
-.drawer__email-toggle-chevron {
-  width: 12px;
-  height: 12px;
-  margin-left: auto;
-  color: var(--color-text-muted);
-}
-
-.drawer__email-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding-top: var(--space-2);
-}
-
-.drawer__email-entry {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1) 0;
-  font-size: var(--text-xs);
-}
-
-.drawer__email-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.drawer__email-dot--sent {
-  background: var(--color-success);
-}
-
-.drawer__email-dot--failed {
-  background: var(--color-error);
-}
-
-.drawer__email-dot--pending {
-  background: var(--color-text-muted);
-}
-
-.drawer__email-dot--permanently_failed {
-  background: var(--color-error);
-}
-
-.drawer__email-retry {
-  color: var(--color-text-muted);
-  font-size: var(--text-xxs);
-  margin-left: var(--space-1);
-}
-
-.drawer__email-subject {
-  flex: 1;
-  color: var(--color-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.drawer__email-status {
-  flex-shrink: 0;
-  font-family: var(--font-mono);
-  color: var(--color-text-muted);
-}
-
-.drawer__email-time {
-  flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-muted);
-  white-space: nowrap;
-}
-
-/* Expand Transition (email footer) */
-.expand-enter-active,
-.expand-leave-active {
-  transition: all var(--transition-fast);
-  overflow: hidden;
-}
-
-.expand-enter-from,
-.expand-leave-to {
-  opacity: 0;
-  max-height: 0;
-}
-
-.expand-enter-to,
-.expand-leave-from {
-  opacity: 1;
-  max-height: 300px;
-}
 </style>

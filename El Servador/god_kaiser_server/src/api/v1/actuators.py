@@ -75,7 +75,6 @@ from ...schemas import (
 from ...schemas.common import PaginationMeta
 from ...services.actuator_service import ActuatorService
 from ...services.config_builder import ConfigPayloadBuilder
-from ...services.config_push_intent import schedule_config_push_intent
 from ...services.esp_service import ESPService
 from ...services.gpio_validation_service import GpioValidationService
 from ...services.safety_service import SafetyService
@@ -669,15 +668,22 @@ async def create_or_update_actuator(
 
     config_correlation_id: Optional[str] = None
     config_request_id: Optional[str] = None
-    push_status: Optional[str] = None
     # Publish config to ESP32 via MQTT (using dependency-injected services)
-    esp_service: ESPService = get_esp_service(db)
-    config_correlation_id, push_status = await schedule_config_push_intent(
-        esp_service,
-        esp_id,
-        reason_code="actuator_config_change",
-    )
-    config_request_id = config_correlation_id
+    try:
+        config_builder: ConfigPayloadBuilder = get_config_builder(db)
+        combined_config = await config_builder.build_combined_config(esp_id, db)
+
+        esp_service: ESPService = get_esp_service(db)
+        schedule_result = await esp_service.trigger_config_push_debounced(
+            esp_id,
+            reason_code="actuator_config_change",
+        )
+        config_correlation_id = schedule_result.get("correlation_id")
+        config_request_id = schedule_result.get("request_id") or config_correlation_id
+        logger.info("Config push coalesced for ESP %s after actuator create/update", esp_id)
+    except Exception as e:
+        # Log error but don't fail the request (DB save was successful)
+        logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
 
     subzone_repo = SubzoneRepository(db)
     subzone = await subzone_repo.get_subzone_by_gpio(esp_id, gpio)
@@ -688,7 +694,6 @@ async def create_or_update_actuator(
     )
     response.correlation_id = config_correlation_id
     response.request_id = config_request_id
-    response.push_status = push_status
     return response
 
 
@@ -1418,12 +1423,19 @@ async def delete_actuator(
     logger.info(f"Actuator deleted: {esp_id} GPIO {gpio} by {current_user.username}")
 
     # Publish updated config to ESP32 via MQTT (actuator removed from payload)
-    esp_service: ESPService = get_esp_service(db)
-    config_correlation_id, push_status = await schedule_config_push_intent(
-        esp_service,
-        esp_id,
-        reason_code="actuator_config_change",
-    )
+    try:
+        config_builder: ConfigPayloadBuilder = get_config_builder(db)
+        combined_config = await config_builder.build_combined_config(esp_id, db)
+
+        esp_service: ESPService = get_esp_service(db)
+        await esp_service.trigger_config_push_debounced(
+            esp_id,
+            reason_code="actuator_config_change",
+        )
+        logger.info("Config push coalesced for ESP %s after actuator delete", esp_id)
+    except Exception as e:
+        # Log error but don't fail the request (DB delete was successful)
+        logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
 
     # WebSocket event: Frontend removes actuator from store (analog to sensor_config_deleted)
     try:
@@ -1441,11 +1453,7 @@ async def delete_actuator(
     except Exception as e:
         logger.debug(f"WebSocket broadcast for actuator_config_deleted: {e}")
 
-    response = _model_to_schema_response(actuator, esp_id, None)
-    response.correlation_id = config_correlation_id
-    response.request_id = config_correlation_id
-    response.push_status = push_status
-    return response
+    return _model_to_schema_response(actuator, esp_id, None)
 
 
 # =============================================================================

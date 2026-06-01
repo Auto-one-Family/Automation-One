@@ -20,11 +20,10 @@ import { createLogger } from '@/utils/logger'
 import type {
   MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLevel,
   MockESPCreate, OfflineInfo, OfflineReason,
-  StatusSource, SensorConfigCreate, ActuatorConfigCreate, MockSensor,
+  StatusSource, SensorConfigCreate, ActuatorConfigCreate, MockSensor, MockActuator,
   HeartbeatGpioItem,
   PendingESPDevice, ESPApprovalRequest, ESPApprovalResponse,
-  DeviceDiscoveredPayload, DeviceApprovedPayload, DeviceRejectedPayload,
-  ConfigPushStatus,
+  DeviceDiscoveredPayload, DeviceApprovedPayload, DeviceRejectedPayload
 } from '@/types'
 import { useZoneStore } from '@/shared/stores/zone.store'
 import { useDeviceContextStore } from '@/shared/stores/deviceContext.store'
@@ -114,6 +113,111 @@ function keepFreshOnlineStatus(
   return apiStatus
 }
 
+function normalizeSensorTypeForMerge(sensorType: string | undefined | null): string {
+  return (sensorType ?? '').trim().toLowerCase()
+}
+
+function sensorLiveTimestampMs(sensor: MockSensor): number | null {
+  const candidates = [sensor.last_event_at, sensor.last_read, sensor.last_reading_at]
+  let best: number | null = null
+  for (const ts of candidates) {
+    if (!ts) continue
+    const ms = Date.parse(ts)
+    if (!Number.isFinite(ms)) continue
+    if (best === null || ms > best) best = ms
+  }
+  return best
+}
+
+function sensorsMatchForLiveMerge(existing: MockSensor, incoming: MockSensor): boolean {
+  if (existing.config_id && incoming.config_id) {
+    return existing.config_id === incoming.config_id
+  }
+  if (existing.gpio !== incoming.gpio) return false
+  if (normalizeSensorTypeForMerge(existing.sensor_type) !== normalizeSensorTypeForMerge(incoming.sensor_type)) {
+    return false
+  }
+  if (existing.i2c_address != null && incoming.i2c_address != null) {
+    return existing.i2c_address === incoming.i2c_address
+  }
+  if (existing.onewire_address && incoming.onewire_address) {
+    return existing.onewire_address === incoming.onewire_address
+  }
+  return true
+}
+
+/**
+ * Preserve in-memory WS sensor readings when a DB snapshot from fetchAll/fetchDevice
+ * is older than the live store (AUT-580: visibility/login resync must not freeze UI).
+ */
+function mergeLiveSensorLists(
+  incoming: MockSensor[],
+  existing: MockSensor[] | undefined,
+): MockSensor[] {
+  if (!existing?.length) return incoming
+  return incoming.map((incomingSensor) => {
+    const liveSensor = existing.find((candidate) => sensorsMatchForLiveMerge(candidate, incomingSensor))
+    if (!liveSensor) return incomingSensor
+
+    const incomingMs = sensorLiveTimestampMs(incomingSensor)
+    const liveMs = sensorLiveTimestampMs(liveSensor)
+    if (liveMs === null || (incomingMs !== null && incomingMs >= liveMs)) {
+      return incomingSensor
+    }
+
+    return {
+      ...incomingSensor,
+      raw_value: liveSensor.raw_value ?? incomingSensor.raw_value,
+      processed_value: liveSensor.processed_value ?? incomingSensor.processed_value,
+      quality: liveSensor.quality ?? incomingSensor.quality,
+      unit: liveSensor.unit ?? incomingSensor.unit,
+      last_read: pickFresherIso(incomingSensor.last_read, liveSensor.last_read) ?? incomingSensor.last_read,
+      last_event_at: pickFresherIso(incomingSensor.last_event_at, liveSensor.last_event_at) ?? incomingSensor.last_event_at,
+      last_reading_at: pickFresherIso(incomingSensor.last_reading_at, liveSensor.last_reading_at) ?? incomingSensor.last_reading_at,
+      multi_values: liveSensor.multi_values ?? incomingSensor.multi_values,
+      is_stale: liveSensor.is_stale ?? incomingSensor.is_stale,
+      metadata: liveSensor.metadata ?? incomingSensor.metadata,
+    }
+  })
+}
+
+function actuatorLiveTimestampMs(actuator: MockActuator): number | null {
+  if (!actuator.last_command_at) return null
+  const ms = Date.parse(actuator.last_command_at)
+  return Number.isFinite(ms) ? ms : null
+}
+
+function mergeLiveActuatorLists(
+  incoming: MockActuator[],
+  existing: MockActuator[] | undefined,
+  espId: string,
+  actStore: ReturnType<typeof useActuatorStore>,
+): MockActuator[] {
+  return incoming.map((incomingActuator) => {
+    if (existing && actStore.isActuatorCommandPending(espId, incomingActuator.gpio)) {
+      const liveActuator = existing.find((candidate) => candidate.gpio === incomingActuator.gpio)
+      return liveActuator ? { ...incomingActuator, state: liveActuator.state, pwm_value: liveActuator.pwm_value } : incomingActuator
+    }
+
+    const liveActuator = existing?.find((candidate) => candidate.gpio === incomingActuator.gpio)
+    if (!liveActuator) return incomingActuator
+
+    const incomingMs = actuatorLiveTimestampMs(incomingActuator)
+    const liveMs = actuatorLiveTimestampMs(liveActuator)
+    if (liveMs === null || (incomingMs !== null && incomingMs >= liveMs)) {
+      return incomingActuator
+    }
+
+    return {
+      ...incomingActuator,
+      state: liveActuator.state,
+      pwm_value: liveActuator.pwm_value,
+      emergency_stopped: liveActuator.emergency_stopped,
+      last_command_at: pickFresherIso(incomingActuator.last_command_at, liveActuator.last_command_at) ?? incomingActuator.last_command_at,
+    }
+  })
+}
+
 // ============================================
 // OFFLINE REASON HELPERS
 // ============================================
@@ -170,6 +274,8 @@ export const useEspStore = defineStore('esp', () => {
 
   // State
   const devices = ref<ESPDevice[]>([])
+  /** Bumped on every live WS patch / snapshot replace so UI can depend on store freshness. */
+  const devicesLiveTick = ref(0)
   const selectedDeviceId = ref<string | null>(null)
   const isLoading = ref(false)
   const error = ref<string | null>(null)
@@ -362,8 +468,13 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     return device.device_id || device.esp_id || ''
   }
 
+  function bumpDevicesLiveTick(): void {
+    devicesLiveTick.value += 1
+  }
+
   function replaceDevices(snapshot: ESPDevice[]): void {
     devices.value = snapshot
+    bumpDevicesLiveTick()
   }
 
   function applyDevicePatch(
@@ -374,7 +485,22 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     if (!result) return false
     const nextDevice = patchFn(result.device)
     devices.value[result.index] = nextDevice
+    bumpDevicesLiveTick()
     return true
+  }
+
+  /**
+   * Re-arm WS handlers + subscription after logout/login (Pinia store survives navigation).
+   */
+  async function ensureRealtimeHandlers(): Promise<void> {
+    if (wsUnsubscribers.length === 0) {
+      initWebSocket()
+    }
+    try {
+      await ws.connect()
+    } catch (err) {
+      logger.error('Failed to ensure realtime WebSocket handlers', err)
+    }
   }
 
   // =========================================================================
@@ -437,14 +563,22 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
           // Keep live WS payload data if the snapshot omits arrays temporarily.
           // Preserve optimistic actuator.state for any pending command intents so that
           // a WS reconnect + fetchAll does not overwrite an in-flight ON/OFF toggle.
-          const incomingActuators = Array.isArray(device.actuators) ? device.actuators : (existing?.actuators ?? [])
-          const mergedActuators = incomingActuators.map((a) => {
-            if (existing && actStore.isActuatorCommandPending(id, a.gpio)) {
-              const existingAct = (existing.actuators ?? []).find((ea) => ea.gpio === a.gpio)
-              return existingAct ? { ...a, state: existingAct.state } : a
-            }
-            return a
-          })
+          const incomingSensors = Array.isArray(device.sensors)
+            ? device.sensors
+            : (existing?.sensors ?? [])
+          const incomingActuators = Array.isArray(device.actuators)
+            ? device.actuators
+            : (existing?.actuators ?? [])
+          const mergedSensors = mergeLiveSensorLists(
+            incomingSensors as MockSensor[],
+            existing?.sensors as MockSensor[] | undefined,
+          )
+          const mergedActuators = mergeLiveActuatorLists(
+            incomingActuators as MockActuator[],
+            existing?.actuators as MockActuator[] | undefined,
+            id,
+            actStore,
+          )
           // Preserve live WS-updated fields when they are fresher than the DB snapshot.
           const fresherLastSeen = existing
             ? pickFresherIso(device.last_seen, existing.last_seen)
@@ -454,7 +588,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
             : device.last_heartbeat
           const mergedDevice: ESPDevice = {
             ...device,
-            sensors: Array.isArray(device.sensors) ? device.sensors : (existing?.sensors ?? []),
+            sensors: mergedSensors,
             actuators: mergedActuators,
             last_seen: fresherLastSeen,
             last_heartbeat: fresherLastHb,
@@ -462,9 +596,9 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
               ? keepFreshOnlineStatus(device.status, existing.status, fresherLastSeen)
               : device.status,
             connected: existing
-              ? (keepFreshOnlineStatus(device.status, existing.status, fresherLastSeen) === 'online'
-                  ? true
-                  : device.connected)
+              ? keepFreshOnlineStatus(device.status, existing.status, fresherLastSeen) === 'online'
+                ? true
+                : device.connected
               : device.connected,
           }
           dedupedDevices.push(mergedDevice)
@@ -489,32 +623,46 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
 
     try {
       const device = await espApi.getDevice(deviceId)
-      
+
       // Update device in list if exists, otherwise add.
       // Preserve live WS-updated timestamps/status: a DB snapshot fetched
-      // right after saving config can be slightly behind the real-time WS state
-      // (e.g. last_seen not yet written to DB, or status still 'offline' after
-      // a brief blip that WS already resolved to 'online').
+      // right after saving config can be slightly behind the real-time WS state.
       const index = devices.value.findIndex(d =>
         getDeviceId(d) === getDeviceId(device)
       )
       if (index !== -1) {
         const existing = devices.value[index]
+        const deviceId = getDeviceId(device)
+        const actStore = useActuatorStore()
         const fresherLastSeen = pickFresherIso(device.last_seen, existing.last_seen)
-        const fresherLastHb   = pickFresherIso(device.last_heartbeat, existing.last_heartbeat)
-        applyDevicePatch(getDeviceId(device), () => ({
+        const fresherLastHb = pickFresherIso(device.last_heartbeat, existing.last_heartbeat)
+        const incomingSensors = Array.isArray(device.sensors)
+          ? (device.sensors as MockSensor[])
+          : ((existing.sensors ?? []) as MockSensor[])
+        const incomingActuators = Array.isArray(device.actuators)
+          ? (device.actuators as MockActuator[])
+          : ((existing.actuators ?? []) as MockActuator[])
+        applyDevicePatch(deviceId, () => ({
           ...device,
-          last_seen:     fresherLastSeen,
+          sensors: mergeLiveSensorLists(incomingSensors, existing.sensors as MockSensor[] | undefined),
+          actuators: mergeLiveActuatorLists(
+            incomingActuators,
+            existing.actuators as MockActuator[] | undefined,
+            deviceId,
+            actStore,
+          ),
+          last_seen: fresherLastSeen,
           last_heartbeat: fresherLastHb,
-          status:    keepFreshOnlineStatus(device.status, existing.status, fresherLastSeen),
+          status: keepFreshOnlineStatus(device.status, existing.status, fresherLastSeen),
           connected: keepFreshOnlineStatus(device.status, existing.status, fresherLastSeen) === 'online'
             ? true
             : device.connected,
         }))
-      } else {
-        replaceDevices([...devices.value, device])
+        const patched = devices.value.find((entry) => getDeviceId(entry) === deviceId)
+        return patched ?? device
       }
-      
+
+      replaceDevices([...devices.value, device])
       return device
     } catch (err: unknown) {
       error.value = extractErrorMessage(err, `Failed to fetch device ${deviceId}`)
@@ -853,7 +1001,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   async function addSensor(
     deviceId: string,
     config: MockSensorConfig & { operating_mode?: string; timeout_seconds?: number }
-  ): Promise<{ correlation_id?: string | null; push_status?: ConfigPushStatus | null }> {
+  ): Promise<void> {
     error.value = null
 
     try {
@@ -862,8 +1010,6 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         // MOCK-ESP: Debug-API verwenden (bestehende Logik)
         // =========================================================================
         await debugApi.addSensor(deviceId, config)
-        await fetchDevice(deviceId)
-        return {}
 
       } else {
         // =========================================================================
@@ -904,13 +1050,11 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
           }
         }
 
-        const created = await sensorsApi.createOrUpdate(deviceId, config.gpio, realConfig)
-        await fetchDevice(deviceId)
-        return {
-          correlation_id: created.correlation_id ?? null,
-          push_status: created.push_status ?? null,
-        }
+        await sensorsApi.createOrUpdate(deviceId, config.gpio, realConfig)
       }
+
+      // UI aktualisieren
+      await fetchDevice(deviceId)
     } catch (err: unknown) {
       error.value = extractErrorMessage(err, 'Failed to add sensor')
       throw err
@@ -1092,10 +1236,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     }
   }
 
-  async function addActuator(
-    deviceId: string,
-    config: MockActuatorConfig,
-  ): Promise<{ correlation_id?: string | null; push_status?: ConfigPushStatus | null }> {
+  async function addActuator(deviceId: string, config: MockActuatorConfig): Promise<void> {
     error.value = null
     const mock = isMock(deviceId)
     logger.info('[DnD] addActuator called', { deviceId, actuatorType: config.actuator_type, gpio: config.gpio, isMock: mock })
@@ -1106,8 +1247,6 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         // MOCK-ESP: Debug-API verwenden (bestehende Logik)
         // =========================================================================
         await debugApi.addActuator(deviceId, config)
-        await fetchDevice(deviceId)
-        return {}
       } else {
         // =========================================================================
         // REAL-ESP: Actuator-API verwenden (analog zu addSensor Phase 2B)
@@ -1128,13 +1267,11 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
             ...(config.inverted_logic ? { inverted_logic: true } : {}),
           }
         }
-        const created = await actuatorsApi.createOrUpdate(deviceId, config.gpio, realConfig)
-        await fetchDevice(deviceId)
-        return {
-          correlation_id: created.correlation_id ?? null,
-          push_status: created.push_status ?? null,
-        }
+        await actuatorsApi.createOrUpdate(deviceId, config.gpio, realConfig)
       }
+
+      // UI aktualisieren
+      await fetchDevice(deviceId)
     } catch (err: unknown) {
       error.value = extractErrorMessage(err, 'Failed to add actuator')
       throw err
@@ -1774,11 +1911,9 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
 
     const toast = useToast()
     const sensorLabel = data.sensor_type ? ` (${data.sensor_type})` : ''
-    // Use a dedupe key that covers both the panel's "accepted" toast (gpio:type) and
-    // the config_id path so either form prevents a duplicate success toast.
-    toast.success(`Sensor entfernt${sensorLabel} — Liste aktualisiert`, {
-      duration: 4000,
-      dedupeKey: `sensor-delete:${data.esp_id}:${data.gpio}:${data.sensor_type ?? 'unknown'}`,
+    toast.info(`Sensor entfernt${sensorLabel}`, {
+      duration: 3000,
+      dedupeKey: `sensor-delete:${data.esp_id}:${data.config_id ?? `${data.gpio}:${data.sensor_type ?? 'unknown'}`}`,
     })
   }
 
@@ -1814,10 +1949,8 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     })
 
     const toast = useToast()
-    // success toast matches the panel's "Löschauftrag akzeptiert" info-toast dedupeKey pattern.
-    // Panel uses "actuator-delete:${espId}:${gpio}" → same key suppresses info and replaces with success.
-    toast.success(`Aktor entfernt (GPIO ${data.gpio}) — Liste aktualisiert`, {
-      duration: 4000,
+    toast.info(`Aktor entfernt (GPIO ${data.gpio})`, {
+      duration: 3000,
       dedupeKey: `actuator-delete:${data.esp_id}:${data.gpio}`,
     })
   }
@@ -2005,15 +2138,9 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   }
 
   // =============================================================================
-  // Logic Execution Handler - applies actuator state from rule execution outcome
+  // Logic execution (cross-ESP automation) — live actuator state in Monitor L2
   // =============================================================================
 
-  /**
-   * Apply actuator state from logic_execution WS event.
-   * logic_execution arrives reliably when any rule fires (simpler and sequences alike).
-   * actuator_command may be blocked by the concurrent-intent guard for cycling rules,
-   * so we use this event as the primary real-time state source in MonitorView.
-   */
   function handleLogicExecution(message: { data: Record<string, unknown> }): void {
     const data = message.data
     if (!data.success) return
@@ -2097,8 +2224,6 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
 
     // Reliable fallback: finalize pending actuator intents via intent_outcome (QoS 1).
     // actuator_response is QoS 0 and can be lost under MQTT network stress.
-    // When flow='command' arrives with a terminal outcome, the actuator store finalizes
-    // the intent if actuator_response has not already done so (idempotent guard inside).
     const flow = typeof message.data.flow === 'string' ? message.data.flow : ''
     const outcome = typeof message.data.outcome === 'string' ? message.data.outcome : ''
     if (flow === 'command' && ['applied', 'failed', 'rejected', 'expired'].includes(outcome)) {
@@ -2383,6 +2508,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   return {
     // State
     devices,
+    devicesLiveTick,
     selectedDeviceId,
     isLoading,
     error,
@@ -2408,6 +2534,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     // Actions
     fetchAll,
     fetchDevice,
+    ensureRealtimeHandlers,
     createDevice,
     updateDevice,
     updateDeviceZone,

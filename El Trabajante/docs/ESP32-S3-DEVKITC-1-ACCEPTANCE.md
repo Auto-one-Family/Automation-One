@@ -71,4 +71,25 @@ mosquitto_sub -h <broker> -t 'kaiser/+/esp/+/sensor/+/data' -v
 | S3-Pinout | GPIO 17/18 in `SAFE_GPIO_PINS`, kein Konflikt I2C 8/9, USB 19/20, Flash 26–37 |
 | Warmup | ~3 min nach `configureSensor` — Messungen bis dahin `quality=warming_up` |
 | Driver | `src/drivers/mhz19_uart.cpp` — RAW ppm, `raw_mode: true` |
-| Runtime | **PASS** (2026-05-29) — CO2-Werte im Frontend nach Warmup |
+| Runtime | **PASS** (2026-05-29) — CO2-Werte im Frontend nach Warmup; Config `gpio=18`, `rx=18`, `tx=17` |
+
+### Operator-UI (ein Pin reicht)
+
+| UI-Feld | Wert S3 (ESP_AEAE64) | Bedeutung |
+|---------|----------------------|-----------|
+| GPIO (Dashboard) | **18** | Logischer Slot **und** `uart_rx_pin` (ESP empfängt ← Sensor TX) |
+| `uart_tx_pin` | **17** (automatisch) | Server `config_builder` / MQTT-Fallback — **nicht** im UI einstellbar |
+
+### Löschen / NVS-Geister (AUT-527)
+
+| Problem | Ursache | Lösung |
+|---------|---------|--------|
+| GPIO 18 „belegt“ nach UI-Löschen | Alter CO₂-Slot in NVS auf GPIO **17** (reserviert 17+18) | CO₂ in UI **löschen** (Tombstone-Push) — Server sendet für `co2` **zwei** `active:false`-Einträge (GPIO 17 **und** 18) |
+| Tombstone schlägt fehl (`UART sensor missing uart_rx_pin`) | Firmware validierte Lösch-Payload vor `active:false` | Behoben: `parseAndConfigureSensorWithTracking()` verarbeitet **`active:false` vor** `validateSensorConfig()`; CO₂-Fallback entfernt Slot 17/18 |
+
+**Serial-Erfolg nach Löschen + Neu-Anlegen:**
+
+```text
+Configured UART CO2 … rx=18 tx=17
+ConfigResponse … success=3 failed=0
+```

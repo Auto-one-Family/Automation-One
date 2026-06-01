@@ -273,6 +273,37 @@ DEFAULT_SENSOR_MAPPINGS: List[Dict[str, Any]] = [
         "required": False,
         "default": 0,
     },
+    # =============================================================
+    # UART sensor fields (AUT-576: SEN0220 / MH-Z16 CO2 via UART)
+    #
+    # UART pins are stored in sensor_metadata by the API layer when
+    # the operator creates a CO2 sensor with interface_type=UART.
+    # The ESP32 firmware reads uart_rx_pin / uart_tx_pin / uart_baud
+    # from the config payload top-level to initialise Serial2.
+    #
+    # Default 255 = "not set" (same sentinel the firmware uses in NVS).
+    # =============================================================
+    {
+        "source": "sensor_metadata.uart_rx_pin",
+        "target": "uart_rx_pin",
+        "field_type": "int",
+        "required": False,
+        "default": 255,
+    },
+    {
+        "source": "sensor_metadata.uart_tx_pin",
+        "target": "uart_tx_pin",
+        "field_type": "int",
+        "required": False,
+        "default": 255,
+    },
+    {
+        "source": "sensor_metadata.uart_baud",
+        "target": "uart_baud",
+        "field_type": "int",
+        "required": False,
+        "default": 9600,
+    },
 ]
 
 

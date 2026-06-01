@@ -180,6 +180,8 @@ Zusätzlich: `src/core/validators.py` → `validate_gpio(gpio, board_type)` und 
 - **VIRTUAL-Filter** bleibt: `interface_type == "VIRTUAL"` wird vor ESP-Push ausgeschlossen (serverseitig berechnet, z. B. VPD).
 - **Multi-Value-Expand** (SHT31 → `sht31_temp` + `sht31_humidity`): über `sensor_type_registry.normalize_sensor_type()` / `SENSOR_TYPE_MAPPING` — **keine** S3-spezifischen Sub-Types (Default: nein).
 - GPIO-Konflikt-Check im Builder nutzt DB-Zuordnung; harte Pin-Grenzen gehören in **`gpio_validation_service`** (vor Persistenz in API), nicht in den Push-Builder.
+- **UART-CO2 Fallback** (`build_sensor_payload()`): Wenn `uart_rx_pin == 255` (unset), setzt Builder Laufzeit-Fallback: `uart_rx_pin = sensor.gpio`, `uart_tx_pin = {17→18, 18→17}[gpio]` (UART1-Paar ESP32-S3). Explizite Pins aus `sensor_metadata` haben Vorrang.
+- **CO₂-Löschen / Tombstones** (`DELETE /sensors/{esp_id}/{config_id}` → `sensors.py::_build_sensor_delete_tombstones()`): Nach DB-Delete werden `extra_sensor_entries` an den Config-Push angehängt — `active: false` pro Slot. Bei `sensor_type=co2` **zwei** Einträge (GPIO **gpio** und UART1-Komplement **17↔18**), jeweils mit `uart_rx_pin`/`uart_tx_pin`/`uart_baud=9600`, damit der ESP NVS-Geister auf dem falschen logischen GPIO entfernt (DB gpio=18 vs. NVS gpio=17).
 
 ### Sensor-Type-Registry
 

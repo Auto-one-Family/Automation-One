@@ -210,12 +210,13 @@
   --z-fab:            38;  /* Quick Action Ball — above tray, below modal-backdrop */
   --z-modal-backdrop: 40;
   --z-modal:          50;
-  --z-dialog:         65;  /* BaseModal/ConfirmDialog — above SlideOver high (60) */
+  --z-dialog:         65;  /* BaseModal (generic) — above SlideOver high (60) */
   --z-popover:        60;
   --z-tooltip:        70;
   --z-drag-overlay:   72;  /* drag feedback — ephemeral, above tooltip */
-  --z-toast:          73;  /* toasts — above modals, below safety */
-  --z-safety:         75;  /* EmergencyStop — highest interactive priority */
+  --z-prompt:         78;  /* ConfirmDialog — above other BaseModals (e.g. ConfigWizardModal at 65) */
+  --z-toast:          80;  /* toasts — above modals and prompts */
+  --z-safety:         85;  /* EmergencyStop — highest interactive priority */
 
   /* ═══════════════════════════════════════════════════════════════════════════
      BACKDROP / OVERLAY
@@ -270,6 +271,11 @@
   --color-status-ok:       var(--color-status-good);
   --color-status-warn:     var(--color-status-warning);
   --color-status-offl:     var(--color-status-offline);
+
+  /* Alert lifecycle state colors (AUT-561) */
+  --color-status-active:       var(--color-error);
+  --color-status-acknowledged: var(--color-warning);
+  --color-status-resolved:     var(--color-success);
 
   /* ═══════════════════════════════════════════════════════════════════════════
      THRESHOLD ZONES — For charts and range sliders

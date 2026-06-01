@@ -290,6 +290,58 @@ describe('ESP Store - fetchAll', () => {
     expect(ids).not.toContain('ESP_STALE_001')
   })
 
+  it('should preserve fresher in-memory sensor readings when DB snapshot is older', async () => {
+    const liveLastRead = '2026-06-01T12:00:00.000Z'
+    const staleLastRead = '2026-06-01T11:00:00.000Z'
+
+    server.use(
+      http.get('/api/v1/esp/devices', () => {
+        return HttpResponse.json({
+          data: [{
+            ...mockESPDevice,
+            device_id: 'ESP_TEST_001',
+            esp_id: 'ESP_TEST_001',
+            sensors: [{
+              ...mockSensor,
+              gpio: 4,
+              sensor_type: 'sht31_temp',
+              raw_value: 19.5,
+              last_read: staleLastRead,
+            }],
+            actuators: [],
+          }],
+          total: 1,
+        })
+      }),
+      http.get('/api/v1/debug/mock-esp', () => {
+        return HttpResponse.json({ success: true, data: [], total: 0 })
+      }),
+    )
+
+    const store = useEspStore()
+    store.replaceDevices([{
+      ...mockESPDevice,
+      device_id: 'ESP_TEST_001',
+      esp_id: 'ESP_TEST_001',
+      sensors: [{
+        ...mockSensor,
+        gpio: 4,
+        sensor_type: 'sht31_temp',
+        raw_value: 23.1,
+        last_read: liveLastRead,
+        last_event_at: liveLastRead,
+      }],
+      actuators: [],
+    } as any])
+
+    await store.fetchAll()
+
+    const device = store.devices.find((entry) => (entry.device_id || entry.esp_id) === 'ESP_TEST_001')
+    const sensor = device?.sensors?.[0] as { raw_value?: number; last_read?: string } | undefined
+    expect(sensor?.raw_value).toBe(23.1)
+    expect(sensor?.last_read).toBe(liveLastRead)
+  })
+
   it('should preserve existing sensors/actuators when snapshot omits arrays', async () => {
     server.use(
       http.get('/api/v1/esp/devices', () => {

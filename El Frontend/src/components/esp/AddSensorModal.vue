@@ -13,12 +13,9 @@
 import { ref, computed, watch } from 'vue'
 import { Loader2, ScanLine, AlertCircle, Info, Thermometer, Plus, CheckSquare, Square, Check } from 'lucide-vue-next'
 import GpioPicker from './GpioPicker.vue'
-import { useBoardLayout } from '@/composables/useBoardLayout'
 import SubzoneAssignmentSection from '@/components/devices/SubzoneAssignmentSection.vue'
 import { Badge, BaseModal } from '@/shared/design/primitives'
 import { useEspStore } from '@/stores/esp'
-import { useActuatorStore } from '@/shared/stores/actuator.store'
-import { notifyConfigAddPush } from '@/utils/configPushAck'
 import { useToast } from '@/composables/useToast'
 import {
   SENSOR_TYPE_CONFIG,
@@ -31,7 +28,7 @@ import {
   inferInterfaceType,
   getI2CAddressOptions,
 } from '@/utils/sensorDefaults'
-import { getRecommendedGpios, type HardwareType } from '@/utils/gpioConfig'
+import { getRecommendedGpios } from '@/utils/gpioConfig'
 import { normalizeSubzoneId } from '@/utils/subzoneHelpers'
 import type { MockSensorConfig } from '@/types'
 import { createLogger } from '@/utils/logger'
@@ -56,7 +53,6 @@ const emit = defineEmits<{
 }>()
 
 const espStore = useEspStore()
-const actuatorStore = useActuatorStore()
 const toast = useToast()
 
 // ── Form State ───────────────────────────────────────────────────────
@@ -65,7 +61,7 @@ const defaultSensorType = 'ds18b20'
 const sensorTypeOptions = getSensorTypeOptions()
 
 const newSensor = ref<MockSensorConfig & { operating_mode?: string; timeout_seconds?: number }>({
-  gpio: 4,
+  gpio: 0,
   sensor_type: defaultSensorType,
   name: '',
   subzone_id: null,
@@ -97,8 +93,9 @@ watch(() => newSensor.value.sensor_type, (newType) => {
     const options = getI2CAddressOptions(newType)
     selectedI2CAddress.value = options.length > 0 ? options[0].value : null
   } else {
-    const rec = getRecommendedGpios(newType, 'sensor', deviceHardwareType.value as HardwareType | null)
-    newSensor.value.gpio = rec.length > 0 ? rec[0] : 4
+    // BUG-1: Default to first recommended GPIO (avoid invalid GPIO 0)
+    const rec = getRecommendedGpios(newType, 'sensor')
+    newSensor.value.gpio = rec.length > 0 ? rec[0] : 32
     selectedI2CAddress.value = null
   }
 })
@@ -204,7 +201,7 @@ const supportsOnDemand = computed(() => {
   return config?.supportsOnDemand ?? false
 })
 
-const oneWireScanPins = computed(() => getRecommendedGpios('ds18b20', 'sensor', deviceHardwareType.value as HardwareType | null))
+const oneWireScanPins = computed(() => getRecommendedGpios('ds18b20', 'sensor'))
 
 /** GPIO used for subzone assignment (create-new flow); varies by sensor type */
 const effectiveGpio = computed(() => {
@@ -218,9 +215,6 @@ const device = computed(() =>
 )
 const zoneId = computed(() => device.value?.zone_id ?? null)
 
-const deviceHardwareType = computed(() => device.value?.hardware_type ?? null)
-const { i2cDefaultLabel } = useBoardLayout(deviceHardwareType)
-
 /** Subzone v-model: SubzoneAssignmentSection expects string | null, form may have undefined */
 const subzoneModel = computed({
   get: () => newSensor.value.subzone_id ?? null,
@@ -229,7 +223,7 @@ const subzoneModel = computed({
 
 // ── Shared Payload Builder ───────────────────────────────────────────
 
-type SensorPayload = MockSensorConfig & { operating_mode?: string; timeout_seconds?: number; i2c_address?: number | null; i2c_bus?: number }
+type SensorPayload = MockSensorConfig & { operating_mode?: string; timeout_seconds?: number; i2c_address?: number | null }
 
 /** Build sensor API payload from form state. Used by BOTH I2C and OneWire flows. */
 function buildSensorPayload(overrides: Partial<SensorPayload> = {}): SensorPayload {
@@ -261,7 +255,7 @@ function resetForm() {
     ? oneWireScanPin.value
     : inferInterfaceType(st) === 'I2C'
       ? 0
-      : (getRecommendedGpios(st, 'sensor', deviceHardwareType.value as HardwareType | null)[0] ?? 4)
+      : (getRecommendedGpios(st, 'sensor')[0] ?? 32)
   newSensor.value = {
     gpio: defaultGpio,
     sensor_type: defaultSensorType,
@@ -281,28 +275,18 @@ function resetForm() {
 async function addSensor() {
   try {
     const i2cOverrides: Partial<SensorPayload> = isI2CSensor.value && selectedI2CAddress.value !== null
-      ? { interface_type: 'I2C' as const, i2c_address: selectedI2CAddress.value, i2c_bus: 0, gpio: 0 }
+      ? { interface_type: 'I2C' as const, i2c_address: selectedI2CAddress.value, gpio: 0 }
       : {}
     const sensorData = buildSensorPayload(i2cOverrides)
-    const ack = await espStore.addSensor(props.espId, sensorData)
-    const mvDevice = MULTI_VALUE_DEVICES[sensorData.sensor_type.toLowerCase()]
-    const label = mvDevice
-      ? `${mvDevice.label}: ${mvDevice.values.length} Messwerte`
-      : `Sensor ${sensorData.sensor_type} an GPIO ${sensorData.gpio}`
-    const successFallback = mvDevice
-      ? `${mvDevice.label}: ${mvDevice.values.length} Messwerte erstellt`
-      : 'Sensor erfolgreich hinzugefügt'
+    await espStore.addSensor(props.espId, sensorData)
 
-    notifyConfigAddPush(
-      ack as Record<string, unknown>,
-      label,
-      successFallback,
-      `${props.espId}:sensor-add:${sensorData.gpio}:${sensorData.sensor_type}`,
-      toast,
-      actuatorStore,
-      props.espId,
-      `sensor-add:${sensorData.gpio}:${sensorData.sensor_type}`,
-    )
+    // Multi-value sensors create multiple configs on the server
+    const mvDevice = MULTI_VALUE_DEVICES[sensorData.sensor_type.toLowerCase()]
+    if (mvDevice) {
+      toast.success(`${mvDevice.label}: ${mvDevice.values.length} Messwerte erstellt`)
+    } else {
+      toast.success('Sensor erfolgreich hinzugefügt')
+    }
 
     close()
     resetForm()
@@ -482,8 +466,7 @@ function onSensorGpioValidation(valid: boolean, _message: string | null): void {
           <option v-for="opt in i2cAddressOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
         </select>
         <p class="form-hint">
-          <Info :size="12" class="inline-block mr-1 opacity-70" />
-          I2C-Bus: {{ i2cDefaultLabel ?? 'Wird automatisch nach ESP-Heartbeat gesetzt' }}
+          <Info :size="12" class="inline-block mr-1 opacity-70" />I2C-Bus: SDA/SCL werden automatisch konfiguriert
         </p>
       </div>
 

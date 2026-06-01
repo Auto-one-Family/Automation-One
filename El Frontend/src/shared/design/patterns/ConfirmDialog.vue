@@ -62,6 +62,7 @@ watch(isOpen, async (open) => {
     :open="isOpen"
     :title="state.title"
     max-width="max-w-md"
+    level="prompt"
     :show-close="false"
     :close-on-overlay="false"
     :close-on-escape="false"

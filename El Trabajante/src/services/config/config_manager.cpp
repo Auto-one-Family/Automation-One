@@ -1636,6 +1636,7 @@ static void buildActuatorKey(char* buffer, size_t buffer_size, uint8_t index, co
 #define NVS_SEN_UART_RX    "sen_%d_urx"      // UART RX pin
 #define NVS_SEN_UART_TX    "sen_%d_utx"      // UART TX pin
 #define NVS_SEN_UART_BAUD  "sen_%d_ubd"      // UART baud rate
+#define NVS_SEN_QOS        "sen_%d_qos"      // AUT-576: publish_qos (0=QoS-0, 1=QoS-1); 10 chars ✅
 
 // Legacy keys (deprecated, some >15 chars - kept for migration only)
 // NOTE: Old keys "sensor_%d_*" were OK for small indices but:
@@ -1984,6 +1985,13 @@ bool ConfigManager::saveSensorConfig(const SensorConfig& config) {
   snprintf(key, sizeof(key), NVS_SEN_UART_BAUD, index);
   success &= storageManager.putULong(key, config.uart_baud);
 
+  // AUT-576: persist publish_qos so QoS-adaptive rule stays valid after reboot.
+  // AUT-555 introduced publish_qos in SensorConfig but omitted NVS persistence;
+  // after reboot loadSensorConfig() restored sensors with publish_qos=0 (default),
+  // discarding the server-assigned QoS-1 for rule-trigger sensors.
+  snprintf(key, sizeof(key), NVS_SEN_QOS, index);
+  success &= storageManager.putUInt8(key, config.publish_qos);
+
   // Update count if new sensor (use new key only!)
   if (existing_index < 0) {
     success &= storageManager.putUInt8(NVS_SEN_COUNT, sensor_count + 1);
@@ -2172,6 +2180,11 @@ bool ConfigManager::loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors
 
     snprintf(new_key, sizeof(new_key), NVS_SEN_UART_BAUD, i);
     config.uart_baud = storageManager.getULong(new_key, 9600);
+
+    // AUT-576: restore publish_qos from NVS (default 0 = QoS-0 for pre-AUT-576 entries).
+    // Without NVS persistence the AUT-555 QoS-adaptive rule was lost after every reboot.
+    snprintf(new_key, sizeof(new_key), NVS_SEN_QOS, i);
+    config.publish_qos = storageManager.getUInt8(new_key, 0);
 
     // Reset runtime fields
     config.last_raw_value = 0;

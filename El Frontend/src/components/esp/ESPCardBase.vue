@@ -33,7 +33,8 @@ const espRef = toRef(() => props.esp)
 const {
   status,
   statusColor,
-  statusText,
+  statusDetailLabel,
+  statusTooltip,
   statusPulse,
   isOnline,
   isMock,
@@ -63,7 +64,7 @@ const sizeClass = computed(() => `esp-card-base--${props.variant}`)
     :style="{ borderLeftColor: borderColor }"
     :role="interactive ? 'button' : undefined"
     :tabindex="interactive ? 0 : undefined"
-    :aria-label="`${displayName}, Status: ${statusText}`"
+    :aria-label="`${displayName}, Status: ${statusDetailLabel}`"
   >
     <!-- Header: Status dot + Name + Badge + Actions slot -->
     <div class="esp-card-base__header esp-drag-handle">
@@ -71,7 +72,8 @@ const sizeClass = computed(() => `esp-card-base--${props.variant}`)
         class="esp-card-base__status-dot"
         :class="{ 'esp-card-base__status-dot--pulse': statusPulse }"
         :style="{ backgroundColor: statusColor }"
-        :title="statusText"
+        :title="statusTooltip"
+        :aria-label="statusDetailLabel"
       />
       <span class="esp-card-base__name">
         <slot name="name" :display-name="displayName" :device-id="deviceId">
@@ -86,7 +88,7 @@ const sizeClass = computed(() => `esp-card-base--${props.variant}`)
 
     <!-- Status text (last seen) — hidden on mini variant -->
     <div v-if="variant !== 'mini'" class="esp-card-base__status-line">
-      <span class="esp-card-base__status-text" :style="{ color: statusColor }">{{ statusText }}</span>
+      <span class="esp-card-base__status-text" :style="{ color: statusColor }">{{ statusDetailLabel }}</span>
       <span class="esp-card-base__last-seen">{{ lastSeenText }}</span>
     </div>
 

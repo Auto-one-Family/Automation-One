@@ -15,11 +15,11 @@
  * - Chart panel expands within center card (not overlaying satellites)
  */
 
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, watchEffect } from 'vue'
 import { X, Heart, Settings2, Loader2, Pencil, Check } from 'lucide-vue-next'
 import ESPCard from './ESPCard.vue'
-import SensorColumn from './SensorColumn.vue'
-import ActuatorColumn from './ActuatorColumn.vue'
+import SensorSatellite from './SensorSatellite.vue'
+import ActuatorSatellite from './ActuatorSatellite.vue'
 import AddSensorModal from './AddSensorModal.vue'
 import AddActuatorModal from './AddActuatorModal.vue'
 import AnalysisDropZone from './AnalysisDropZone.vue'
@@ -71,8 +71,15 @@ const emit = defineEmits<{
   'name-updated': [payload: { deviceId: string; name: string | null }]
 }>()
 
+/** Live device from esp.store — props alone can lag behind WS patches (AUT-580 L2). */
+const liveDevice = computed(() => {
+  void espStore.devicesLiveTick
+  const id = espStore.getDeviceId(props.device)
+  return espStore.devices.find((entry) => espStore.getDeviceId(entry) === id) ?? props.device
+})
+
 // ── Device Actions (shared composable) ───────────────────────────────
-const actions = useDeviceActions(() => props.device)
+const actions = useDeviceActions(() => liveDevice.value)
 const {
   espId, isMock, displayName, isOnline, systemState, stateInfo,
   wifiInfo, wifiColorClass, wifiDisplayLabel, wifiTooltip,
@@ -100,11 +107,11 @@ const availableZones = computed(() => getAvailableZones(espStore.devices))
 
 async function handleZoneChanged(_deviceId: string, zoneId: string | null) {
   if (zoneId === null) {
-    await handleRemoveFromZone(props.device)
+    await handleRemoveFromZone(liveDevice.value)
   } else {
     await handleDeviceDrop({
-      device: props.device,
-      fromZoneId: props.device.zone_id || null,
+      device: liveDevice.value,
+      fromZoneId: liveDevice.value.zone_id || null,
       toZoneId: zoneId,
     })
   }
@@ -129,11 +136,11 @@ const selectedType = ref<'sensor' | 'actuator' | null>(null)
 // Computed: Device Data
 // =============================================================================
 const sensors = computed<MockSensor[]>(() => {
-  return (props.device?.sensors as MockSensor[]) || []
+  return (liveDevice.value.sensors as MockSensor[]) || []
 })
 
 const actuators = computed<MockActuator[]>(() => {
-  return (props.device?.actuators as MockActuator[]) || []
+  return (liveDevice.value.actuators as MockActuator[]) || []
 })
 
 const actuatorRuntimeMap = computed(() => {
@@ -154,13 +161,106 @@ const totalItems = computed(() => {
   return sensors.value.length + actuators.value.length
 })
 
-/**
- * Determine if sensors should use multi-row layout.
- * - <=5 sensors: single row (horizontal)
- * - >5 sensors: 2-column grid (wraps into multiple rows)
- */
-const sensorsUseMultiRow = computed(() => {
-  return sensors.value.length > 5
+/** Merged sorted satellite list: sensors (sorted) followed by actuators */
+const sortedSatellites = computed(() => {
+  const sensorItems = [...sensors.value]
+    .sort((a, b) => {
+      const typeCompare = (a.sensor_type || '').localeCompare(b.sensor_type || '')
+      if (typeCompare !== 0) return typeCompare
+      return (a.i2c_address ?? 0) - (b.i2c_address ?? 0)
+    })
+    .map(s => ({ ...s, kind: 'sensor' as const, key: s.config_id || `sensor-${s.gpio}-${s.sensor_type}` }))
+
+  const actuatorItems = [...actuators.value]
+    .map(a => ({ ...a, kind: 'actuator' as const, key: `actuator-${a.gpio}` }))
+
+  return [...sensorItems, ...actuatorItems]
+})
+
+/** Normalized (cos/sin) orbit positions per satellite — CSS handles pixel calculation via --orbit-radius */
+const orbitPositions = computed(() => {
+  const total = sortedSatellites.value.length
+  if (total === 0) return []
+  return sortedSatellites.value.map((sat, index) => {
+    const angle = (2 * Math.PI * index) / total - Math.PI / 2
+    return {
+      ...sat,
+      txNorm: Math.round(Math.cos(angle) * 10000) / 10000,
+      tyNorm: Math.round(Math.sin(angle) * 10000) / 10000,
+      transitionDelay: `${index * 0.07}s`,
+    }
+  })
+})
+
+const visibleSatellites = ref(false)
+const containerW = ref(720)
+const containerH = ref(420)
+// CSS-derived base orbit radii (from --orbit-radius breakpoints, NOT sat-count adjusted)
+const orbitRadiusX = ref(270)
+const orbitRadiusY = ref(210)
+let orbitalResizeObserver: ResizeObserver | null = null
+
+// Minimum orbit rx so adjacent satellites don't overlap (card width 150px + 10px gap).
+// Computed from the tightest pair on an N-satellite ellipse with given aspect ratio.
+function computeMinOrbitRX(n: number, rxBase: number, ryBase: number): number {
+  if (n <= 2) return rxBase
+  const angleStep = (2 * Math.PI) / n
+  const k = ryBase / Math.max(rxBase, 1)
+  const dFactor = Math.sqrt(
+    Math.pow(1 - Math.cos(angleStep), 2) +
+    Math.pow(k * Math.sin(angleStep), 2),
+  )
+  return dFactor > 0 ? 160 / dFactor : rxBase
+}
+
+// Effective orbit radii: scale up uniformly when satellite count demands it
+const effectiveRX = computed(() => {
+  const minRX = computeMinOrbitRX(sortedSatellites.value.length, orbitRadiusX.value, orbitRadiusY.value)
+  return Math.max(orbitRadiusX.value, minRX)
+})
+
+const effectiveRY = computed(() => {
+  if (orbitRadiusX.value <= 0) return orbitRadiusY.value
+  return orbitRadiusY.value * (effectiveRX.value / orbitRadiusX.value)
+})
+
+// Keep CSS custom properties in sync so satellite transforms stay correct
+watchEffect(() => {
+  const el = containerRef.value
+  if (!el) return
+  el.style.setProperty('--orbit-radius-x', `${Math.round(effectiveRX.value)}px`)
+  el.style.setProperty('--orbit-radius-y', `${Math.round(effectiveRY.value)}px`)
+})
+
+onMounted(() => {
+  requestAnimationFrame(() => { visibleSatellites.value = true })
+  if (containerRef.value) {
+    orbitalResizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+      containerW.value = entry.contentRect.width
+      containerH.value = entry.contentRect.height
+      // Read the RAW --orbit-radius base (not the JS-overridden --orbit-radius-x/y)
+      const cs = window.getComputedStyle(entry.target)
+      const base = parseFloat(cs.getPropertyValue('--orbit-radius').trim()) || 280
+      orbitRadiusX.value = Math.max(270, base * 1.3)
+      orbitRadiusY.value = Math.max(150, base * 0.75)
+    })
+    orbitalResizeObserver.observe(containerRef.value)
+  }
+})
+
+watch(
+  () => sortedSatellites.value.length,
+  () => {
+    visibleSatellites.value = false
+    requestAnimationFrame(() => { visibleSatellites.value = true })
+  },
+)
+
+onUnmounted(() => {
+  orbitalResizeObserver?.disconnect()
+  orbitalResizeObserver = null
 })
 
 // =============================================================================
@@ -216,22 +316,88 @@ function handleActuatorClick(gpio: number) {
     @dragleave="onDragLeave"
     @drop="onDrop"
   >
-    <!-- Left Column: Sensors (uses extracted SensorColumn) -->
-    <SensorColumn
-      :esp-id="espId"
-      :sensors="sensors"
-      :selected-gpio="selectedGpio !== null && selectedType === 'sensor' ? selectedGpio : null"
-      :show-connections="showConnections"
-      class="esp-horizontal-layout__column esp-horizontal-layout__column--sensors"
-      :class="{
-        'esp-horizontal-layout__column--multi-row': sensorsUseMultiRow,
-        'esp-horizontal-layout__column--empty': sensors.length === 0
-      }"
-      @sensor-click="handleSensorClick"
-    />
+    <!-- Orbital SVG Overlay: decorative orbit ellipse + radial connection lines (S6) -->
+    <svg
+      class="esp-orbital-svg"
+      :width="containerW"
+      :height="containerH"
+      :viewBox="`0 0 ${containerW} ${containerH}`"
+      aria-hidden="true"
+    >
+      <ellipse
+        class="esp-orbital-svg__ring"
+        :cx="containerW / 2"
+        :cy="containerH / 2"
+        :rx="effectiveRX"
+        :ry="effectiveRY"
+      />
+      <line
+        v-for="sat in orbitPositions"
+        :key="`line-${sat.key}`"
+        class="esp-orbital-svg__line"
+        :class="{ 'esp-orbital-svg__line--visible': visibleSatellites }"
+        :x1="containerW / 2"
+        :y1="containerH / 2"
+        :x2="containerW / 2 + sat.txNorm * effectiveRX"
+        :y2="containerH / 2 + sat.tyNorm * effectiveRY"
+        :style="{ 'transition-delay': sat.transitionDelay, 'animation-delay': sat.transitionDelay }"
+      />
+    </svg>
 
-    <!-- Center Column: ESP Card -->
-    <div ref="centerRef" class="esp-horizontal-layout__center">
+    <!-- Radial Satellites (Sensors + Actuators) -->
+    <div
+      v-for="sat in orbitPositions"
+      :key="sat.kind === 'sensor'
+        ? `${sat.key}-${sat.last_read ?? ''}-${sat.raw_value ?? ''}`
+        : `${sat.key}-${sat.state}-${sat.pwm_value ?? 0}`"
+      class="satellite-card"
+      :class="{ 'satellite-card--visible': visibleSatellites }"
+      :style="{ '--tx-norm': sat.txNorm, '--ty-norm': sat.tyNorm, 'transition-delay': sat.transitionDelay }"
+    >
+      <SensorSatellite
+        v-if="sat.kind === 'sensor'"
+        :esp-id="espId"
+        :gpio="sat.gpio"
+        :sensor-type="sat.sensor_type"
+        :name="sat.name"
+        :value="sat.processed_value ?? sat.raw_value ?? 0"
+        :quality="sat.quality"
+        :unit="sat.unit"
+        :device-type="sat.device_type"
+        :multi-values="sat.multi_values"
+        :is-multi-value="sat.is_multi_value"
+        :i2c-address="sat.i2c_address"
+        :interface-type="sat.interface_type"
+        :device-scope="sat.device_scope"
+        :assigned-zones="sat.assigned_zones ?? undefined"
+        :selected="selectedGpio === sat.gpio && selectedType === 'sensor'"
+        :show-connections="showConnections"
+        @click="() => handleSensorClick({ configId: sat.config_id, gpio: sat.gpio, sensorType: sat.sensor_type })"
+      />
+      <ActuatorSatellite
+        v-else
+        :esp-id="espId"
+        :gpio="sat.gpio"
+        :actuator-type="sat.actuator_type"
+        :hardware-type="sat.hardware_type"
+        :name="sat.name"
+        :state="sat.state"
+        :pwm-value="sat.pwm_value"
+        :last-command-at="sat.last_command_at"
+        :last-triggered-at="actuatorRuntimeMap[sat.gpio]?.lastTriggeredAt"
+        :trigger-reason="actuatorRuntimeMap[sat.gpio]?.triggerReason"
+        :trigger-rule-name="actuatorRuntimeMap[sat.gpio]?.triggerRuleName"
+        :emergency-stopped="sat.emergency_stopped"
+        :device-scope="sat.device_scope"
+        :assigned-zones="sat.assigned_zones ?? undefined"
+        :selected="selectedGpio === sat.gpio && selectedType === 'actuator'"
+        :show-connections="showConnections"
+        @click="handleActuatorClick(sat.gpio)"
+      />
+    </div>
+
+    <!-- Center: ESP Card (orbital center) -->
+    <div ref="centerRef" class="esp-orbital-center">
       <!-- Compact Mode: Simple Info Card -->
       <div
         v-if="compactMode"
@@ -389,20 +555,6 @@ function handleActuatorClick(gpio: number) {
       <!-- Full Mode: Full ESP Card (for detail view) -->
       <ESPCard v-else :esp="device" />
     </div>
-
-    <!-- Right Column: Actuators (uses extracted ActuatorColumn) -->
-    <ActuatorColumn
-      :esp-id="espId"
-      :actuators="actuators"
-      :selected-gpio="selectedGpio !== null && selectedType === 'actuator' ? selectedGpio : null"
-      :actuator-runtime-map="actuatorRuntimeMap"
-      :layout="actuatorLayout"
-      :show-rules-section="compactMode"
-      :show-connections="showConnections"
-      class="esp-horizontal-layout__column esp-horizontal-layout__column--actuators"
-      :class="{ 'esp-horizontal-layout__column--empty': actuators.length === 0 }"
-      @actuator-click="handleActuatorClick"
-    />
 
     <!-- Drop Indicator Overlay (Phase 2B: for all ESPs) -->
     <Transition name="fade">

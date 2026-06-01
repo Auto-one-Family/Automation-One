@@ -25,6 +25,49 @@ static const BaseType_t SAFETY_TASK_CORE = 1;
 // Forward declaration — defined in main.cpp
 extern void checkServerAckTimeout();
 
+static void processSafetyTaskNotifications(uint32_t notified) {
+    if (notified & NOTIFY_EMERGENCY_STOP) {
+        LOG_W(SAFETY_TAG, "[SAFETY-M2] EMERGENCY_STOP received — stopping all actuators");
+        bumpSafetyEpoch("emergency_notify");
+        flushActuatorCommandQueue();
+        flushSensorCommandQueue();
+        safetyController.emergencyStopAll("MQTT emergency command (Core 0 notify)");
+    }
+    if (notified & NOTIFY_MQTT_DISCONNECTED) {
+        if (offlineModeManager.getOfflineRuleCount() > 0) {
+            LOG_W(SAFETY_TAG, "[SAFETY-M2] MQTT_DISCONNECTED — " +
+                  String(offlineModeManager.getOfflineRuleCount()) +
+                  " offline rules available, delegating covered actuators to P4");
+            if (actuatorManager.isInitialized()) {
+                actuatorManager.setUncoveredActuatorsToSafeState();
+            }
+        } else {
+            if (actuatorManager.isInitialized()) {
+                actuatorManager.setAllActuatorsToSafeState();
+            }
+            LOG_W(SAFETY_TAG, "[SAFETY-M2] MQTT_DISCONNECTED — no offline rules, setting actuators to safe state immediately");
+        }
+    }
+    // NOTIFY_SUBZONE_SAFE: M3 — full GPIO routing via Core 1 queue (not yet implemented)
+}
+
+void runSafetyCooperativeSlice() {
+    uint32_t notified = 0;
+    xTaskNotifyWait(0, UINT32_MAX, &notified, 0);
+    if (notified != 0) {
+        processSafetyTaskNotifications(notified);
+    }
+
+    processActuatorCommandQueue();
+    if (actuatorManager.isInitialized()) {
+        actuatorManager.processActuatorLoops();
+    }
+
+    #ifndef WOKWI_SIMULATION
+    esp_task_wdt_reset();
+    #endif
+}
+
 bool createSafetyTask() {
     BaseType_t created = xTaskCreatePinnedToCore(
         safetyTaskFunction,
@@ -78,51 +121,15 @@ void safetyTaskFunction(void* param) {
         }
         const unsigned long safety_cycle_start_ms = millis();
 
-        // ============================================
-        // M2: Cross-Core Notification Handler
-        // ============================================
-        // Poll notifications from MQTT task (Core 0) — latency < 1 loop cycle (10ms).
-        // Bit-mask cleared atomically; multiple bits can arrive in one cycle.
-        {
-            uint32_t notified = 0;
-            xTaskNotifyWait(0, UINT32_MAX, &notified, 0);  // Non-blocking poll
-
-            if (notified & NOTIFY_EMERGENCY_STOP) {
-                LOG_W(SAFETY_TAG, "[SAFETY-M2] EMERGENCY_STOP received — stopping all actuators");
-                // Prevent post-emergency command tail: drop queued commands before stop.
-                bumpSafetyEpoch("emergency_notify");
-                flushActuatorCommandQueue();
-                flushSensorCommandQueue();
-                safetyController.emergencyStopAll("MQTT emergency command (Core 0 notify)");
-            }
-            if (notified & NOTIFY_MQTT_DISCONNECTED) {
-                if (offlineModeManager.getOfflineRuleCount() > 0) {
-                    LOG_W(SAFETY_TAG, "[SAFETY-M2] MQTT_DISCONNECTED — " +
-                          String(offlineModeManager.getOfflineRuleCount()) +
-                          " offline rules available, delegating covered actuators to P4");
-                    // AUT-66: Uncovered actuators forced to safe state immediately;
-                    // covered actuators remain under P4 grace period + rule evaluation.
-                    if (actuatorManager.isInitialized()) {
-                        actuatorManager.setUncoveredActuatorsToSafeState();
-                    }
-                } else {
-                    if (actuatorManager.isInitialized()) {
-                        actuatorManager.setAllActuatorsToSafeState();
-                    }
-                    LOG_W(SAFETY_TAG, "[SAFETY-M2] MQTT_DISCONNECTED — no offline rules, setting actuators to safe state immediately");
-                }
-            }
-            // NOTIFY_SUBZONE_SAFE: M3 — full GPIO routing via Core 1 queue (not yet implemented)
-        }
-
-        #ifndef WOKWI_SIMULATION
-        esp_task_wdt_reset();
-        #endif
+        // Notifications + actuator queue + runtime loops before blocking sensor work.
+        runSafetyCooperativeSlice();
 
         sensorManager.performAllMeasurements();
-        actuatorManager.processActuatorLoops();
+
+        // Drain commands that arrived during measurement (cooperative slices run inside reads).
+        runSafetyCooperativeSlice();
+
         checkServerAckTimeout();
-        processActuatorCommandQueue();
         processSensorCommandQueue();
         processConfigUpdateQueue();  // SAFETY-RTOS M4.6: drain Core 0→1 config queue
         healthMonitor.loop();

@@ -262,6 +262,7 @@ Quelle: `esp32_s3_devkit.h` — `GPIOManager` lehnt RESERVED ab (`initializeAllP
 - S3: `USB_CDC_ON_BOOT=1` → USB-CDC auf GPIO **19/20**; UART0 = **43/44** (RESERVED). CO2 nutzt **`Serial2`** mit config-getriebenen Pins — kein Konflikt mit USB/UART0.
 - Referenz-Deployment **ESP_AEAE64** (`esp32-s3-devkitc-1`): RX=GPIO18, TX=GPIO17, 9600 8N1; logischer Slot `gpio=18` (kein ADC).
 - Driver: `drivers/mhz19_uart.cpp` — MH-Z19 9-Byte-Frame, RAW ppm, ~3 min Warmup (`quality=warming_up`).
+- **Löschen:** Tombstone `active:false` in `main.cpp` **vor** `validateSensorConfig()`; CO₂-Fallback entfernt GPIO 17/18 wenn Tombstone-GPIO nicht matcht.
 - WROOM: historisch UART **16 RX / 17 TX** moeglich; S3-Pins frei waehlbar innerhalb `SAFE_GPIO_PINS`.
 - Detail: `docs/ESP32-S3-DEVKITC-1-ACCEPTANCE.md` § AUT-527
 

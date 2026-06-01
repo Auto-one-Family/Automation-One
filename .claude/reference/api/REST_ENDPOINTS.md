@@ -63,7 +63,7 @@ allowed-tools: Read
 | `/sensors/config/{config_id}` | GET | JWT | Sensor-Config by UUID (immer eindeutig, auch bei 2x SHT31) |
 | `/sensors/{sensor_id}` | GET | JWT | Sensor Details |
 | `/sensors/{esp_id}/{gpio}` | POST | Operator | Sensor erstellen/aktualisieren (ESP+GPIO) |
-| `/sensors/{esp_id}/{config_id}` | DELETE | Operator | Sensor-Config löschen (by UUID, Sensordaten bleiben erhalten) |
+| `/sensors/{esp_id}/{config_id}` | DELETE | Operator | Sensor-Config löschen (by UUID, Sensordaten bleiben erhalten). **MQTT:** Config-Push + Tombstone `active:false`; bei `co2` dual GPIO 17+18 (AUT-527) |
 | `/sensors/data` | GET | JWT | Query Sensor-Daten (historisch, filterbar nach zone_id, subzone_id, resolution, before_timestamp) |
 | `/sensors/export` | GET | JWT | Sensor-Daten als CSV streamen (mind. esp_id\|zone_id\|subzone_id; Query: columns CSV-Liste, resolution raw\|1m\|5m\|1h\|1d, start_time, end_time; `columns=''` → 422; Dateiname-Fallback: esp_id → zone_id → subzone_id → all; zone_id/subzone_id leer bei aggregierten Rows) |
 | `/sensors/{sensor_id}/data` | GET | JWT | Sensor-Daten (historisch) |
@@ -1965,6 +1965,10 @@ Detaillierter Health Check mit Komponenten-Status (JWT erforderlich, ActiveUser)
 ### Sensor Schemas (`schemas/sensor.py`)
 - `SensorConfigBase`, `SensorConfigCreate`, `SensorConfigUpdate`
 - `description`, `unit` (optional, max 500/20 Zeichen) — persistiert in `sensor_metadata`, bei GET zurückgegeben
+- **UART-Felder** in `SensorConfigCreate` + `SensorConfigUpdate` (alle `Optional[int]`): `uart_rx_pin`, `uart_tx_pin`, `uart_baud` — persistiert in `sensor_metadata`; `_schema_to_model_fields()` schreibt diese in die DB
+- **`interface_type` Pattern** erlaubt jetzt auch `"UART"` (zusätzlich zu `"I2C"`, `"ONEWIRE"`, `"ANALOG"`, `"VIRTUAL"`)
+- **`_infer_interface_type()`** gibt für Sensortyp `"co2"` jetzt `"UART"` zurück (war `"ANALOG"`)
+- **Delete-Tombstones (AUT-527):** `_build_sensor_delete_tombstones()` — bei `co2` zwei MQTT-Einträge (`gpio` + UART1-Komplement 17/18), `active: false`, inkl. `uart_rx_pin`/`uart_tx_pin`/`uart_baud`
 - `SensorReading` (inkl. zone_id, subzone_id Phase 0.1), `SensorDataQuery`, `SensorStats`
 - `SensorProcessRequest`, `SensorCalibrateRequest`
 - `OneWireDevice`, `OneWireScanRequest`

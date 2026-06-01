@@ -247,29 +247,29 @@ bool parseAndConfigureSensor(const JsonObjectConst& sensor_obj) {
     config.raw_mode = true;
   }
 
-  // Validate config
+  // Tombstone deletes (active=false) BEFORE validateSensorConfig() — AUT-527:
+  // UART tombstones may omit uart_rx/tx; validation would reject the delete.
+  if (!config.active) {
+    bool removed = sensorManager.removeSensor(config.gpio, config.onewire_address,
+                                             config.i2c_address);
+    if (!removed && config.sensor_type == "co2") {
+      if (config.gpio != 17) removed = sensorManager.removeSensor(17, "", 0);
+      if (!removed && config.gpio != 18) removed = sensorManager.removeSensor(18, "", 0);
+    }
+    if (!removed) {
+      LOG_WARNING("Sensor removal requested, but no sensor on GPIO " + String(config.gpio));
+    }
+    LOG_INFO("Sensor removed: GPIO " + String(config.gpio));
+    return true;
+  }
+
+  // Validate config (active sensors only)
   if (!configManager.validateSensorConfig(config)) {
     String message = "Sensor validation failed for GPIO " + String(config.gpio);
     LOG_ERROR(message);
     ConfigResponseBuilder::publishError(
         ConfigType::SENSOR, ConfigErrorCode::VALIDATION_FAILED, message, failed_variant);
     return false;
-  }
-
-  // Handle deactivation (removal)
-  if (!config.active) {
-    if (!sensorManager.removeSensor(config.gpio)) {
-      LOG_WARNING("Sensor removal requested, but no sensor on GPIO " + String(config.gpio));
-    }
-    if (!configManager.removeSensorConfig(config.gpio)) {
-      String message = "Failed to remove sensor config from NVS for GPIO " + String(config.gpio);
-      LOG_ERROR(message);
-      ConfigResponseBuilder::publishError(
-          ConfigType::SENSOR, ConfigErrorCode::NVS_WRITE_FAILED, message, failed_variant);
-      return false;
-    }
-    LOG_INFO("Sensor removed: GPIO " + String(config.gpio));
-    return true;
   }
 
   // Configure sensor
@@ -399,6 +399,8 @@ config.uart_baud = static_cast<uint32_t>(uart_baud);
 | `uart_rx_pin` | 18 | ESP RX ← MH-Z19 TX |
 | `uart_tx_pin` | 17 | ESP TX → MH-Z19 RX |
 | `uart_baud` | 9600 | MH-Z19 default 9600 8N1 |
+
+**Tombstone / removal (AUT-527):** `parseAndConfigureSensorWithTracking()` prüft `active=false` **vor** `validateSensorConfig()`. CO₂-Löschung: Firmware-Fallback entfernt NVS-Slot auf GPIO **17** und/oder **18**, wenn der Tombstone-GPIO nicht matcht. Server sendet bei `DELETE` für `co2` zwei Tombstones (DB-`gpio` + UART1-Komplement) — siehe `sensors.py::_build_sensor_delete_tombstones()`.
 
 **Reference payload:**
 
@@ -1032,24 +1034,16 @@ MQTT Config Message (kaiser/{kaiser_id}/esp/{esp_id}/config)
   │     │     └─► JsonHelpers::extractString/Bool/Int() with defaults
   │     │
   │     ├─► STEP 3.1: UART CO2 fields (if co2/mhz19_co2 or interface_type=UART)
-  │     │     └─► Validate uart_rx_pin, uart_tx_pin, uart_baud
+  │     │     └─► uart_rx_pin, uart_tx_pin, uart_baud (parsed before active check)
   │     │
-  │     ├─► STEP 5: Validate Configuration (config_manager.cpp:603-623)
-  │     │     ├─► GPIO != 255
-  │     │     ├─► GPIO 0-39
-  │     │     └─► sensor_type not empty
+  │     ├─► If active=false: (BEFORE validation — AUT-527)
+  │     │     ├─► STEP 7: removeSensor() → release GPIO (+ UART rx/tx for CO2)
+  │     │     │     └─► CO2 fallback: also try GPIO 17 and 18
+  │     │     └─► removeSensor() → removeSensorConfig() / NVS shift
   │     │
-  │     ├─► If active=false:
-  │     │     ├─► STEP 7: Remove from SensorManager
-  │     │     │     ├─► Release GPIO via GPIOManager
-  │     │     │     ├─► Shift array
-  │     │     │     └─► Decrement count
-  │     │     │
-  │     │     └─► STEP 8: Remove from NVS
-  │     │           ├─► Find sensor index
-  │     │           ├─► Shift remaining sensors
-  │     │           ├─► Clear last entry
-  │     │           └─► Decrement sensor_count
+  │     ├─► STEP 5: Validate Configuration (active=true only)
+  │     │     ├─► GPIO != 255, GPIO 0-39, sensor_type not empty
+  │     │     └─► UART: uart_rx_pin/uart_tx_pin required
   │     │
   │     └─► If active=true:
   │           ├─► STEP 4: Configure in SensorManager
@@ -1287,14 +1281,16 @@ MQTT Config Message (kaiser/{kaiser_id}/esp/{esp_id}/config)
 
 ### Removal Workflow
 
-1. User deactivates sensor in God-Kaiser UI
-2. God-Kaiser publishes config with `"active": false`
-3. ESP detects deactivation flag
-4. ESP removes sensor from SensorManager
-5. ESP releases GPIO pin
-6. ESP removes from NVS
-7. ESP publishes success response
+1. User deactivates sensor in God-Kaiser UI (`DELETE /sensors/{esp_id}/{config_id}`)
+2. God-Kaiser publishes config with `"active": false` (MQTT config push)
+3. **CO₂ (AUT-527):** Server appends **two** tombstones — DB `gpio` (e.g. 18) **and** UART1 complement (17) — each with `uart_rx_pin`/`uart_tx_pin`/`uart_baud=9600`
+4. ESP processes **`active=false` before validation** (`main.cpp`)
+5. ESP `removeSensor()` releases GPIO (+ UART rx/tx); CO₂ fallback tries GPIO 17/18 if primary gpio miss
+6. NVS entry removed via `removeSensorConfig()` inside `removeSensor()`
+7. ESP publishes success in aggregated `config_response`
 8. Sensor stops publishing data
+
+**Symptom:** GPIO 18 „belegt“ after UI delete → stale NVS slot on GPIO **17** (UART pair). Fix: delete CO₂ again (dual tombstone) or factory reset NVS.
 
 ---
 
@@ -1384,6 +1380,20 @@ mosquitto_pub -h 192.168.0.198 -p 1883 \
 [INFO] ConfigResponse published [sensor] status=success
 [DEBUG] SensorManager: CO2 warmup (178s remaining)
 ```
+
+**Successful UART CO2 Tombstone (delete):**
+```
+[INFO] Sensor removed: GPIO 17
+[INFO] Sensor removed: GPIO 18
+[INFO] ConfigResponse … success=3 failed=0
+```
+
+**UART CO2 configure failure (GPIO ghost):**
+```
+[ERROR] Sensor validation failed for GPIO 18
+[ERROR] GPIO 18 reserved by sensor/co2 (UART RX GPIO 18 not available)
+```
+→ Prior CO₂ slot still in NVS on GPIO 17; run UI delete (dual tombstone) before re-adding on GPIO 18.
 
 **Error Example:**
 ```

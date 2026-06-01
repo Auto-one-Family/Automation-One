@@ -46,6 +46,13 @@ const MAX_TOASTS = 20
 const MAX_PERSISTENT_TOASTS = 10
 const DEDUP_WINDOW_MS = 2000
 
+const TOAST_TYPE_PRIORITY: Record<ToastOptions['type'], number> = {
+  info: 1,
+  success: 2,
+  warning: 3,
+  error: 4,
+}
+
 // Singleton state - shared across all components
 const state = reactive<ToastState>({
   toasts: []
@@ -74,7 +81,15 @@ export function useToast() {
       }
     )
     if (duplicate) {
-      return duplicate.id
+      const sameKey = Boolean(options.dedupeKey && duplicate.dedupeKey && options.dedupeKey === duplicate.dedupeKey)
+      const shouldUpgrade =
+        sameKey &&
+        TOAST_TYPE_PRIORITY[options.type] > TOAST_TYPE_PRIORITY[duplicate.type]
+      if (shouldUpgrade) {
+        dismiss(duplicate.id)
+      } else {
+        return duplicate.id
+      }
     }
 
     const id = generateId()
