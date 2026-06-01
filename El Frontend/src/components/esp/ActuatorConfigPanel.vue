@@ -19,7 +19,7 @@ import { AccordionSection } from '@/shared/design/primitives'
 import { useUiStore } from '@/shared/stores/ui.store'
 import { useGpioStatus } from '@/composables/useGpioStatus'
 import { supportsAuxGpio, ACTUATOR_TYPE_CONFIG } from '@/utils/actuatorDefaults'
-import { getGpioConfig } from '@/utils/gpioConfig'
+import { useBoardLayout } from '@/composables/useBoardLayout'
 import type { MockActuator } from '@/types'
 import AlertConfigSection from '@/components/devices/AlertConfigSection.vue'
 import RuntimeMaintenanceSection from '@/components/devices/RuntimeMaintenanceSection.vue'
@@ -34,6 +34,7 @@ import { useActuatorStore } from '@/shared/stores/actuator.store'
 import { useLogicStore } from '@/shared/stores/logic.store'
 import { normalizeSubzoneId } from '@/utils/subzoneHelpers'
 import { createLogger } from '@/utils/logger'
+import { notifyConfigDeletePush, runConfigSaveAckFlow } from '@/utils/configPushAck'
 import type { DeviceScope } from '@/types'
 import type { DeviceMetadata } from '@/types/device-metadata'
 import { parseDeviceMetadata, mergeDeviceMetadata } from '@/types/device-metadata'
@@ -100,7 +101,7 @@ const activeZoneId = ref<string | null>(null)
 const subzoneId = ref<string | null>(null)
 
 // Type-specific fields
-const maxRuntime = ref(3600) // seconds
+const maxRuntime = ref(0) // seconds — 0 = unbegrenzt; Pump-Default wird in onMounted aus Config geladen
 const minPause = ref(60) // seconds
 const maxOpenTime = ref(3600) // seconds
 const isNormalClosed = ref(true)
@@ -181,6 +182,9 @@ const zoneContextLabel = computed(() =>
 )
 const subzoneContextLabel = computed(() => subzoneId.value || 'Zone-weit')
 
+const deviceHardwareType = computed(() => (contextDevice.value as any)?.hardware_type ?? null)
+const { safeOutputGpios } = useBoardLayout(deviceHardwareType)
+
 // Verknuepfte Regeln (AUT-256): prominente Anzeige + Konflikt-Warnung
 const linkedRules = computed(() => logicStore.getRulesForActuator(props.espId, props.gpio))
 const activeRuleCount = computed(() => linkedRules.value.filter(r => r.enabled).length)
@@ -190,13 +194,13 @@ const hasActiveRules = computed(() => activeRuleCount.value > 0)
 const { allPinStatuses } = useGpioStatus(computed(() => props.espId))
 const auxGpioOptions = computed(() => {
   const meta = allPinStatuses.value
+  const fallbackPins = safeOutputGpios.value.length > 0
+    ? safeOutputGpios.value
+    : [4, 5, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33]
   const pins =
     meta.length > 0
       ? meta.filter(p => p.available && p.gpio !== props.gpio).map(p => p.gpio)
-      : getGpioConfig('ESP32_WROOM')
-          .filter(p => p.category !== 'avoid')
-          .map(p => p.gpio)
-          .filter(g => g !== props.gpio)
+      : fallbackPins.filter(g => g !== props.gpio)
   const set = new Set(pins)
   if (auxGpio.value !== 255 && auxGpio.value !== props.gpio) {
     set.add(auxGpio.value)
@@ -369,13 +373,18 @@ async function confirmAndDelete() {
 
   deleting.value = true
   try {
-    await actuatorsApi.delete(props.espId, props.gpio)
+    const deleted = await actuatorsApi.delete(props.espId, props.gpio)
+    notifyConfigDeletePush(
+      deleted as unknown as Record<string, unknown>,
+      `Aktor-Löschung GPIO ${props.gpio}`,
+      `actuator-delete:${props.espId}:${props.gpio}`,
+      toast,
+      actuatorStore,
+      props.espId,
+      `actuator-delete:${props.gpio}:${props.actuatorType}`,
+    )
     if (isMock.value) {
       toast.success('[Simulation] Aktor entfernt', {
-        dedupeKey: `actuator-delete:${props.espId}:${props.gpio}`,
-      })
-    } else {
-      toast.info('Löschauftrag akzeptiert - warte auf Geräte-Rückmeldung', {
         dedupeKey: `actuator-delete:${props.espId}:${props.gpio}`,
       })
     }
@@ -445,66 +454,27 @@ async function handleSave() {
       config.metadata = meta
       const result = await actuatorsApi.createOrUpdate(props.espId, props.gpio, config as any)
       const response = result as unknown as Record<string, unknown>
-      const correlationId = typeof response.correlation_id === 'string' ? response.correlation_id : undefined
-      const requestId = typeof response.request_id === 'string' ? response.request_id : undefined
-      const handles = [correlationId ? `Korrelation: ${correlationId}` : '', requestId ? `Request-ID: ${requestId}` : '']
-        .filter(Boolean)
-        .join(' | ')
       const scope = `actuator:${props.gpio}:${props.actuatorType}`
       const summary = `Aktor-Konfiguration ${props.actuatorType} an GPIO ${props.gpio}`
-      const subjectId = actuatorStore.registerConfigIntentFromRest({
-        espId: props.espId,
-        scope,
-        correlationId,
-        requestId,
-        summary,
-      })
-      lastConfigSubjectId.value = subjectId
-      lastConfigCorrelationId.value = correlationId ?? null
-      toast.info(
-        `Konfigurationsauftrag akzeptiert: ${summary}.${handles ? ` ${handles}` : ''}`,
+      const outcome = await runConfigSaveAckFlow(
         {
-          dedupeKey: `config-accepted:${correlationId ?? requestId ?? `${props.espId}:${scope}`}`,
+          response,
+          espId: props.espId,
+          scope,
+          summary,
+          dedupeScope: `${props.espId}:${scope}`,
         },
+        actuatorStore,
+        toast,
+        configLogger,
       )
-      const terminal = await actuatorStore.waitForConfigTerminal({
-        subjectId,
-        correlationId,
-        timeoutMs: 65_000,
-      })
-      if (!terminal) {
-        configLogger.info('config_pending_over_timeout: UI-Wartezeit abgelaufen', {
-          subject_id: subjectId,
-          correlation_id: correlationId,
-        })
-        toast.warning('Konfigurationsauftrag ausstehend: Noch keine Geräte-Rückmeldung. Status wird im Panel angezeigt.', {
-          dedupeKey: `config-await-timeout:${correlationId ?? requestId ?? subjectId}`,
-        })
-        return
-      }
-      if (terminal.state === 'terminal_success') {
+      lastConfigSubjectId.value = outcome.subjectId ?? null
+      lastConfigCorrelationId.value = outcome.correlationId ?? null
+      if (outcome.result === 'saved') {
         lastConfigSubjectId.value = null
         lastConfigCorrelationId.value = null
-        toast.success('Aktor-Konfiguration wurde vom Gerät bestätigt')
         emit('saved')
-        return
       }
-      if (terminal.state === 'terminal_timeout') {
-        configLogger.info('config_pending_over_timeout: Store-Timeout erreicht', {
-          subject_id: subjectId,
-          correlation_id: correlationId,
-        })
-        toast.warning('Konfigurationsauftrag ausstehend: Gerät hat nicht innerhalb der Frist geantwortet.', {
-          dedupeKey: `config-terminal-timeout:${correlationId ?? requestId ?? subjectId}`,
-        })
-        return
-      }
-      lastConfigSubjectId.value = null
-      lastConfigCorrelationId.value = null
-      toast.error('Konfiguration fehlgeschlagen. Details im Event-Monitor prüfen.', {
-        persistent: true,
-        dedupeKey: `config-terminal-failed:${correlationId ?? requestId ?? subjectId}`,
-      })
       return
     }
   } catch (err) {
@@ -714,12 +684,12 @@ function formatDuration(seconds: number): string {
         <!-- Pump -->
         <template v-if="isPump">
           <div class="actuator-config__field">
-            <label class="actuator-config__label">Geraete-Sicherheitslimit</label>
+            <label class="actuator-config__label">Sicherheitslimit (Sekunden) - 0 = unbegrenzt / aus</label>
             <div class="actuator-config__input-with-unit">
-              <input v-model.number="maxRuntime" type="number" min="0" class="actuator-config__input" />
+              <input v-model.number="maxRuntime" type="number" min="0" placeholder="3600" class="actuator-config__input" />
               <span class="actuator-config__unit">Sek. ({{ formatDuration(maxRuntime) }})</span>
             </div>
-            <span class="actuator-config__helper">Absolute Sicherheitsgrenze — greift unabhaengig von Regeln, auch bei manuellen Befehlen. Bei Ueberschreitung: Emergency Stop (Aktor gesperrt bis manueller Reset). 0 = unbegrenzt. Standard: 3600 Sek.</span>
+            <span class="actuator-config__helper">Absolute Sicherheitsgrenze — greift unabhaengig von Regeln, auch bei manuellen Befehlen. Bei Ueberschreitung: Emergency Stop (Aktor gesperrt bis manueller Reset). 0 = unbegrenzt / aus.</span>
           </div>
           <div class="actuator-config__field">
             <label class="actuator-config__label">Mindest-Pause zwischen Laeufen</label>
@@ -783,12 +753,12 @@ function formatDuration(seconds: number): string {
         <!-- Relay -->
         <template v-else-if="isRelay">
           <div class="actuator-config__field">
-            <label class="actuator-config__label">Geraete-Sicherheitslimit</label>
+            <label class="actuator-config__label">Sicherheitslimit (Sekunden) - 0 = unbegrenzt / aus</label>
             <div class="actuator-config__input-with-unit">
-              <input v-model.number="maxRuntime" type="number" min="0" class="actuator-config__input" />
+              <input v-model.number="maxRuntime" type="number" min="0" placeholder="300" class="actuator-config__input" />
               <span class="actuator-config__unit">Sek. ({{ formatDuration(maxRuntime) }})</span>
             </div>
-            <span class="actuator-config__helper">Absolute Sicherheitsgrenze fuer Relais/Aktorlaufzeit. 0 = unbegrenzt (empfohlen fuer Dauerlicht).</span>
+            <span class="actuator-config__helper">Absolute Sicherheitsgrenze fuer Relais/Aktorlaufzeit. 0 = unbegrenzt / aus (Firmware-verankert).</span>
           </div>
           <div class="actuator-config__field actuator-config__field--toggle">
             <label class="actuator-config__label">Normal-Closed (NC)</label>
