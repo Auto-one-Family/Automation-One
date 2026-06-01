@@ -14,32 +14,25 @@ from src.services.config_push_intent import (
 
 
 class TestResolveConfigPushStatus:
-    def test_scheduled_with_mqtt_connected_is_queued(self) -> None:
+    def test_scheduled_is_queued(self) -> None:
         status = resolve_config_push_status(
             {"success": True, "scheduled": True, "sent": False},
-            mqtt_connected=True,
         )
         assert status == "queued"
 
-    def test_scheduled_with_mqtt_down_is_db_only(self) -> None:
+    def test_scheduled_stays_queued_when_mqtt_client_disconnected(self) -> None:
+        """Coalesce success must not become db_only just because is_connected is false."""
         status = resolve_config_push_status(
             {"success": True, "scheduled": True, "sent": False},
-            mqtt_connected=False,
         )
-        assert status == "db_only"
+        assert status == "queued"
 
     def test_publish_success_is_published(self) -> None:
-        status = resolve_config_push_status(
-            {"success": True, "sent": True},
-            mqtt_connected=True,
-        )
+        status = resolve_config_push_status({"success": True, "sent": True})
         assert status == "published"
 
     def test_publish_failure_is_db_only(self) -> None:
-        status = resolve_config_push_status(
-            {"success": False, "sent": False},
-            mqtt_connected=True,
-        )
+        status = resolve_config_push_status({"success": False, "sent": False})
         assert status == "db_only"
 
 
@@ -48,9 +41,6 @@ class TestScheduleConfigPushIntent:
     async def test_returns_schedule_correlation_id_when_push_succeeds(self) -> None:
         scheduled_id = str(uuid.uuid4())
         esp_service = MagicMock()
-        esp_service.publisher = MagicMock()
-        esp_service.publisher.client = MagicMock()
-        esp_service.publisher.client.is_connected = MagicMock(return_value=True)
         esp_service.trigger_config_push_debounced = AsyncMock(
             return_value={
                 "success": True,
@@ -72,9 +62,6 @@ class TestScheduleConfigPushIntent:
     @pytest.mark.asyncio
     async def test_returns_fallback_uuid_when_schedule_raises(self) -> None:
         esp_service = MagicMock()
-        esp_service.publisher = MagicMock()
-        esp_service.publisher.client = MagicMock()
-        esp_service.publisher.client.is_connected = MagicMock(return_value=True)
         esp_service.trigger_config_push_debounced = AsyncMock(
             side_effect=RuntimeError("build_combined_config failed")
         )
@@ -89,12 +76,9 @@ class TestScheduleConfigPushIntent:
         assert push_status == "db_only"
 
     @pytest.mark.asyncio
-    async def test_mqtt_down_returns_db_only_with_valid_uuid(self) -> None:
+    async def test_disconnected_mqtt_client_still_returns_queued_when_scheduled(self) -> None:
         scheduled_id = str(uuid.uuid4())
         esp_service = MagicMock()
-        esp_service.publisher = MagicMock()
-        esp_service.publisher.client = MagicMock()
-        esp_service.publisher.client.is_connected = MagicMock(return_value=False)
         esp_service.trigger_config_push_debounced = AsyncMock(
             return_value={
                 "success": True,
@@ -111,4 +95,4 @@ class TestScheduleConfigPushIntent:
         )
 
         assert correlation_id == scheduled_id
-        assert push_status == "db_only"
+        assert push_status == "queued"

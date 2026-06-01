@@ -50,7 +50,7 @@ describe('configPushAck', () => {
       logger as never,
     )
     expect(result.result).toBe('saved')
-    expect(registerConfigIntentFromRest).not.toHaveBeenCalled()
+    expect(registerConfigIntentFromRest).toHaveBeenCalledOnce()
     expect(waitForConfigTerminal).not.toHaveBeenCalled()
     expect(toast.warning).toHaveBeenCalledOnce()
   })

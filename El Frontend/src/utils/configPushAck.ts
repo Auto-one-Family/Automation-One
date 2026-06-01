@@ -80,6 +80,15 @@ export async function runConfigSaveAckFlow(
 
   if (pushStatus === 'db_only') {
     const handle = correlationId ?? requestId ?? params.dedupeScope
+    if (correlationId) {
+      actuatorStore.registerConfigIntentFromRest({
+        espId: params.espId,
+        scope: params.scope,
+        correlationId,
+        requestId,
+        summary: params.summary,
+      })
+    }
     toast.warning(configPushDbOnlyMessage(params.summary), {
       dedupeKey: `config-db-only:${handle}`,
     })

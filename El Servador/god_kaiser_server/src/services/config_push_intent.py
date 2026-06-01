@@ -19,22 +19,8 @@ logger = get_logger(__name__)
 ConfigPushStatus = Literal["queued", "published", "db_only"]
 
 
-def _mqtt_broker_ready(esp_service: ESPService) -> bool:
-    publisher = esp_service.publisher
-    client = getattr(publisher, "client", None)
-    if client is None or not hasattr(client, "is_connected"):
-        return True
-    return bool(client.is_connected())
-
-
-def resolve_config_push_status(
-    schedule_result: dict[str, Any],
-    *,
-    mqtt_connected: bool,
-) -> ConfigPushStatus:
+def resolve_config_push_status(schedule_result: dict[str, Any]) -> ConfigPushStatus:
     """Map ESPService schedule/send result to REST push_status."""
-    if not mqtt_connected:
-        return "db_only"
     if schedule_result.get("scheduled"):
         return "queued"
     if schedule_result.get("sent") and schedule_result.get("success"):
@@ -59,7 +45,6 @@ async def schedule_config_push_intent(
     correlation_id is ALWAYS a valid UUID — even when scheduling or MQTT fails.
     """
     fallback_correlation_id = str(uuid.uuid4())
-    mqtt_connected = _mqtt_broker_ready(esp_service)
 
     try:
         schedule_result = await esp_service.trigger_config_push_debounced(
@@ -68,10 +53,7 @@ async def schedule_config_push_intent(
             extra_sensor_entries=extra_sensor_entries,
         )
         correlation_id = schedule_result.get("correlation_id") or fallback_correlation_id
-        push_status = resolve_config_push_status(
-            schedule_result,
-            mqtt_connected=mqtt_connected,
-        )
+        push_status = resolve_config_push_status(schedule_result)
         logger.info(
             "Config push intent esp_id=%s correlation_id=%s push_status=%s reason=%s",
             esp_id,
